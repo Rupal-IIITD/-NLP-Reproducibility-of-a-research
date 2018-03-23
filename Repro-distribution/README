@@ -1,0 +1,44 @@
+The State of Reproducibility in Computer Science
+------------------------------------------------
+
+Introduction
+ This archive contains all the data that we collected for our
+ study of reproducibility except for emails. It also contains
+ scripts for analyzing the data, as well as many that we used
+ in managing and creating the database.
+
+ Papers are organized by conference. With a sub directory for
+ each paper. A data.txt file contains all the information we
+ collected, details below.
+
+Directories
+ docs/tr        - Scripts used to generate tables and 
+                  graphics for the paper - See below
+ Java_Workspace - Code for data entry gui and email script 
+                  generator
+ ReproEditor    - Jar of data entry gui
+ external       - Third party jar for parsing pdfs
+ removed_papers - See removed_papers/deleted_papers.txt for
+                  why these were removed
+ scripts        - Various scripts - See below
+ webpage        - An internally used webpage for viewing pie
+                  charts.
+
+Scripts
+ Details on each script can be found in the readme in that
+ directory. The main script for creating statistics on the
+ database is repro_status.py. Run the help for that script
+ for details.
+
+Docs/tr
+ Directory for the technical report. Finished report can
+ be downloaded from the website.
+
+ To use the scripts in this directory you will first need
+ to generate macros using repro_status.py. From there,
+ the next step is to prepare the data for sankey.py.
+ Use these commands:
+>echo "data = {}" > resultmacros.py
+>grep DATA data/resultmacros.tex | sed -f makedata.sed >> resultmacros.py
+ To make the table used in the paper:
+>gawk -f maketable.awk < /dev/null > overviewtable.tex
