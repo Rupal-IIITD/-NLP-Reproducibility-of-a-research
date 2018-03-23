@@ -1,0 +1,2017 @@
+Finding Alternative Shortest Paths in Spatial Networks
+
+KEXIN XIE, KE DENG, SHUO SHANG, XIAOFANG ZHOU, and KAI ZHENG,
+University of Queensland
+
+Shortest path query is one of the most fundamental queries in spatial network databases. There exist al-
+gorithms that can process shortest path queries in real time. However, many complex applications require
+more than just the calculation of a single shortest path. For example, one of the common ways to deter-
+mine the importance (or price) of a vertex or an edge in spatial network is to use Vickrey pricing, which
+intuitively values the vertex v (or edge e) based on how much harder for travelling from the sources to the
+destinations without using v (or e). In such cases, the alternative shortest paths without using v (or e) are
+required. In this article, we propose using a precomputation based approach for both single pair alternative
+shortest path and all pairs shortest paths processing. To compute the alternative shortest path between a
+source and a destination efﬁciently, a na¨ıve way is to precompute and store all alternative shortest paths
+
+rently, the state of the art approach for reducing the storage cost is to choose a subset of the vertices as
+center points, and only store the single-source alternative shortest paths from those center points. Such ap-
+
+between every pair of vertices avoiding every possible vertex (or edge), which requires O(cid:2)n4(cid:3) space. Cur-
+proach has the space complexity of O(cid:2)n2 log n(cid:3). We propose a storage scheme termed iSPQF, which utilizes
+alternative shortest paths. We have reduced the space complexity from the na¨ıve O(cid:2)n4(cid:3)(cid:2)or the state of the
+art O(cid:2)n2 log n(cid:3)(cid:3) to O(cid:2)min(γ , L)n1.5(cid:3) with comparable query performance of O(K), where K is the number of
+
+shortest path quadtrees by observing the relationships between each avoiding vertex and its corresponding
+
+vertices in the returned paths, L is the diameter of the spatial network, and γ is a value that depends on
+the structure of the spatial network, which is empirically estimated to be 40 for real road networks. Experi-
+ments on real road networks have shown that the space cost of the proposed iSPQF is scalable, and both the
+algorithms based on iSPQF are efﬁcient.
+
+Categories and Subject Descriptors: H.2.8 [Database Management]: Database Applications—Spatial
+databases and GIS; E.1 [Data Structures]: Graphs and Networks; H.2.4 [Database Management]:
+Systems—Query processing; F.2 [Analysis of Algorithms and Problem Complexity]: Miscellaneous
+
+General Terms: Design, Algorithms, Performance
+
+Additional Key Words and Phrases: Spatial networks, shortest paths, real-time query processing
+
+ACM Reference Format:
+Xie, K., Deng, K., Shang, S., Zhou, X., and Zheng, K. 2012. Finding alternative shortest paths in spatial
+networks. ACM Trans. Database Syst. 37, 4, Article 29 (December 2012), 31 pages.
+DOI = 10.1145/2389241.2389248 http://doi.acm.org/10.1145/2389241.2389248
+
+1. INTRODUCTION
+Shortest path query, which is one of the most fundamental queries in spatial network
+databases, has been studied extensively. Many [Samet et al. 2008; Sankaranarayanan
+and Samet 2009; Sankaranarayanan et al. 2005, 2009] have identiﬁed the limitation
+of the classic Dijkstra’s algorithm [Dijkstra 1959], which must visit a large number
+
+29
+
+Authors’ address: K. Xie, K. Deng, S. Shang, X. Zhou, and K. Zheng, School of Information Technology and
+Electrical Engineering, University of Queensland, Brisbane, Australia; email: kexin@itee.uq.edu.au.
+Permission to make digital or hard copies of part or all of this work for personal or classroom use is granted
+without fee provided that copies are not made or distributed for proﬁt or commercial advantage and that
+copies show this notice on the ﬁrst page or initial screen of a display along with the full citation. Copyrights
+for components of this work owned by others than ACM must be honored. Abstracting with credit is per-
+mitted. To copy otherwise, to republish, to post on servers, to redistribute to lists, or to use any component
+of this work in other works requires prior speciﬁc permission and/or a fee. Permission may be requested
+from Publications Dept., ACM, Inc., 2 Penn Plaza, Suite 701, New York, NY 10121-0701, USA, fax +1 (212)
+869-0481, or permissions@acm.org.
+c(cid:2) 2012 ACM 0362-5915/2012/12-ART29 $15.00
+DOI 10.1145/2389241.2389248 http://doi.acm.org/10.1145/2389241.2389248
+
+ACM Transactions on Database Systems, Vol. 37, No. 4, Article 29, Publication date: December 2012.
+
+29:2
+
+K. Xie et al.
+
+of vertices to ﬁnd the shortest path. To address such limitation, a number of meth-
+ods [Samet et al. 2008; Sankaranarayanan and Samet 2009; Sankaranarayanan et al.
+2005, 2009] based on precomputing the all pairs shortest paths have been proposed,
+such that shortest path or approximate distance queries can be answered in real time.
+Most complex applications of the shortest path problem, however, require more than
+just the calculation of simple shortest paths. Computing the shortest path that avoids
+a given vertex (or edge) is frequently required, and has received much attention [Ball
+et al. 1989; Bernstein and Karger 2008, 2009; Chowdhury and Ramachandran 2002;
+Demetrescu et al. 2008; Emek et al. 2008; Hershberger and Suri 2001; Hershberger
+et al. 2007; Roditty and Zwick 2005] for general graph theory in the past decade. In
+this article, we study and term such problem, which ﬁnds the shortest paths that
+avoid a given vertex (edge), as the alternative shortest path problem in spatial net-
+work databases. The vertex (edge) to be avoided is termed as the unwanted vertex
+(edge). To the best of our knowledge, this is the ﬁrst study on alternative shortest
+path query processing in the setting of spatial networks, despite numerous studies on
+similar problems in general graph theory. In general, the main difference between a
+spatial network and a general graph is that spatial networks are special cases of gen-
+eral graph, where vertices and edges in spatial networks are augmented with spatial
+information (e.g., coordinates).
+
+One of the applications that alternative shortest path queries are required is to
+see how the shortest path is inﬂuenced by various system parameters through a “sen-
+sitivity analysis” [Bernstein and Karger 2008, 2009; Demetrescu and Italiano 2004;
+Hershberger and Suri 2001]. For example, in many analytical applications, govern-
+ment agencies need to evaluate different road segments (i.e., ﬁnd how much a road
+segment is worth?) through Vickrey pricing [Hershberger and Suri 2001], such that
+maintenance budget can be allocated accordingly, or the amount of tolls can be ad-
+justed reasonably. For example, if tolls are not charged appropriately and avoiding an
+expensive toll point causes only a small detour, then it is more likely that most drivers
+would take the detour, rather than pay for the toll.
+
+In Vickrey pricing, the value (price) of a road segment e is determined by how much
+harder it would be to travel between two points without using e. Let πx,y and dx,y
+denote the shortest path and the cost of the shortest path between two vertices x and
+y in a spatial network G, Vickrey pricing pe of edge e for a given pair (x, y) of vertices
+is formally deﬁned by the following expression [Hershberger and Suri 2001]:
+
+pe(x, y) =(cid:4)dx,y(G|w(e)=∞) − dx,y(G|w(e)=0)
+
+0
+
+if e ∈ πx,y;
+otherwise.
+
+(1)
+
+Note that dx,y(G|w(e)=0) is simply the cost dx,y of the shortest path from x to y mi-
+nus the weight w(e) of e, and dx,y(G|w(e)=∞) is the cost of the alternative shortest path
+from x to y avoiding e. For the given e ∈ πx,y, the term dx,y(G|w(e)=0) can be easily
+computed using any precomputation based shortest path algorithms efﬁciently [Samet
+et al. 2008; Sankaranarayanan et al. 2005]. However, computing the alternative short-
+est path requires considerable expensive computation cost. Existing precomputation
+based solutions [Samet et al. 2008; Sankaranarayanan et al. 2005] store only infor-
+mation on normal shortest paths and hence cannot be used. Without using precompu-
+tation, computing the term requires either running a Dijkstra’s (based) shortest path
+algorithm [Dijkstra 1959; Fredman and Tarjan 1987] on G with e removed, or apply-
+ing update strategies to a dynamic all pairs shortest paths data structure to obtain the
+result. As identiﬁed earlier, Dijkstra’s algorithm visits too many vertices. The update
+strategy for dynamic all pairs shortest path data structure is even more expensive
+
+(cid:5)i.e., O(cid:5)n2 log3 n(cid:6) [Demetrescu and Italiano 2004](cid:6), which is comparable to recompute
+
+ACM Transactions on Database Systems, Vol. 37, No. 4, Article 29, Publication date: December 2012.
+
+Finding Alternative Shortest Paths in Spatial Networks
+
+29:3
+
+the all pairs shortest path from scratch. As a result, neither of the approaches are
+practical.
+
+For any given analytical tasks, computing the Vickrey pricing for a single road seg-
+ment e (or vertex v) w.r.t. a single vertex pair (x, y) is less useful. Aggregated Vickrey
+pricing for a number of road segments (or vertices) w.r.t a number of source and des-
+tination pairs is also required for many situations. For example, to evaluate a road
+segment e (or vertex v), analysts need to consider not only one single pair of source and
+destination vertices, but all possible alternative shortest paths from multiple source
+vertices to multiple destination vertices and use them to perform arbitrary aggrega-
+tions on the Vickrey pricing avoiding e (or v) (e.g., ﬁnding the average Vickery pricing
+for a set of sources and a set of destinations). Computational cost in such scenario be-
+comes even more expensive because of the vast amount of expensive alternative short-
+est path queries issued. Not only in complex analytical queries, real time answering of
+alternative shortest path queries is also very useful in other application domains such
+as routing in case of physical network failure, real time navigation for online mapping
+services, etc.
+
+Since normal shortest path queries can be computed efﬁciently using pre-
+
+computation with space cost of O(cid:2)n1.5(cid:3) [Samet et al. 2008], can alternative shortest
+
+path queries be answered efﬁciently using precomputation based approach with scal-
+able space cost as well? This motivates us to design a data structure, such that alterna-
+tive shortest path queries can be answered efﬁciently without visiting a large number
+of vertices. The basic idea of such approach is to precompute and store the shortest
+path between every pair of source and destination vertices avoiding every edge. There
+are totally mn2 possible cases, where m is the number of edges and n is the number of
+
+vertices in the network. As a result, it takes O(cid:2)mn3(cid:3)(cid:2)or O(cid:2)n4(cid:3) in case of dealing with
+vertices only(cid:3) space to store all possible paths. Obviously, the key optimization goal
+shortest path queries in O(K) time with O(cid:2)n2 log n(cid:3) space, where K is the number of
+
+for any precomputation based approaches is to utilize the data structure to achieve
+less and scalable space cost. In the latest research work, Bernstein and Karger [2009]
+propose a distance sensitivity oracle, which can be extended to answer alternative
+
+vertices in the returned path. Although the space cost has been greatly reduced, it is
+still not scalable when n becomes a very large number.
+
+In this article, we propose a data structure termed iSPQF, which is inspired from a
+spatial index structure called shortest path quadtree proposed in Sankaranarayanan
+et al. [2005], which is later analyzed and extended in Samet et al. [2008]. In order
+to answer normal shortest path queries, one shortest path quadtree is stored for each
+vertex in the spatial network. In order to answer alternative shortest path queries, one
+can simply extend the shortest path quadtree into a forest (SPQF) of n quadtrees for
+
+each vertex, which has an overall space cost of O(cid:2)n2.5(cid:3). We take this simple extension
+
+as a starting point and reduce the number of quadtrees required for each forest from n
+to a smaller number by merging the shortest path quadtrees together. The challenges
+for merging quadtrees to reduce the space complexity are 1) the number of quadtrees
+after merging should have at least sublinear space cost w.r.t. the size of the spatial
+network and 2) each merged quadtree should not have more space complexity than
+the original shortest path quadtree. To address those two challenges, we develop tech-
+niques that capture the inﬂuences of vertices to shortest paths, such that quadtrees
+can be merged without increasing space complexity. Our theoretical analysis shows
+that by applying our techniques, the number of quadtrees in each forest has been re-
+duced from n to a small constant (γ ), independent of the size of the spatial network,
+and is empirically estimated to be around 40 for real road networks. In addition, each
+quadtree in iSPQF have the same space complexity as a shortest path quadtree. As
+
+a result, the overall space cost for iSPQF is O(cid:2)γ n1.5(cid:3). This is a huge improvement
+
+ACM Transactions on Database Systems, Vol. 37, No. 4, Article 29, Publication date: December 2012.
+
+29:4
+
+K. Xie et al.
+
+Table I. Theoretical Results for (Alt.) Shortest Path Problems
+
+Data Structure
+
+Na¨ıve SP
+[Samet et al. 2008;
+Sankaranarayanan
+et al. 2005]
+Na¨ıve ASP
+[Samet et al. 2008;
+Sankaranarayanan
+et al. 2005] ext.
+(SPQF)
+[Bernstein and
+Karger 2009]
+iSPQF
+
+Space Cost
+
+O(cid:2)n3(cid:3)
+O(cid:2)n1.5(cid:3)
+O(cid:2)n4(cid:3)
+O(cid:2)n2.5(cid:3)
+
+O(cid:2)n2 log n(cid:3)
+O(cid:2)n1.5(cid:3)
+
+Shortest Path
+
+Alt. Shortest Path
+
+Graph
+
+O(1)
+O(K)∗
+
+O(1)
+O(K)∗
+
+O(K)
+
+O(K)∗
+
+N/A
+N/A
+
+O(1)
+O(K)∗
+
+O(K)
+
+O(K)∗
+
+General graph
+
+Spatial network (planar)
+
+General graph
+
+Spatial network (planar)
+
+General graph
+
+Spatial network (planar)
+
+*number of location queries (not strict running time).
+
+compared to the na¨ıve approach (cid:2)i.e., O(cid:2)n4(cid:3)(cid:3) and is also signiﬁcant compared to the
+state of the art theory result(cid:2)i.e., O(cid:2)n2 log n(cid:3)(cid:3) in spatial network setting.
+
+Based on iSPQF, we propose algorithms that not only answer single pair (ASP), but
+also all pairs (AASP) alternative shortest paths queries by issuing a small number (i.e.,
+O(K)) of location queries. Note that all pairs alternative shortest paths query can be
+simply computed by issuing multiple single pair alternative shortest path queries for
+all possible pairs. Compared to Dijkstra’s (based) approaches for processing all pairs
+alternative shortest paths queries, exhaustive ASP already saves signiﬁcant computa-
+tions. The proposed AASP further optimizes the query processing to save even more
+processing time by avoiding the redundant computations. Both algorithms proposed
+have the worst case processing time proportional to the size of the returned result (i.e.,
+K) rather than the size of the spatial network (i.e., n). Note that K is usually signiﬁ-
+cantly smaller than n.
+
+As a result, the key contribution of this article is that we have reduced the space
+
+cost for answering alternative shortest path queries from the na¨ıve O(cid:2)n4(cid:3) (or the state
+of the art O(cid:2)n2 log n(cid:3) [Bernstein and Karger 2009]) to O(cid:2)n1.5(cid:3) for spatial networks with
+
+comparable query performance of only O(K) location queries. Note that although O(K)
+is not the strict running time but the number of location queries issued to answer
+alternative shortest path queries.
+In our setting, the time for each location query
+depends on the depth of the quadtrees. A PR-quadtree on a sphere corresponding to
+the earth with radius 6378 and 1 meter resolution at the equator only has a depth
+of 24. As a result, practically, each location query processing time is bounded O(24),
+which is constant.
+
+Table I summarizes the studies on (alternative) shortest path problem and their
+
+query time is the same as the data structure and algorithm proposed in Samet et al.
+
+theoretical results. Note that iSPQF’s O(cid:2)n1.5(cid:3) worst case space complexity and O(K)
+[2008] which studies a much simpler case (cid:2)i.e., O(cid:2)n3(cid:3) na¨ıve storage cost(cid:3) that only
+
+answers normal shortest path queries, where no unwanted vertex (or edge) can be
+speciﬁed.
+
+Since our solution utilizes properties of shortest path quadtrees [Samet et al. 2008],
+for the purpose of deriving the order of the space requirement, we restrict the underly-
+ing spatial network to be planar. Such restriction is also used in previous works [Samet
+et al. 2008; Sankaranarayanan and Samet 2009; Sankaranarayanan et al. 2009], that
+utilize properties of quadtrees in spatial networks. Note that the restriction is solely
+used for analysing only, the algorithms and the data structures proposed work with
+
+ACM Transactions on Database Systems, Vol. 37, No. 4, Article 29, Publication date: December 2012.
+
+Finding Alternative Shortest Paths in Spatial Networks
+
+29:5
+
+both planar and nonplanar spatial networks. As a result, the presence of tunnels and
+bridges will not affect the correctness of the algorithms.
+
+The rest of the article is organized as follows. Section 2 visits research work related
+to our problem. We formally deﬁne the alternative shortest path problem in Section 3.
+Section 4 brieﬂy covers shortest path quadtree. Our proposed iSPQF is covered in Sec-
+tion 5, followed by query processing algorithms in Section 6. We analyze the proposed
+iSPQF and query algorithms in Section 7. Experiment results are discussed in Section
+8, and we conclude in Section 9.
+
+2. RELATED WORK
+In the case of answering normal shortest path queries. The well-known Dijkstra’s al-
+gorithm [Dijkstra 1959] is widely used for many shortest path (based) queries [Cho
+and Chung 2005; Goldberg and Harrelson 2005; Jung and Pramanik 2002; Papadias
+et al. 2003]. Dijkstra’s algorithm reports the shortest path from a starting vertex x to
+every other vertex y in increasing order of distance from x. The drawback of Dijkstra-
+based algorithms is they must visit a very large number of vertices, even though the
+shortest path from x to y does not pass through them. An alternative approach to
+Dijkstra’s algorithm is to precompute and store the shortest paths between all possi-
+ble vertices in the spatial network. This approach avoids the drawback of Dijkstra’s
+algorithm or its variants but requires more storage. A na¨ıve algorithm of such ap-
+
+shortest paths from vertex x to all remaining vertices can be decomposed into subsets
+based on the ﬁrst edges on the shortest paths to them from x, and introduces short-
+est path quadtree to capture the spatial coherence. As a result, the space complexity
+
+proach requires O(cid:2)n3(cid:3) space. Samet et al. [2008] take the advantage of the fact that the
+is reduced to O(cid:2)n1.5(cid:3). Sankaranarayanan and Samet [2009] construct a distance ora-
+
+cle which adapts the well-separated pair technique to answer approximate distance
+queries. Sankaranarayanan et al. [2009] propose the idea of path-coherent pairs aided
+by the well-separated pair technique and proposes a path oracle that takes O(sdn) that
+an intermediate link in a shortest path can be retrieved in O(log n) time using a B-tree,
+where d is the number of dimension.
+
+Dynamic shortest path problem maintains all precomputed shortest paths on the
+graph, so when the graph is updated, the relevant shortest paths are also updated
+accordingly. Frigioni et al. [1996, 2000] study the single source dynamic shortest
+paths problem, and Demetrescu and Italiano [2004] and King [1999] study all pairs
+shortest paths problem. Single source dynamic shortest path normally has low cost
+which requires O(log n) worst case time if only deals with updates on the weights
+of edges [Frigioni et al. 2000]. The best bound for all pairs dynamic shortest paths
+
+takes O(cid:5)n2 log3 n(cid:6) amortized time for real weighted directed graphs [Demetrescu and
+
+Italiano 2004]. Because of the slow update time of dynamic shortest path problem, it
+is not suitable to update the all pairs structure every time in order to answer queries
+avoiding a unwanted vertex (or edge). In order to answer the alternative shortest path
+query given an arbitrary unwanted vertex, simply recompute single source shortest
+
+path with the vertex removed may have less query time(cid:2)i.e., O(cid:2)n log n + m(cid:3)(cid:3). All pairs
+
+dynamic shortest paths does not solve our problem because of slow update time.
+
+Given a pair of vertices (x, y), replacement paths problem ﬁnds for every edge on the
+shortest path between x and y, the new shortest path avoiding that edge. The key dif-
+ference between replacement path problem and ours is that, for the replacement paths
+problem, the user do not need to specify an unwanted vertex (or edge), it simply out-
+puts all alternative shortest paths avoiding each possible edge on the shortest path.
+The goal of replacement paths problem is to reuse the computations for each avoid-
+ing edge to achieve a better overall performance. The only known time lower bound
+
+ACM Transactions on Database Systems, Vol. 37, No. 4, Article 29, Publication date: December 2012.
+
+29:6
+
+K. Xie et al.
+
+[Hershberger et al. 2007]. Ball et al. [1989] present an algorithm with a running time
+
+for replacement paths in general graphs is O(cid:2)m√n(cid:3) in the graph comparison model
+of O(m + n log n) for undirected graphs. Roditty and Zwick [2005] propose an ˜O(cid:2)m√n(cid:3)
+
+algorithm in unweighted graphs. Emek et al. [2008] develop an ˜O(n) algorithm for
+general planar graphs.
+
+Our problem is the spatial network version of the distance sensitivity problem
+[Bernstein and Karger 2008, 2009; Demetrescu et al. 2008] in general graph theory,
+in which a distance sensitivity oracle is constructed to allow ﬁnding the shortest
+distance from a source vertex x to a destination vertex y avoiding a vertex v (or
+edge (u, v)) efﬁciently. The state-of-the-art approach is proposed by Bernstein and
+
+in Bernstein and Karger [2008]. The only differences between Bernstein and Karger
+[2009] and our work is that 1) their work considers general graph, while ours are more
+suitable for spatial graph (with each vertices associated with coordinates) and 2) our
+
+Karger [2009]. They propose an oracle of O(cid:2)n2 log n(cid:3) space by improving their work
+space complexity (i.e., O(cid:2)n1.5(cid:3) depends on the assumption of planar graph. The idea of
+
+Bernstein and Karger [2009] is based on the property of having to avoid every vertex
+on a particular path p can be reduced to that of avoiding a few key vertices on p. As
+a result, one can use a hash table A to store the key vertices of every possible pairs
+of vertices, and another hash table B to store the distances of the alternative shortest
+paths avoiding the key vertices for the paths that are covered by each of the key
+vertices. Although the number of key vertices is large, they have different coverage
+to be able to answer all possible queries. The hash table A has the space complexity
+
+of O(cid:2)n2(cid:3), and the hash table B is proved to have the space complexity of O(cid:2)n2 log n(cid:3),
+which yields an overall space consumption of O(cid:2)n2 log n(cid:3). Although their work focuses
+
+on answering distance-based queries, their oracle can be easily extended to answer
+alternative shortest path queries in O(K) time with the same storage cost, where K
+is the number of vertices in the returned alternative shortest path. In order to ﬁnd
+the distance avoiding two unwanted vertices, Duan and Pettie [2009] propose a data
+structure that answers distance queries avoiding two vertices in O(log n) time using
+
+O(cid:5)n2 log3 n(cid:6) space. The data structure and query algorithm are considerably more
+
+complex than those of Demetrescu et al. [2008] and Bernstein and Karger [2009]. They
+also suggest that beyond 2 unwanted vertices will require a fundamentally different
+approach to the problem.
+
+3. PROBLEM SETTINGS
+A spatial network G(V, E) can be modeled as either directed or undirected weighted
+graph. In this article, as in Bernstein and Karger [2009], we only show how to answer
+alternative shortest path query avoiding an unwanted vertex, because it is easy to ex-
+tend our solution to answer alternative shortest paths that avoiding edges by adopting
+the similar idea in Demetrescu et al. [2008].
+
+Given two vertices x and y in G, the path from x to y is denoted as px,y, and the
+shortest path from x to y is denoted as πx,y. The distance from x to y, denoted as dx,y,
+is the weight of the shortest path πx,y (i.e., w(πx,y)). As in other papers in this research
+ﬁeld, without loss of generality, we assume the shortest path for any given source and
+destination vertices is unique.
+
+The alternative shortest path problem is formally deﬁned as follows.
+
+Deﬁnition 1 (Single pair alternative shortest path query). Given a spatial network
+G(V, E), a source vertex x, a destination vertex y, and an unwanted vertex v, the
+(single pair) alternative shortest path query returns the shortest path from x to y that
+avoids v denoted as πx,y,v. The distance from x to y avoiding v is denoted as dx,y,v.
+
+ACM Transactions on Database Systems, Vol. 37, No. 4, Article 29, Publication date: December 2012.
+
+Finding Alternative Shortest Paths in Spatial Networks
+
+29:7
+
+Fig. 1. Shortest path quadtree and shortest path tree.
+
+Deﬁnition 2 (All pairs alternative shortest paths query). Given a spatial network
+G(V, E), and a set X of source vertices, a set Y of destination vertices, and an un-
+wanted vertex v, the all pairs alternative shortest path query returns the alternative
+shortest path πx,y,v for each possible pair (x, y) ∈ X × Y .
+
+Since we frequently use the notion of shortest path tree [Dijkstra 1959], which is a
+tree that represents shortest paths from the root vertex to all possible vertices illus-
+trated in Figure 1(b). The notion of shortest path tree and reverse shortest path tree is
+formally deﬁned as follows.
+
+Deﬁnition 3. Given a spatial network G, let Tx be the shortest path tree rooted at
+
+reverse shortest path tree rooted at vertex x, which contains all shortest path from all
+vertices to x in G. Note in the case of G being modeled as an undirected graph, Tx and
+
+vertex x, which contains all shortest paths from x to all vertices in G. (cid:7)Tx denotes the
+(cid:7)Tx are the same. Given any vertex v, let Tx(v) (cid:2)or(cid:7)Tx(v)(cid:3) be the subtree of Tx (cid:2)or(cid:7)Tx(cid:3)
+
+that is rooted at v.
+
+Table II summarizes the list of notations we use in the article.
+
+4. SHORTEST PATH QUADTREE
+In this section, for the sake of completeness, we brieﬂy cover the idea of shortest path
+quadtree proposed in Sankaranarayanan et al. [2005], and later analyzed in Samet
+et al. [2008].
+
+Given a spatial network G(V, E) with n vertices, there are O(cid:2)n2(cid:3) possible paths.
+It is unnecessary to store all shortest paths, which takes O(cid:2)n3(cid:3) space. Instead, one
+
+only needs to store the ﬁrst edge along the shortest path from a source vertex x to a
+destination vertex y. Since we know the ﬁrst edge of the shortest path from x to y,
+the remaining edges in πx,y can be constructed in time proportional to the length of
+the path by repeatedly following the edges that make up the shortest path as they
+are discovered. As a result, each triplet (x, y, u) for each possible source vertex x,
+destination vertex y and the ﬁrst edge (x, u) of πx,y can be stored so that shortest path
+queries can be efﬁciently answered. One can use a shortest path quadtree for each
+
+vertex to achieve the same query time but a lower storage cost(cid:2)i.e., O(cid:2)n1.5(cid:3)(cid:3).
+
+A shortest path quadtree [Samet et al. 2008; Sankaranarayanan et al. 2005] is a
+variant of region quadtree. Given a source vertex x with an out degree of c, the shortest
+
+ACM Transactions on Database Systems, Vol. 37, No. 4, Article 29, Publication date: December 2012.
+
+29:8
+
+K. Xie et al.
+
+Table II. A List of Notations
+
+notation
+
+description
+
+g(v, e)
+
+the spatial network
+the number of vertices
+
+n
+m the number of edges
+
+k
+
+tx ((cid:7)tx)
+tx(v)(cid:2)(cid:7)tx(v)(cid:3)
+
+px,y
+
+πx,y
+
+π[x,y]
+dx,y
+
+πx,y,v
+
+dx,y,v
+qx
+qx,v
+
+q′x,v
+
+q′x,v
+
+fx
+
+the total number of vertices in the query result
+the (reverse) shortest path tree rooted at ver-
+tex x
+
+the sub tree of tx (cid:2)(cid:7)tx(cid:3) rooted at vertex v
+
+a path with source vertex x and destination
+vertex y
+the shortest path from vertex x to vertex y
+a detour from vertex x to vertex y
+the cost (distance) of πx,y
+the shortest path from vertex x to vertex y that
+avoids vertex v
+the cost (distance) of πx,y,v
+the shortest path quadtree rooted at vertex x
+the shortest path quadtree rooted at vertex x
+covering vertex v
+the alternative shortest path quadtree rooted
+at vertex x covering vertex v
+the alternative shortest path quadtree rooted
+at vertex x cover a set v of vertices
+the (improved) shortest path quadtree forest
+rooted at vertex x
+
+path quadtree rooted at x denoted as Q x is a decomposition of space into c regions, such
+that each region consists of the disjoint quadtree blocks that contain all the vertices
+Y , for each y ∈ Y the ﬁrst edge of πx,y is the out going edge (x, u) of the root vertex
+x. Figure 1(a) shows the shortest path quadtree rooted at vertex x. As illustrated, the
+shortest paths from x to any vertex in region Ru1 start with edge (x, u1), and so as the
+other regions.
+
+Deﬁnition 4 (Label). Given a region R in shortest path quadtree Q x rooted at x. We
+say R is labeled with u, denoted as Ru, if edge (x, u) is the ﬁrst edge of the shortest
+path from x to every vertex located in Ru. Each of such labeling vertices can uniquely
+identify its corresponding region in Q x.
+
+As illustrated in Figure 1(a), to ﬁnd the shortest path given a source vertex x and a
+destination vertex y using the shortest path quadtrees, a sequence of location queries
+are issued. Starting from the shortest path quadtree rooted at the source vertex x, the
+algorithm ﬁrst ﬁnds the region that contains y. In this example, the region is Ru2. As
+a result, the ﬁrst edge of πx,y is found, because the label of Ru2 is u2. Next, we go to
+u2’s shortest path quadtree and ﬁnd which region contains y to ﬁnd the the next edge
+along πx,y; this process continues until the destination y is reached.
+
+5. FROM TREES TO FORESTS
+In this section, we ﬁrst introduce the straightforward extension of shortest path
+quadtrees to answer alternative shortest path queries in Section 5.1. Then we cover
+the strategies to improve the straightforward extension and explain the improved data
+
+ACM Transactions on Database Systems, Vol. 37, No. 4, Article 29, Publication date: December 2012.
+
+Finding Alternative Shortest Paths in Spatial Networks
+
+29:9
+
+Fig. 2. Shortest path quadtree and alternative shortest path quadtree covering u2.
+
+structure iSPQF in detail. We concentrate on the intuition and the structure of iSPQF
+in this section and leave the detailed theoretical analysis in Section 7.
+
+5.1. The Straightforward Extension (SPQF)
+The alternative shortest path problem is the same as shortest path problem with the
+unwanted vertex removed from the spatial network. In order to capture the changes
+made by removing a vertex from the spatial network, we ﬁrst deﬁne the concept of
+cover for shortest path quadtrees.
+
+Deﬁnition 5 (Cover). Given a shortest path quadtree Q x rooted at vertex x, we say
+Q x covers vertex v, denoted as Q x,v, if it stores the shortest path quadtree rooted at x,
+in the case that v is removed from the spatial network.
+
+Figure 2(a) illustrates the shortest path quadtree rooted at x covering u2. The re-
+gions are changed accordingly with the removal of u2 from the spatial network. In
+order to ﬁnd the ﬁrst edge from x to any given destination avoiding any given vertex.
+We need to store a forest of shortest path quadtrees rooted at x covering each possible
+unwanted vertex, as a result, there are a total number of n shortest path quadtrees
+(i.e., 1 × Q x and (n − 1) × Q x,v for all v ∈ V). We term such a forest of shortest path
+quadtrees as SPQF. As a result, instead of a single shortest path quadtree, we use
+a SPQF for each vertex, such that alternative shortest path queries can be answered
+in a similar fashion as normal shortest path queries by issuing a sequence of location
+queries.
+
+Given a destination y and an unwanted vertex v, the ﬁrst edge of πx,y,v can be found
+by issuing a location query of y to the shortest path quadtree rooted at x that covers
+v, from which the label of the region containing y determine the ﬁrst edge along πx,y,v.
+Suppose the label of the region in Q x,v is x′, the ﬁrst edge of πx,y,v is (x, x′). The re-
+maining edges in πx,y,v can be constructed by repeated following the edges that make
+up the alternative shortest path by looking at the label of the corresponding shortest
+path quadtree that covers v.
+
+Samet et al. [2008] show that n shortest path quadtrees have a total cost of O(n1.5).
+Since an SPQF consist of a total number of n shortest path quadtrees (i.e., 1 × Q x and
+
+ACM Transactions on Database Systems, Vol. 37, No. 4, Article 29, Publication date: December 2012.
+
+29:10
+
+K. Xie et al.
+
+(n − 1) × Q x,v for each v ∈ V), and there is one SPQF for each vertex, the total space
+cost of all SPQFs is O(n2.5).
+
+5.2. Improved SPQF with Less Trees (iSPQF)
+The problem with simply extending shortest path quadtrees to SPQFs is that the
+space cost is not scalable (i.e., O(n2.5)). This is caused by the fact that there are too
+many quadtrees (i.e., n) in each SPQF. In this section, we aim to reduce the number
+of quadtrees required for each vertex to reduce the space cost. Before the detailed
+techniques are introduced, we ﬁrst deﬁne the following operations on shortest path
+quadtrees that are necessary for the discussion.
+
+Deﬁnition 6 (Clip). Given a shortest path quadtree Q x,v and a region R. R clips Q x,v
+(or Q x,v clipped by R) denoted as clip(Q x,v, R) returns the parts of regions in Q x,v that
+are overlapped with R.
+
+Deﬁnition 7 (Difference). Given two shortest path quadtrees Q x,v and Q x, both
+The difference between Q x,v and Q x denoted as
+
+rooted at x with c regions.
+dif f (Q x,v, Q x) returns the parts of regions that are presented in Q x,v but not in Q x.
+
+Deﬁnition 8 (Merge). Given two shortest path quadtrees Q x,v1 and Q x,v2 both rooted
+at x with disjoint regions. The merge of Q x,v1 and Q x,v2 is a shortest path quadtree with
+regions of both Q x,v1 and Q x,v2.
+
+The quadtree operations described above are illustrated in Figure 3. As described in
+the previous section, the original shortest path quadtree (Q x) needs to be stored in each
+SPQF for answering normal shortest path queries (i.e., no unwanted vertex speciﬁed).
+The presence of Q x makes it sufﬁcient to store only regions of destinations that are
+different from Q x. For example, let Q′x,v be the difference of Q x,v and Q x. In order to
+ﬁnd the ﬁrst edge of πx,y,v for any given vertex y, we could ﬁrst issue a location query
+in Q′x,v. If y is in region R, then we ﬁnd the ﬁrst edge in πx,y,v by looking at the label
+of R. If y is in an empty region, we know that removing v from G does not change the
+ﬁrst edge in πx,y. As a result, we could issue a location query in Q x to ﬁnd the ﬁrst edge
+in πx,y,v. Such a quadtree (i.e., Q′x,v) is termed as an alternative shortest path quadtree,
+which is formally deﬁned as follows.
+
+Deﬁnition 9. Given a shortest path quadtree Q x,v rooted at vertex x covering v, the
+
+alternative shortest path quadtree Q′x,v rooted at x covering v is dif f (Q x,v, Q x).
+
+Figure 2(b) illustrates the result of performing dif f (Q x,u2 , Q x) to derive of alterna-
+tive shortest path quadtrees that cover u2 for the road network shown in Figure 2(a).
+As illustrated, the alternative shortest path quadtree contains large space of empty
+regions, where less information is stored. In order reduce the storage requirement of
+the data structure, the rational is to make better usage of those empty regions so that
+not so many quadtrees are needed in each forest. This can be achieved by merging
+quadtrees together. From Deﬁnition 8, multiple quadtrees can be merged into a single
+one, if the nonempty regions in these quadtrees do not overlap with each other. To ﬁnd
+those quadtrees that can be merged together, our improved SPQF (iSPQF) optimizes
+SPQF in two key strategies, which are termed horizontal integration and vertical in-
+tegration respectively. We start each optimization strategy with a simple observation.
+Then we introduce our techniques, which further utilize the observations and achieve
+effective space reduction. Now we present the ﬁrst observation.
+
+OBSERVATION 1. For any source vertex x and destination vertex y, the original
+
+shortest path πx,y is not affected by removing a vertex that was not in πx,y.
+
+ACM Transactions on Database Systems, Vol. 37, No. 4, Article 29, Publication date: December 2012.
+
+Finding Alternative Shortest Paths in Spatial Networks
+
+29:11
+
+Fig. 3. Shortest path quadtree operations.
+
+Observation 1 shows that given a source vertex x, each unwanted vertex v only af-
+fects the shortest paths to a limited number of destinations. Speciﬁcally, in the shortest
+path tree Tx, the removal of vertex v from the spatial network affects only the subtree
+Tx(v). Because of the assumption that all shortest paths are unique,1 we have the
+following lemma [Bernstein and Karger 2009].
+
+LEMMA 1. Given a vertex x and the shortest path tree Tx rooted at x. All vertices at
+
+level l in Tx have disjoint subtrees of Tx.
+
+The idea of Lemma 1 is shown in Figure 1(b). As illustrated, since u1, u2, and u3
+are on the same level2 (i.e., level 1) of Tx, Lemma 1 ensures that Tx(u1), Tx(u2), and
+Tx(u3) are distinct subtrees of Tx with no overlaps. Since region Ru1, Ru2, and Ru3 in
+the shortest path quadtree Q x correspond to the subtree Tx(u1), Tx(u2), and Tx(u3) in
+Tx respectively, we have the following corollary.
+
+1Even though there may exist multiple shortest paths, one can consistently choose any one of them as the
+unique shortest path.
+2Level is the stpes along the shortest path from the root vertex of a shortest path tree.
+
+ACM Transactions on Database Systems, Vol. 37, No. 4, Article 29, Publication date: December 2012.
+
+29:12
+
+K. Xie et al.
+
+Fig. 4. Horizontal integration.
+
+COROLLARY 1. For all vertices {v1, v2, . . . , vi} at level l in Tx, the alternative shortest
+
+have disjoint regions to each other.
+
+path quadtrees Q′x,v1
+
+, . . . , Q′x,vi
+
+PROOF. From Observation 1, removing a vertex from a shortest path tree affects
+only its subtree. Because 1) Lemma 1 shows the set of vertices Vl on the same level l of
+the shortest path tree have distinct subtrees, and 2) alternative shortest path quadtree
+rooted at any vertex x covering v contains regions of only destinations in Tx(v), there
+will be no overlap regions among alternative shortest path quadtrees rooted at the
+same vertex covering vertices on the same level l of the shortest path tree.
+
+Having the disjointness property of alternative shortest path quadtrees shown in
+Corollary 1, all alternative shortest path quadtrees rooted at the same vertex can
+be merged into a single alternative shortest path quadtree if they cover vertices on
+the same level of the shortest path tree. Hence, instead of having each alternative
+shortest path quadtree Q′x,v covering each possible unwanted vertex v, we can have
+each alternative shortest path quadtree Q′x,Vl
+covering a set of vertices Vl (i.e., the set
+of vertices on level l of Tx). For example, in Figure 4, we can see that Q′x,u1
+, Q′x,u2
+,
+and Q′x,u3 are in the same level (i.e., level 1) of Tx. From Corollary 1, their nonempty
+regions are disjoint from each other, as a result, we can merge the nonempty regions of
+Q′u1
+, where Vl1 = {u1, u2, u3}. Now
+we summarize the ﬁrst improvement with the following theorem.
+
+into a single quadtree to obtain Q′x,Vl1
+
+, and Q′u3
+
+, Q′u2
+
+THEOREM 1 (HORIZONTAL INTEGRATION). The SPQF rooted at x with each short-
+est path quadtree covering single vertex can be replace by an iSPQF rooted at x with
+each alternative shortest path quadtree covering all vertices on each level of Tx.
+
+By applying Theorem 1, the number of alternative shortest path quadtrees in
+each forest has been reduced signiﬁcantly from n to L, where L is the depth of the
+
+ACM Transactions on Database Systems, Vol. 37, No. 4, Article 29, Publication date: December 2012.
+
+Finding Alternative Shortest Paths in Spatial Networks
+
+29:13
+
+Fig. 5. Shortest path quadtree covering some vertices.
+
+corresponding shortest path tree. It can be easily seen that L is upper bounded by
+the diameter path (i.e., the shortest path with most vertices) of G. In the case of the
+shortest path tree being a balanced tree, L = log n, in the case of the spatial network
+being a regular grid with similar height and width, L = √n.
+
+Although the number of quadtrees required for each forest has been signiﬁcantly
+reduced (to L), it still increases when the size of the spatial network increases. Now we
+show the second optimization, which is later proved that by applying this optimization
+the number of alternative shortest path quadtrees is bounded by a constant, which
+no longer depends on the size of the spatial network (i.e., Section 7.1). Same as the
+ﬁrst optimization (i.e., horizontal integration), we start the second optimization (i.e.,
+vertical integration) with the following observation:
+
+OBSERVATION 2. Given a spatial network G(V, E), there exists a number of alterna-
+tive shortest paths {πx,y,v} (x, y, v ∈ V), whose ﬁrst edge in πx,y,v is the same as the ﬁrst
+edge in πx,y. That is,
+
+∃x,y,v∈V ( f irst edge(πx,y,v) = f irst edge(πx,y))
+
+Now we show how observation 2 affects the alternative shortest path quadtrees.
+Figure 5(a) and 5(b) show two cases of shortest path quadtrees covering different ver-
+tices. Figure 5(a) shows the case, where Q x,u21 is different from Q x, thus the alternative
+shortest path Q′x,u21
+would contain some nonempty regions. Figure 5(b) illustrates the
+case that by removing u22, Q x,u22 is the same as Q x thus Q′x,u22
+= dif f (Q x,u22 , Q x) is
+empty. Developed from Observation 2, the following lemma shows the cases of deriv-
+ing empty alternative shortest path quadtrees.
+
+LEMMA 2. Given a source vertex x and an unwanted vertex v, if for all destination
+vertices y ∈ V, the ﬁrst edge of πx,y,v is the same as the ﬁrst edge of πx,y, then Q′x,v is
+empty.
+
+PROOF. According to alternative shortest path tree’s deﬁnition (deﬁnition 9), Q′x,v is
+obtained by dif f (Q x,v, Q x). For all destination vertices y ∈ V, the ﬁrst edge of πx,y is
+the same as πx,y,v, the label of each region is not changed by removing v. That is, Q x is
+the same as Q x,v. Hence Q′x,v is empty.
+
+ACM Transactions on Database Systems, Vol. 37, No. 4, Article 29, Publication date: December 2012.
+
+29:14
+
+K. Xie et al.
+
+Fig. 6. Vertical integration.
+
+From Theorem 1, alternative shortest path quadtrees rooted at the same vertex
+covering vertices on the same level of the shortest path tree are merged to form a
+single alternative shortest path quadtree. Let Vl be the set of all vertices in level l of
+Tx, if a majority of alternative shortest path quadtrees that make up Q′x,Vl
+are empty
+because of Lemma 2, then Q′x,Vl
+has a large number of empty regions. The rationale
+here is to ﬁll those empty regions as much as possible, such that it is unnecessary to
+create additional trees. Those empty spaces can be ﬁlled with the following steps.
+
+(1) For iSPQF rooted at vertex x, the process begins by ﬁrst ﬁnding all vertices
+
+{v0, . . . , v j} in the ﬁrst level of Tx.
+
+(2) Find each alternative shortest path quadtrees Q′x,vi
+(3) If any of the alternative shortest path quadtree (e.g., Q′x,vk
+
+) is empty, it is replaced
+by the alternative shortest path quadtrees which cover vk’s children vertices in Tx.
+(4) Recursively repeat the above process until all alternative shortest path quadtrees
+
+where 0 ≤ i ≤ j.
+
+to be merged contain some region or we reach the leaf nodes in Tx.
+
+For those empty alternative shortest path quadtrees, it is safe to discard them since
+we could simply refer to Q x to locate the ﬁrst edge of alternative shortest path for
+any given destination. As illustrated in Figure 6, we can see that empty alternative
+shortest path quadtree Q′x,u22
+is discared and we can simply merge the children of u22
+in Tx instead. Now we summarize this optimization in the following theorem.
+
+THEOREM 2 (VERTICAL INTEGRATION). Given the iSPQF rooted at each x ∈ V, it
+is only necessary to store Q′x,v which is not empty. Those Q′x,v can then be merged if they
+all contain disjoint subtrees in Tx.
+
+Algorithm 1 shows the process to construct iSPQF, which applies both optimizations
+summarized in Theorems 1 and 2. The algorithm takes Tx as input, and returns the
+iSPQF rooted at x. The input Tx can be computed using either Dijkstra’s algorithm
+[Dijkstra 1959; Fredman and Tarjan 1987] or some all pairs shortest paths algorithms
+such as Johnson’s algorithm [Johnson 1977] so that other shortest path trees are also
+
+ACM Transactions on Database Systems, Vol. 37, No. 4, Article 29, Publication date: December 2012.
+
+Finding Alternative Shortest Paths in Spatial Networks
+
+29:15
+
+ALGORITHM 1: Create iSPQ F(Tx)
+Input: The shortest path tree Tx of source x
+Output: An iSPQF rooted at x
+
+1 Fx ← init f orest();
+2 Lc ← (cid:10)(cid:11);
+3 Ln ← (cid:10)(cid:11);
+4 Ln.append all(T x. f irst level vertices);
+5 while Ln.size == 0 do
+6
+
+Lc.append all(L n.elements);
+Ln ← (cid:10)(cid:11);
+V′ ← ∅;
+Q′x,V′ ←init quadtree();
+while Lc.size() > 0 do
+v ← Ln. pop f irst();
+Q′x,v ← init quadtree();
+foreach Destination vertex y ∈ V do
+
+7
+
+8
+
+9
+
+10
+
+11
+
+12
+
+13
+
+14
+
+15
+
+16
+
+17
+
+18
+
+19
+
+20
+
+21
+
+22
+
+23
+
+24
+
+25
+
+if f irst edge(πx,y,v) == f irst edge(πx,y) then
+
+else
+
+lab el ← empty;
+lab el ← f irst edge(πx,y,v);
+
+Q′x,v.insert(y, lab el);
+
+if Q′x,v contains only empty region then
+
+Lc.append all(get children(Tx, v));
+
+else
+
+Q′x,V′ ← merge(Q′x,V′ , Q′x,v);
+V′ ← V′ ∪ {v};
+Ln.append all(get children(T x, v));
+
+Fx.add quadtree(Q′x,V′ );
+
+26 return Fx;
+
+computed for constructing iSPQFs rooted at other vertices. The algorithm ﬁrst ini-
+tializes the iSPQF Fx rooted at x and uses two sequences Lc and Ln (line 1–4), which
+keeps track of all the vertices that have nonoverlapping shortest path subtrees. Lc
+is ﬁrst initialized with all the children vertices of the root vertex in the shortest path
+tree Tx (line 6), and Ln is an empty sequence (line 7). The alternative shortest path
+quadtree Q′x,V′ rooted at x covering a set V′ of vertices is initialized. Each element v in
+Lc is retrieved and removed from Lc to ﬁnd the corresponding shortest path quadtree
+Q′x,v covering v (line 11–18). If Q′x,v only contains empty region (line 19), then accord-
+ing to Theorem 2, it can be safely discarded, and Lc is appended with v’s children,
+such that the empty part of the alternative shortest path quadtree can then be ﬁlled
+with the alternative shortest path quadtrees of v’s children node without inﬂuencing
+the other existing regions in Q′x,V′ (according to Corollary 1 and Theorem 1). If Q′x,v
+contains nonempty region (line 21), then Q′x,v ﬁlls the empty regions in Q′x,V′ and Ln
+is appended with v’s children, which contains the vertices that the next alternative
+shortest path quadtree should cover in Fx. If there are no more elements in Lc, it
+means that the alternative shortest path quadtree Q x,V′ has covered enough vertices
+and can be added to Fx (line 10, 25). If there are no more element in Ln, this means
+
+ACM Transactions on Database Systems, Vol. 37, No. 4, Article 29, Publication date: December 2012.
+
+29:16
+
+K. Xie et al.
+
+that all possible unwanted vertices have been processed and thus Fx can be returned
+(line 5, 26).
+
+To construct iSPQF, in Algorithm 1, although we perform n single source shortest
+paths for each vertex, the algorithm can be easily implemented for computation in
+parallel to improve construction time. This is because each single source shortest paths
+computation is independent of each other. In addition, there exists many optimizations
+for computing shortest paths with slight changes in the ﬁeld of dynamic shortest path
+problem [Demetrescu and Italiano 2004; Frigioni et al. 1996, 2000; King 1999], one
+can utilize their optimizations to improve the construction time. Since this process is
+ofﬂine, the construction time is not vital in our case.
+
+6. QUERY PROCESSING WITH ISPQF
+
+6.1. Single Pair Alternative Shortest Path Query
+This section introduces the single pair alternative shortest path algorithm (ASP),
+which uses iSPQF to efﬁciently answer the alternative shortest path queries. The basic
+idea is to issue a sequence of location queries, which determines the next edge along
+the alternative shortest path to follow until the destination is reached.
+
+Recall, in the case of SPQF, given an alternative shortest path query for πx,y,v, the
+ﬁrst edge of alternative shortest path can be found by issuing a location query to the
+shortest path quadtree Q x,v rooted at x covering v to obtain the next vertex after x
+in πx,y,v, let such vertex be x′, then the next vertex along πx,y,v can then be found by
+issuing a location query to the shortest path quadtree Q x′,v rooted at x′ covering v. This
+process goes on until we reach y.
+
+Since iSPQF employs techniques to reduce the number of quadtrees in each forest,
+some information is lost. In particular, the empty regions in each quadtree have been
+replaced by the nonempty regions in other quadtrees. These empty region indicates
+the case that the next vertex along the alternative shortest path is the same as the
+original shortest path. For example, given a query for πx,y,v, if y is located in an empty
+region of Q′x,v, then we know that it follows the original shortest path and could simply
+issue a location query to the original shortest path quadtree Q x to ﬁnd the next vertex
+along the path. However, in iSPQF, alternative shortest path quadtrees are merged
+together so that those empty regions are lost. For example, Q′x,v are merged with other
+alternative shortest path quadtrees to form Q′x,V′, where V′ ⊂ V is the set of vertices
+that the merged alternative shortest path quadtree cover and v ∈ V′. In this case, if
+y is still located in an empty region in Q′x,V′, we could still refer to Q x to ﬁnd the next
+vertex along the path, the next vertex for any unwanted vertex that are covered by
+Q′x,V′ is the same as the original shortest path. However, if y is located in a nonempty
+region, it is no longer safe to say that we could follow Q′x,V′ to ﬁnd the next edge. This is
+because y could located in a region that is originally empty in Q′x,v, but are being ﬁlled
+with nonempty regions when merged with other alternative shortest path quadtrees
+to form Q′x,V′. In order to over come this issue, we design a simple check query, which
+visits a few more vertices that are not on the alternative shortest path. However, this
+does not increase the overall query time complexity.
+
+Before we show how check query works, we ﬁrst present the following theorem.
+THEOREM 3. Given three vertices x, y and v in G, if v ∈ πx,y, we can use the alter-
+native shortest path quadtree Q′x,y,V′ rooted at x covering v (i.e., V′ ⊂ V and v ∈ V′) to
+determine the ﬁrst edge of πx,y,v.
+
+PROOF. Given three vertices x, y and v, let v ∈ πx,y and Tx be the shortest path tree
+of x, we can easily derive that y is in the subtree of Tx rooted at v (i.e., Tx(v)). Let Q′x,V′
+
+ACM Transactions on Database Systems, Vol. 37, No. 4, Article 29, Publication date: December 2012.
+
+Finding Alternative Shortest Paths in Spatial Networks
+
+29:17
+
+be the alternative shortest path quadtree covering v (i.e., v ∈ V′), from the nature of
+how we merge quadtrees together (Theorem 1 and Theorem 2), we can see that other
+vertices covered by Q′x,V′ (i.e., V′−{v}) are not in Tx(v), as a result, y can be guaranteed
+to be in the region that are affected by Q′x,v.
+
+Theorem 3 shows that to determine whether we should follow the alternative short-
+est path quadtree or the original shortest path quadtree, we need to check whether
+v is contained by the current source vertex to the destination or not. As a result, a
+check query is a simple shortest path query except it stops if it reaches any vertex in
+a set S termed as identiﬁcation set before it reaches the destination. Given a vertex
+u to be checked in the query for πx,y,v, the identiﬁcation set S is the set of vertices if
+the shortest path query from u to y visits any vertex in S, then it is guaranteed that
+πu,y passes v. Initially S contains only the unwanted vertex v. After each check query
+has been issued, the visited vertices are added to S. As a result, check query visits
+only a very small number of vertices, rather than all vertices in πu,y. If it does visit all
+vertices in πu,y then we have found πx,y,v and the whole alternative shortest path can
+be returned. The process of check query is illustrated in Algorithm 2.
+
+ALGORITHM 2: Check Path(x, y, S)
+Input: A vertex to be checked x, the destination vertex y, a set of vertices S so that if it reach
+
+any vertex in S the search stops
+
+Output: The path p before reach y or any vertex in S
+
+1 if x == y or x ∈ S then
+
+return;
+
+2
+
+3 Ru ← get region(Q x);
+4 u ← Ru.get lab el();
+5 return (x, u) ◦ Check Path(x, y, S);
+
+6.2. All Pairs Alternative Shortest Path Query
+The previous section shows the algorithm ASP to process single pair alternative short-
+est path query using iSPQF. In this section, we consider the case of ﬁnding all pairs
+alternative shortest paths given a set of source vertices X , a set of destination vertices
+Y , and an unwanted vertex v. The all pairs alternative shortest paths query can be
+simply computed by issuing ASP for each source-destination pair (x, y) ∈ X × Y . In
+this section, we present optimization strategies and propose AASP, in which redun-
+dant computation for a number of pairs can be shared in order to achieve better query
+performance.
+
+It can be seen from the previous section that the algorithm for processing alternative
+shortest path visits a few extra vertices in Check Path() to determine which quadtree
+to follow for the next vertex in the path. It maintains an identiﬁcation set S of vertices.
+Whenever the Check Path() visits a vertex in S before it visits y, it returns an empty
+path indicating the main algorithm should use the corresponding alternative shortest
+path quadtree instead of the original shortest path quadtree. The following lemma
+presents the way S can be maintained and reused for alternative shortest paths for
+different pairs.
+
+LEMMA 3. Given a source vertex x, a destination vertex y and an unwanted vertex
+v, the identiﬁcation set S of vertices maintained while computing πx,y,v contains only
+
+vertices in the subtree(cid:7)Ty(v).
+
+ACM Transactions on Database Systems, Vol. 37, No. 4, Article 29, Publication date: December 2012.
+
+29:18
+
+K. Xie et al.
+
+ALGORITHM 3: A SP(x, y, v, S)
+Input: A source vertex x, a destination vertex y, an unwanted vertex v, A set of vertices S
+
+initially contains a single vertex v
+
+Output: The alternative shortest path πx,y,v
+
+1 if x == y then
+2
+
+return;
+
+3 p ← Check Path(x, y, S);
+4 if p.last vertex == y then
+5
+6 else
+
+return p;
+
+7
+
+S ← S∪ get vertices( p);
+
+8 Q x,V′ ← the shortest path quadtree in Fx that covers v;
+9 R′u ← get region(Q x,V′ , y);
+10 if R′u == empty then
+Ru ← get region(Q x);
+11
+u ← Ru.get lab el();
+u ← R′u.get lab el();
+
+12
+13 else
+
+14
+
+15 return (x, u) ◦ A SP(u, y, v, S);
+
+PROOF. The lemma can be easily proved by showing that for any vertex u passed to
+
+the check query, we only add all vertices in πu,v to the set S, if πu,y contains v.
+
+Lemma 3 shows that the identiﬁcation set S can be shared if alternative shortest
+path queries have the same unwanted vertex and share the same destination. The all
+pairs alternative shortest paths query algorithm (AASP) with reused identiﬁcation set
+S is shown in Algorithm 4. The algorithm issues alternative shortest path queries for
+each possible pair, and the identiﬁcation set S is shared for each destination to save
+cost.
+
+ALGORITHM 4: AASP
+Input: A set X of source vertices, a set Y of destination vertices, an unwanted vertex v, A set of
+
+vertices S initially contains a single vertex v
+
+Output: The alternative shortest path πx,y,v for each (x, y) ∈ X × Y
+
+1 D ← init dictionary;
+2 foreach y ∈ Y do
+
+3
+
+4
+
+5
+
+6
+
+S ← {v};
+foreach x ∈ X do
+π ← Alternative Shortest Path(x, y, v, S);
+D.add((x, y), π);
+
+7 return D;
+
+7. ANALYSIS
+In this section, we ﬁrst analyze the worst case space cost of the iSPQF data struc-
+ture, then we study the worst case query time for processing alternative shortest path
+queries with iSPQF. Since we use properties of shortest path quadtrees, same as Samet
+et al. [2008], we assume the spatial networks are planar.
+
+ACM Transactions on Database Systems, Vol. 37, No. 4, Article 29, Publication date: December 2012.
+
+Finding Alternative Shortest Paths in Spatial Networks
+
+29:19
+
+Fig. 7. Alternative representation of level covering shortest path quadtree.
+
+7.1. Space Complexity
+In this section, we show the space complexity of iSPQF by ﬁrst identifying the space
+required for each shortest path quadtree in iSPQF, then we show the maximum num-
+ber of alternative shortest path quadtrees for each iSPQF, and at last, we conclude by
+showing the overall space cost.
+
+Let us ﬁrst review a property of the original shortest path quadtree proved in Samet
+
+et al. [2008].
+
+LEMMA 4. Each region of the original shortest path quadtree Q x is connected.
+
+This is a property by noting that spatial networks are usually planar [Samet et al.
+2008]. Because those regions are connected and the shortest path quadtree Q x only
+has c regions, where c is the out degree of x. Since each connected quadtree region
+consumes O(√n) space [Bresenham 1965], the space consumed by each shortest path
+quadtree is at most O(c√n).
+
+LEMMA 5. Given any vertex x with out degree c, every alternative shortest path
+quadtree Q x,V′ , can be represented by c quadtrees Q x,V′ 1 . . . Q x,V′ c, each with c − 1 re-
+gions. Each region in the alternatively represented shortest path quadtree Q x,V′ i(1 ≤ i ≤
+c) is connected.
+
+PROOF. Figure 7 shows such a scenario of the alternative representation. Given an
+alternative shortest path quadtree Q′x,V′, which covers all vertices in V′ ⊂ V, we can
+decompose this shortest path quadtree, by clipping it with each regions in the original
+shortest path quadtree Q x. At this point, each region may still have disconnected
+blocks. To join those blocks, we could simply ﬁll the space with each region in the
+original shortest path quadtree, whose labels are included in the decomposed quadtree.
+Note this process is reversible by using the difference and merge operations.
+
+Now we show why after the clip and ﬁll process, the regions in each of the c
+quadtrees are connected. We use the term base region to refer to the region in Q x.
+
+ACM Transactions on Database Systems, Vol. 37, No. 4, Article 29, Publication date: December 2012.
+
+29:20
+
+K. Xie et al.
+
+Fig. 8. Shortest path and detour.
+
+Note after the clip process, we have the regions that consists of destinations that have
+changed their ﬁrst edges. Those regions of vertex u are connected to their base regions
+with the same label because of Lemma 4. Since all of those changed regions are con-
+nected to its base region, after the ﬁll process, each of the regions is guaranteed to be
+connected.
+
+LEMMA 6. Each shortest path quadtree in the iSPQF Fx rooted at x uses O(√n)
+
+space.
+
+PROOF. Let x be any vertex in a given spatial network G(V, E) and c be the out-
+degree of x. We know from Lemma 5 that each alternative shortest path quadtree (e.g.,
+Q x,V′, where V′ ⊂ V) can be represented by c alternative quadtree representations,
+each containing c− 1 connected regions. As a result, we have a total number of c(c− 1)
+connected regions for each alternative shortest path quadtree (with the alternative
+representation).
+
+According to Bresenham [1965], each connected region in a quadtree uses maximum
+of √n space. Hence each alternative shortest path quadtree uses maximum of c(c −
+1)√n space. Because in spatial networks, c is usually a very small number (e.g., 4)
+much smaller than n [Samet et al. 2008], the space required for each shortest path
+quadtree is O(√n).
+
+Before we show the number of quadtrees in each iSPQF, we ﬁrst deﬁne the concepts
+and assumptions that are used in the analysis. First of all, we deﬁne the concept of
+detour, which is illustrated in Figure 8 and formally deﬁned in the following.
+
+Deﬁnition 10 (Detour). Given a source vertex x and a destination vertex y. A detour
+from x to y, denoted as π[x,y], is the shortest path from x to y without using any edge
+on πx,y.
+
+We now deﬁne the following notations that will be used for the following analysis.
+
+Deﬁnition 11. Let a and b be vertices on πx,y. We say a < b if a comes before b on
+πx,y. Let v be a vertex on πx,y, where v (cid:16)= x and v (cid:16)= y. We use v − 1 to denote the vertex
+that is one vertex before v in πx,y and v + 1 to denote the vertex that is one vertex after
+v in πx,y.
+
+Now we show the following lemma, which has been proved in Demetrescu et al.
+
+[2008].
+
+LEMMA 7. Any path πx,y,v can be decomposed into three subpaths πx,a ◦ π[a,b ] ◦ πb ,y,
+where ◦ is path concatenation and x ≤ a < v < b ≤ y on πx,y. We call the vertex a as the
+branch-out vertex, and b as the branch-in vertex.
+
+Now we state the following assumption, similar to one made in Sankaranarayanan
+and Samet [2009] and Sankaranarayanan et al. [2009]. Let the distance ratio of a
+
+ACM Transactions on Database Systems, Vol. 37, No. 4, Article 29, Publication date: December 2012.
+
+Finding Alternative Shortest Paths in Spatial Networks
+
+29:21
+
+shortest path and its detour be bounded from both above and below by δU and δL
+dx,y ≤ 1 + δU, δL and δU > 0),
+respectively (i.e., for any two vertices x and y, 1 + δL ≤
+and let the weight of the edges be bounded by dL and dU (i.e., ∀e∈E.dL ≤ w(e) ≤ dU, dL
+and dU > 0). We have the following lemma.
+
+d[x,y]
+
+LEMMA 8. Given a source vertex x, a destination vertex y, and an unwanted vertex
+
+v, if dx,v > δU
+δL
+
+dU. Then the ﬁrst edge of πx,y,v is the same as the ﬁrst edge of πx,y.
+
+PROOF. Since each shortest path πx,y,v can be decomposed into πx,a ◦ π[a,b ] ◦ πb ,y,
+
+according to Lemma 7, we have,
+
+(2)
+
+(3)
+
+(4)
+
+dx,y,v ≤ dx,v−1 + d[v−1,v+1] + dv+1,y
+
+From our assumption we have the following equation:
+d[v−1,v+1] ≤ (1 + δU)dv−1,v+1
+
+From Equations (2) and (3) we have,
+
+dx,y,v ≤ dx,y + δUdv−1,v+1
+
+Let vertices a and b be the branch-out and branch-in vertices on πx,y,v respectively.
+Equation (4) can be rewritten as the following based on Lemma 7:
+
+Thus:
+
+then:
+
+dx,a + d[a,b ] + db ,y ≤ dx,y + δUdv−1,v+1
+
+dx,a + (1 + δL)da,b + db ,y ≤ dx,y + δUdv−1,v+1
+
+da,b ≤
+
+δU
+δL
+
+dv−1,v+1
+
+Since all edges are bounded by dL and dU, Equation (6) can be rewritten as:
+
+da,b ≤ 2
+
+δU
+δL
+
+dU
+
+(5)
+
+(6)
+
+(7)
+
+According to Equation (7), for a given shortest path πx,y,v if dx,v > 2 δU
+δL
+of πx,y,v is always the same as the ﬁrst edge of πx,y.
+
+dU, the ﬁrst edge
+
+Note that for any given ﬁnite graph, we can always compute the values of δL, δU as
+well as dL and dU. The following lemma shows that the number of quadtrees in each
+iSPQF is independent of the size of the spatial network.
+
+LEMMA 9. Given a spatial network G(V, E), let γ = dU δU
+dL δL
+
+and L be the maximum
+levels of each single source shortest path tree. There are at most O(min(γ , L)) alternative
+shortest path quadtrees in each iSPQF.
+
+PROOF. From Lemma 8, for any vertices x, v ∈ V, we know that if dx,v > δU
+
+dU then
+the ﬁrst edge in πx,y,v is always the same as the ﬁrst edge in πx,y. In this case, let
+there be a circle C centered at x with radius δU
+dU, we do not need any shortest path
+δL
+quadtrees covering vertices outside C, since they are identical to the original short-
+est path quadtree Q x rooted at x. As a result, the number of alternative shortest
+path quadtrees is upper bounded by the number of edges in the shortest path from x
+to the edge of C, which is upper bounded by δU dU
+= γ . Since we already know that
+δL dL
+
+δL
+
+ACM Transactions on Database Systems, Vol. 37, No. 4, Article 29, Publication date: December 2012.
+
+29:22
+
+K. Xie et al.
+
+the number of alternative shortest path quadtree is upper bounded by L (by apply-
+ing only horizontal integration) without discarding any quadtrees, there are at most
+O(min(γ , L)) alternative shortest path quadtrees in each iSPQF.
+
+Now we present the main outcome of the space complexity analysis.
+
+THEOREM 4. Given a spatial network G(V, E), let γ = dU δU
+dL δL
+
+and L be the maximum
+levels of each single source shortest path tree. The improved shortest path quadtree
+forest (iSPQF) consumes O(min(γ , L)n1.5) space in total.
+
+PROOF. According to Lemma 6, each shortest path quadtree in iSPQF consumes
+O(√n) space. Since each iSPQF has maximum O(min(γ , L)) of alternative shortest
+path quadtrees, the total space consumption is O(cid:2)min(γ , L)n1.5(cid:3).
+
+In spatial networks, γ is dependent on the structure of the spatial networks, which
+means if the spatial network is close to regular grids, then γ is close to 1. For real road
+networks, although γ for the entire network can be very large, as veriﬁed in Section
+8.3, this large value is caused by only a small number of edges and paths, which means,
+in average, γ can be reasonably small. We now discuss how the average γ affects the
+iSPQF space consumption.
+
+δL
+
+Recall that in our analysis, we show for any x, v ∈ V, if dx,v > δU
+
+dv−1,v+1, the ﬁrst
+edge of πx,y is the same as the ﬁrst edge of πx,y,v for any y ∈ V. Then dU and dL
+is used to upper bound the number of edges of a path with length δU
+dv−1,v+1 to ﬁnd
+δL
+the upper bound for the number of quadtrees required for each iSPQF. Since we have
+observed that for real road networks, most edges have similar weight with only a small
+number of exceptions, in most cases, the length of a path is generally proportional to
+the number of edges in the path. As a result, in average the number of edges in
+δU
+is normally large, the actual
+δL
+
+dv−1,v+1 is much lower than δU dU
+distance(cid:2)i.e., δU
+In terms of the detour ratio (cid:2)i.e., δU
+
+dv−1,v+1(cid:3), is the one that decides when no more quadtrees are needed.
+δL(cid:3) factor in γ , it can be observed in real road
+
+In additional, one can always break a long edge in to a number of edges with smaller
+weights.
+
+, thus although dU
+dL
+
+δL dL
+
+δL
+
+networks, for shortest path with small length usually have larger detour ratio, how-
+ever, the ratio quickly decrease as the distance between the source and the destina-
+tion increases, and the majority of the paths have small detour ratios (as observed in
+Section 8.3). A similar property is also observed and termed as distortion spectrum
+in Sankaranarayanan and Samet [2009]. Now, we show how this property affects the
+space consumption. Let us ﬁrst assume that all shortest path with at least length T
+have a detour ratio bounded by δ′U
+. Using the same
+δ′L
+method in Lemma 8, we can prove that for any given vertices x, v ∈ V, if dx,v >
+the ﬁrst edge of πx,y,v is the same as the ﬁrst edge of πx,y for any y ∈ V. Since δ′U
+
+δ′L
+dramatically decreases when T increases, a proper upper bound can then be found, to
+give a tighter upper bound.
+
+is much smaller than δU
+δL
+
+, where δ′U
+δ′L
+
+δ′U
+δ′L
+
+T,
+
+In our experiments, γ is estimated to be around 40 for real road networks of various
+sizes. Since the structures of spatial networks are similar and γ does not increase
+with the size, the space required for answering alternative shortest path queries with
+iSPQF is O(n1.5). Our experiments conducted on real road networks also verify this
+result.
+
+ACM Transactions on Database Systems, Vol. 37, No. 4, Article 29, Publication date: December 2012.
+
+Finding Alternative Shortest Paths in Spatial Networks
+
+29:23
+
+Fig. 9. Alternative shortest path.
+
+7.2. Time Complexity
+For the alternative shortest path query processing shown in Algorithm 3 and 2, it can
+be easily seen that besides the vertices that belong to the alternative shortest path,
+the algorithm also visits a few extra vertices in Check Path(x, y, S) to determine which
+quadtree in the iSPQF to follow. As a result, the overall time cost of an alternative
+shortest path query is the number of vertices visited in every iteration of A SP plus
+the total number of vertices visited by Check Path, which is O(K + |S|), where K is the
+number of vertices in the returned path, and |S| is the maximum number of vertices
+that the check query visited. We now show the worst case bound for |S|, given a source
+vertex x, a destination vertex y and an unwanted vertex v.
+Since each check query is a shortest path query from some vertex u in πx,y,v to y,
+S consists of all the vertices in each πu,v, where u ∈ πx,y,v ∧ u (cid:16)∈ πx,y and v (cid:16)∈ πu,y (the
+position of u is on the line segments between a and c shown in Figure 9). We ﬁrst show
+the distance du,v from u to v is bounded by the following lemma.
+
+LEMMA 10. Given a source vertex x, a destination vertex y, and an unwanted vertex
+v, let vertex u ∈ πx,y,v be any vertex that πu,y contains v. The maximum possible distance
+du,v from u to v decreases when u approaches to y on πx,y,v.
+
+PROOF. According to the deﬁnition of u in the lemma, we have du,y,v ≥ du,v + dv,y,
+thus du,v ≤ du,y,v − dv,y. When u approaches to y, du,y,v decreases. Since dv,y is constant,
+the maximum possible du,v decreases with du,y,v when u approaches to y.
+
+The size of S can now be estimated by the sum of all vertices in πu,v for all possible u,
+where u ∈ πx,y,v ∧ u (cid:16)∈ πx,y. In this case, it is not tight to simply add numbers of vertices
+in the paths for all possible u, because of shared vertices in those paths from different
+possible u to v.
+
+Now we show the following assumption made in order to further analyze the time
+
+complexity for alternative shortest path query processing:
+
+ASSUMPTION 1. Let v be any vertex in the spatial network, let deg(v) denote the
+
+degree of v, we assume deg(v) (cid:16)= 2 for all v in the spatial network.
+
+Although there exist vertices that have out degree of 2, those vertices are mainly
+used for maintaining the shape of the road segment, which can be safely removed
+since the shape of the road network is irrelevant of answering alternative shortest
+path queries. In addition, such assumption is used only for the purpose of analysing
+the query time complexity, the correctness of the algorithm is not affected.
+
+Now we present the main theorem for the query performance of alternative shortest
+
+path queries.
+
+ACM Transactions on Database Systems, Vol. 37, No. 4, Article 29, Publication date: December 2012.
+
+29:24
+
+K. Xie et al.
+
+Table III. A Summary of Abbreviations (Notations) Used in Section 8
+
+notation
+
+description
+
+the road network of city of Oldenburg
+
+OL
+TG the road network of city of San Joaquin County
+NA
+ASP
+DIJ
+
+the road network of North America
+The proposed single pair alternative shortest path query algorithm
+a modiﬁed version of Dijkstra’s algorithm for alternative shortest
+path query
+
+BK the oracle proposed by [Bernstein and Karger 2009]
+
+AASP
+EASP
+
+ADIJ
+
+the proposed all pairs alternative shortest path algorithm
+the algorithm that answers all pairs alternative shortest path
+algorithm by issuing ASP exhaustively
+a modiﬁed Dijkstra’s algorithm for all pairs alternative shortest
+paths query answering
+
+ABK using BK to answer all pairs alternative shortest paths query
+
+answering
+
+THEOREM 5. It takes O(K) location queries to process single pair and all pairs al-
+ternative shortest path queries using iSPQF, where K is the number of vertices in the
+returned paths.
+
+PROOF. We show the query time for processing single pair alternative shortest path
+query only, for processing all pairs alternative shortest path queries, the time complex-
+ity can be derived with the same principle easily.
+
+As illustrated in Figure 9, we only visit vertices in the shaded area, which are part
+
+usually planar [Samet et al. 2008], and let none of the vertices in πa,c,v be the leaf node
+
+of the vertices in (cid:7)Ty(v) with leaf vertices in πx,y,v. Because the spatial networks are
+of(cid:7)Ty(v), cutting each subtree rooted at each vertex in πa,c,v from(cid:7)Ty(v) results in a tree
+
+with each internal node containing at least two children, according to Assumption 1.
+The number of leaves in such a tree is bounded by the number of vertices in πx,y,v,
+which is denoted as K. Since the number vertices in the shaded area in Figure 9 is
+maximized when each vertex in the subtree rooted at v contains only 2 children (i.e.,
+each path share the least number of vertices). Because a strictly binary tree with K
+leaf nodes contains at most 2K − 1 nodes, there are O(K) vertices in the shaded area.
+As a result, the time complexity for processing alternative shortest path is O(K).
+
+8. EXPERIMENTS
+In this section, we evaluate the performance of answering alternative shortest path
+queries, the scalability of the space consumption of iSPQF, the property of road net-
+works which may have inﬂuence on the space cost of iSPQF, and the construction time
+of iSPQF. All experiments are implemented in Java. Query performance are evalu-
+ated on a Windows platform with Intel Core 2 Duo CPU (2.4GHz) and 8 GB memory,
+the construction of iSPQF are performed on a blade servers with 160 dual-core CUPs
+and 16 GB memory running Hadoop. We use three real road network data sets [Li
+et al. 2005], which are the road networks of city of Oldenburg (OL), the city of San
+Joaquin County (TG), and the road network of North America (NA). OL consists of
+6104 vertices and 7034 edges, TG consists of 18262 vertices and 23873 edges, and NA
+consists of 175812 vertices and 179178 edges. Table III summarizes the abbreviations
+and notations used in this section.
+
+ACM Transactions on Database Systems, Vol. 37, No. 4, Article 29, Publication date: December 2012.
+
+Finding Alternative Shortest Paths in Spatial Networks
+
+29:25
+
+Fig. 10. Alternative shortest paths query performance.
+
+8.1. Query Performance
+In this section, we examine the query performance of using iSPQF in TG. To com-
+pare with the proposed single pair alternative shortest path query algorithm (ASP),
+we implemented a modiﬁed version of Dijkstra’s algorithm (DIJ), which can answer
+alternative shortest path queries by simply black listing the unwanted vertex during
+the relaxation process. The Euclidean lower bounds to DIJ is not applied. The rea-
+son is, according to a recent study [Goldberg and Harrelson 2005], A∗ search based
+on Euclidean lower bounds offers little efﬁciency improvement over the corresponding
+variant of Dijkstra’s algorithm but hurts the performance. We have also implemented
+the state of the art oracle (BK) proposed by [Bernstein and Karger 2009]. The experi-
+ments are conducted by randomly choosing two vertices in the road network as source
+and destination vertex, and randomly choose a vertex in the shortest path from the
+source to the destination as the unwanted vertex.
+
+We ﬁrst use an output-sensitive measure called efﬁciency. A similar measure is also
+used in [Goldberg and Harrelson 2005]. The efﬁciency is deﬁned as the number of
+vertices in the alternative shortest path divided by the number of vertices visited by
+the algorithm. An optimal algorithm would have efﬁciency equal to 1. Figure 10(a)
+shows the query efﬁciency of ASP using iSPQF and DIJ to process single pair alterna-
+tive shortest path queries. Not surprisingly, ASP has an average efﬁciency of nearly
+0.65, which means to ﬁnd the alternative shortest path, ASP only visit 35% more ver-
+tices of the returned path. DIJ’s average efﬁciency is only 0.025. This means DIJ
+scans too many vertices, but ASP visits only at most twice as many as the vertices
+in the returned path. From Theorem 5, it is not hard to see that the efﬁciency lower
+
+ACM Transactions on Database Systems, Vol. 37, No. 4, Article 29, Publication date: December 2012.
+
+29:26
+
+K. Xie et al.
+
+bound for processing single pair alternative shortest path is 1
+3 (shown in Figure 10(a)
+as ASP LB), which can also be veriﬁed in the ﬁgure, where the query efﬁciency is al-
+ways above the ASP LB. Since BK uses a different approach, where the operational
+units are hash table lookups rather than visiting vertices in the spatial network. How-
+ever, from their analysis, every alternative shortest path can always be answered by
+exactly 3K hash table lookups, where K is the number of vertices in the alternative
+shortest path returned, which means that BK has an efﬁciency of 1
+3 .
+
+We also evaluate the time used for processing alternative shortest path query.
+Figure 10(b) shows the time used for ASP, DIJ, and BK for various lengths of returned
+alternative shortest paths. Because ASP has very high efﬁciency and DIJ visits too
+many vertices, ASP uses much less time to process alternative shortest path queries.
+BK is also very efﬁcient, with only a small number of hash table lookups (i.e., 3K), BK
+has comparable performance with ASP.
+
+Next, we evaluate the all pairs alternative shortest paths query using the efﬁciency
+and query time measure. We have implemented the proposed all pairs alternative
+shortest paths algorithm (AASP), and compares it with EASP and ADIJ. EASP sim-
+ply issues single pair shortest path queries exhaustively using iSPQF, and ADIJ is
+a modiﬁed Dijkstra’s algorithm, which issues a Dijkstra’s algorithm for each source
+vertex, and stops until it reatches all the destination vertices. We have also imple-
+mented an all pairs shortest paths algorithm based BK termed ABK, which uses BK
+to exhaustively issue BK to all pairs to ﬁnd the alternative shortest paths. Note that
+both EASP and ABK also have the query time complexity of O(K), which is already
+much more efﬁcient than Dijkstra-based algorithms (ADIJ) whose time complexity is
+O(min(|X|, |Y|)n log n + min(|X|, |Y|)m). The set of source (destination) vertices are se-
+lected by getting all vertices from a connected subgraph randomly extracted from the
+road network. The size of source vertices is similar to the size of the destination ver-
+tices, with the same geographical area size. The unwanted vertex for each all pairs
+alternative shortest paths query given a set X of sources and a set Y of destinations is
+chosen by randomly select one pair (x, y) of vertices from X × Y , and randomly select
+a vertex as the unwanted vertex from πx,y.
+Figure 10(c) shows the efﬁciency of AASP, EASP, and ADIJ. Same as efﬁciency
+deﬁned for single pair alternative shortest path query, efﬁciency for all pairs alter-
+native shortest paths query is deﬁned as the number of vertices in all the returned
+alternative shortest paths divided by the number of vertices that are visited by the
+algorithm. As can be seen from Figure 10(c), the AASP algorithm has very high
+efﬁciency (around 0.97 for large number of possible pairs), which is very close to
+the optimal efﬁciency (i.e., 1). Exhaustive computing alternative shortest path for
+each possible pair using single pair alternative shortest path with iSPQF (EASP)
+has the average efﬁciency of 0.65. As expected, the na¨ıve algorithm using modiﬁed
+Dijkstra’s algorithm (ADIJ) to compute all possible alternative shortest paths have
+very low efﬁciency of about 0.1. ABK is not evaluated in the efﬁciency test for the same
+reason as in the single source alternative shortest path experiment, where ABK with
+efﬁciency 1
+3 always issues 3K hash table lookups, where K is the number of vertices
+returned.
+
+Figure 10(d) shows the time consumed for EASP, AASP, and ABK with various pos-
+sible numbers of vertex pairs. Since AASP have higher efﬁciency, it performs better
+than EASP. Since both AASP and EASP has higher efﬁciency than ABK, ABK con-
+sumes longer time than both of EASP and AASP. The time consumed for ADIJ is not
+shown in the ﬁgure, since it is extremely time consuming and the performance differ-
+ence between ADIJ and EASP can be easily estimated by the single pair alternative
+shortest path query performance shown in Figure 10(d).
+
+ACM Transactions on Database Systems, Vol. 37, No. 4, Article 29, Publication date: December 2012.
+
+Finding Alternative Shortest Paths in Spatial Networks
+
+29:27
+
+Fig. 11. Average number of quadtrees per forest.
+
+In general, although ASP uses O(K) location queries, the performance is generally
+comparable to the query time of BK [Bernstein and Karger 2009] (with a O(K) running
+time). This is because the running time of each location query is negligible in practical
+situations. Since the O(K) query performance has already been very efﬁcient (linear
+to the size of the output), further improvement is very limited. The key contribution of
+this work is that, iSPQF signiﬁcantly reduces the space cost of answering alternative
+shortest path queries (from the state of the art O(n2 log n) to O(n1.5), without any addi-
+tional cost to query performance. The set of experiments in this section have veriﬁed
+the query performance (second part of this claim), the next section will examine the
+space cost (the ﬁrst part of this claim).
+
+8.2. Space Usage
+In this section, we examine the space usage of iSPQF. The experiments are conducted
+by constructing SPQF, iSPQF, and BK for various sizes of road networks that are con-
+nected subgraphs randomly extracted from TG and NA. SPQF is the na¨ıve extension
+of Samet et al. [2008], which has the space complexity of O(n2.5) shown in Section 5.1.
+BK is the distance oracle proposed by Bernstein and Karger [2009], which we modiﬁed
+to be able to answer path queries.
+
+Since we are using the same quadtree as in Samet et al. [2008], and they share the
+same complexity, we ﬁrst show the space cost by computing the average number of
+alternative shortest path quadtrees of each iSPQF (or SPQF) for various sizes of road
+networks. Figure 11(a) and Figure 11(b) show the average number of quadtrees that
+are constructed for road networks of different sizes for both SPQF and iSPQF in TG
+and NA respectively. While the average number of quadtrees increases dramatically
+for SPQF, which the number of quadtrees have already reached 100 with extremely
+small road network (i.e., 100 vertices), it can be observed that once the road network
+has a reasonably large number of vertices (i.e., 5000 vertices), the average number of
+quadtrees required for each iSPQF is a little above 40, and does not grow as the size
+of the road network grows. This can be observed in Figure 11(b), where all spatial
+networks have more than 5000 vertices. The situation, where the average number
+of quadtrees grows with the size of the road networks with size smaller than 5000
+vertices, is because the road networks are too small, and hence the number of quadtree
+is bounded by the number of levels in each shortest path tree. As the size of the road
+network grows larger (e.g., more than 5000 vertices), the number of levels in each
+shortest path tree increases, but the bound shown in Lemma 8 does not. Hence the
+maximum number of quadtrees in bounded by the bound shown in Lemma 8, which
+
+ACM Transactions on Database Systems, Vol. 37, No. 4, Article 29, Publication date: December 2012.
+
+29:28
+
+K. Xie et al.
+
+Fig. 12. Total number of Morton blocks.
+
+Fig. 13. Space requirements.
+
+is independent of the size of the road network. The average number of quadtrees for
+each iSPQF is constant for large road networks and is greatly smaller than the average
+number of quadtrees for each forest with SPQF.
+
+Figure 12(a) and 12(b) show the total number of Morton blocks required for all
+iSPQFs (SPQFs) in different sizes of road networks of TG and NA respectively. Morton
+blocks are the rectangular blocks in quadtrees. It can be easily represented by an
+integer termed Morton code by bit-interleaving the coordinate values of lower-left
+corner of the block. Using the number of Morton blocks to measure the size of quadtree
+is widely used [Samet 2005; Samet et al. 2008; Sankaranarayanan et al. 2005, 2009].
+As shown in the ﬁgure, iSPQF consumes a lot less space than SPQF. We have also
+drawn the trend lines of both SPQF and iSPQF to verify the scalability of SQPF and
+iSPQF. In Figure 12(a), iSPQF trend is drawn using f (x) = 45x1.5, and SPQF is drawn
+using f (x) = 4x2.5. In Figure 12(a), the iSPQF trend is also drawn using f (x) = 45x1.5.
+The space study of SPQF for NA is not conducted because SPQF simply consumes
+too much space. As shown in the ﬁgures, the total number of Morton blocks for all
+quadtrees with iSQPF is c1n1.5, and for SPQF is c2n2.5, where c1 and c2 are constants
+(i.e., 45 and 4 respectively). This validates Theorem 4.
+
+Figure 13(a) and 13(b) show the sizes of iSPQF and BK for spatial networks of
+different sizes in TG and NA respectively. As shown in the ﬁgure, the size of iSPQF
+grows with the spatial network in the same fashion as the number of Morton blocks.
+The size required for BK is aways more than iSPQF and has a c3n2 log n growth rate
+w.r.t. the size of the spatial network (where c3 = 0.00012).
+
+ACM Transactions on Database Systems, Vol. 37, No. 4, Article 29, Publication date: December 2012.
+
+Finding Alternative Shortest Paths in Spatial Networks
+
+29:29
+
+Fig. 14. Structure of spatial networks.
+
+8.3. Structure of Spatial Networks
+From our theoretical analysis, it can be seen that the number of trees in each iSPQF
+is independent of the size of the spatial network but dependent on the structure of the
+spatial network (γ ), in particular the variation of edge weights (i.e., dU
+) and the ratio
+dL
+between weight of a shortest path and its detour (i.e., δU
+δL
+
+).
+
+We ﬁrst look at the ratio of edge weights dU
+dL
+
+. It ﬁrst appears that the most spatial
+networks can have extremely low dL and very large dU, and thus in the worst case
+dU
+could be an extremely large value. However by looking at the weight distributions
+dL
+in all four spatial networks in Figure 14(a). It can be seen that the weights of most
+edges are actually in a narrow band as shown in Figure 14(a). For detour ratios, we
+can see from Figure 14(b), most pairs of vertices share very similar ratio between its
+shortest path and its detour. This shows that although the gap between both ratio of
+shortest path and its detour and the ratio of edge weight is very large, most of them are
+clustered in a very narrow band. Both road networks possess very similar structure,
+which most edges contain similar weights and most paths have similar detour ratios
+with only a few exceptions.
+
+8.4. iSPQF Construction Time
+In this section, we examine the construction time of iSPQF. The experiments are con-
+ducted by constructing iSPQF for various sizes of road networks, which are connected
+subgraphs randomly extracted from NA. We have implemented a parallel version of
+Algorithm 1, and the algorithm runs on a blade server with 160 dual core CPUs and
+16 GB memory running Hadoop.
+
+The experimental results are shown in Figure 15. Since we need to run many mul-
+tiple single source shortest path algorithms for each vertex in the spatial network, the
+oracle construction time is considerable. To compute the iSPQF for the entire NA spa-
+tial network with 175812 vertices, the construction takes nearly 50 hours. However,
+the main idea of this precomputation-based approach is to do the necessary computa-
+tion in advance, such that queries can be answered instantly online. Since this process
+
+ACM Transactions on Database Systems, Vol. 37, No. 4, Article 29, Publication date: December 2012.
+
+29:30
+
+K. Xie et al.
+
+Fig. 15.
+
+iSPQF construction time.
+
+is ofﬂine, once iSPQF is constructed, it is not expected to change in a long time, we
+believe the construction time is not vital.
+
+9. CONCLUSION
+In this article, we have studied the problem of ﬁnding alternative shortest paths which
+avoid unwanted vertices or edges in spatial networks. As Dijkstra’s algorithm based
+approach visits too many vertices, which is unsuitable for given complex analyti-
+cal tasks. Our solution naturally extends a precomputation based approach [Samet
+et al. 2008] for answering normal shortest path queries, which uses one shortest path
+quadtree per vertex. Instead of one shortest path quadtree per vertex, we propose us-
+ing multiple quadtrees as a forest (SPQF). Our approach (iSPQF) reduces the number
+of quadtrees required for each vertex from n to min(γ , L). Note that L is the maximum
+number of levels of the shortest path tree, which is in average √n, and γ is a value
+independent of the size of the spatial network. The space complexity is reduced from
+O(n4) (or state of the art O(n2 log n) [Bernstein and Karger 2009]) to O(n1.5). Both sin-
+gle pair and all pairs alternative shortest paths algorithms are proposed in the time
+cost of O(K), where K is the number of vertices in the returned result. This means that
+the query time is proportional to the size of the returned result rather than the size
+of the data set. Experiments on real road networks verify that the query processing
+is very efﬁcient, which only visits a small number of vertices. For large road networks
+the average number of quadtrees in each iSPQF is small and does not increase, which
+ensures scalable space consumption.
+
+REFERENCES
+BALL, M., GOLDEN, B., AND VOHRA, R. 1989. Finding the most vital arcs in a network. Oper. Resear. Lett.
+
+8, 2, 73–76.
+
+BERNSTEIN, A. AND KARGER, D. 2008. Improved distance sensitivity oracles via random sampling. In Pro-
+ceedings of the 19th Annual ACM-SIAM Symposium on Discrete Algorithms (SODA’08). SIAM, Philadel-
+phia, PA, 34–43.
+
+BERNSTEIN, A. AND KARGER, D. 2009. A nearly optimal oracle for avoiding failed vertices and edges. In
+Proceedings of the 41st Annual ACM Symposium on Theory of Computing (STOC’09). ACM, New York,
+NY, 101–110.
+
+BRESENHAM, J. E. 1965. Algorithm for computer control of a digital plotter. IBM Syst. J. 4, 25–30.
+CHO, H.-J. AND CHUNG, C.-W. 2005. An efﬁcient and scalable approach to cnn queries in a road network.
+In Proceedings of the 31st International Conference on Very Large Data Bases (VLDB’05). VLDB Endow-
+ment, 865–876.
+
+ACM Transactions on Database Systems, Vol. 37, No. 4, Article 29, Publication date: December 2012.
+
+Finding Alternative Shortest Paths in Spatial Networks
+
+29:31
+
+CHOWDHURY, R. A. AND RAMACHANDRAN, V. 2002. Improved distance oracles for avoiding link-failure. In
+Proceedings of the 13th International Symposium on Algorithms and Computation (ISAAC’02). Springer,
+523–534.
+
+DEMETRESCU, C. AND ITALIANO, G. F. 2004. A new approach to dynamic all pairs shortest paths. J. ACM
+
+51, 968–992.
+
+DEMETRESCU, C., THORUP, M., CHOWDHURY, R. A., AND RAMACHANDRAN, V. 2008. Oracles for distances
+
+avoiding a failed node or link. SIAM J. Comput. 37, 1299–1318.
+
+DIJKSTRA, E. 1959. A note on two problems in connexion with graphs. Numerische mathematik 1, 1,
+
+269–271.
+
+DUAN, R. AND PETTIE, S. 2009. Dual-failure distance and connectivity oracles. In Proceedings of the 20th
+
+Annual ACM-SIAM Symposium on Discrete Algorithms (SODA’09). SIAM, Philadelphia, PA, 506–515.
+
+EMEK, Y., PELEG, D., AND RODITTY, L. 2008. A near-linear time algorithm for computing replacement
+paths in planar directed graphs. In Proceedings of the 19th Annual ACM-SIAM Symposium on Discrete
+Algorithms (SODA’08). SIAM, Philadelphia, PA, 428–435.
+
+FREDMAN, M. L. AND TARJAN, R. E. 1987. Fibonacci heaps and their uses in improved network optimiza-
+
+tion algorithms. J. ACM 34, 596–615.
+
+FRIGIONI, D., MARCHETTI-SPACCAMELA, A., AND NANNI, U. 1996. Fully dynamic output bounded single
+source shortest path problem. In Proceedings of the 7th Annual ACM-SIAM Symposium on Discrete
+Algorithms (SODA’96). SIAM, Philadelphia, PA, 212–221.
+
+FRIGIONI, D., MARCHETTI-SPACCAMELA, A., AND NANNI, U. 2000. Fully dynamic algorithms for main-
+
+taining shortest paths trees. J. Algorithms 34, 251–281.
+
+GOLDBERG, A. V. AND HARRELSON, C. 2005. Computing the shortest path: A search meets graph theory.
+In Proceedings of the 16th Annual ACM-SIAM Symposium on Discrete Algorithms (SODA’05). SIAM,
+Philadelphia, PA, 156–165.
+
+HERSHBERGER, J. AND SURI, S. 2001. Vickrey prices and shortest paths: What is an edge worth? In Pro-
+ceedings of the 42nd IEEE Symposium on Foundations of Computer Science (FOCS’01). IEEE, 252–259.
+HERSHBERGER, J., SURI, S., AND BHOSLE, A. 2007. On the difﬁculty of some shortest path problems. ACM
+
+Trans. Algorithms 3, 5, 1–15.
+
+JOHNSON, D. B. 1977. Efﬁcient algorithms for shortest paths in sparse networks. J. ACM 24, 1–13.
+JUNG, S. AND PRAMANIK, S. 2002. An efﬁcient path computation model for hierarchically structured topo-
+
+graphical road maps. IEEE Trans. Knowl. Data Engin. 14, 1029–1046.
+
+KING, V. 1999. Fully dynamic algorithms for maintaining all-pairs shortest paths and transitive closure in
+digraphs. In Proceedings of the 40th Annual Symposium on Foundations of Computer Science (FOCS’99).
+IEEE, 81–89.
+
+LI, F., CHENG, D., HADJIELEFTHERIOU, M., KOLLIOS, G., AND TENG, S.-H. 2005. On trip planning
+queries in spatial databases. In Advances in Spatial and Temporal Databases, C. Bauzer Medeiros, M.
+Egenhofer, and E. Bertino Eds., Lecture Notes in Computer Science, vol. 3633. Springer, 923–923.
+
+PAPADIAS, D., ZHANG, J., MAMOULIS, N., AND TAO, Y. 2003. Query processing in spatial network
+databases. In Proceedings of the 29th International Conference on Very Large Data Bases (VLDB’03).
+VLDB Endowment, 802–813.
+
+RODITTY, L. AND ZWICK, U. 2005. Replacement paths and k simple shortest paths in unweighted directed
+graphs. In Automata, Languages and Programming, L. Caires, G. Italiano, L. Monteiro, C. Palamidessi,
+and M. Yung Eds., Lecture Notes in Computer Science, vol. 3580. Springer, 249–260.
+
+SAMET, H. 2005. Foundations of Multidimensional and Metric Data Structures. Morgan Kaufmann
+
+Publishers Inc., San Francisco, CA.
+
+SAMET, H., SANKARANARAYANAN, J., AND ALBORZI, H. 2008. Scalable network distance browsing in
+spatial databases. In Proceedings of the ACM SIGMOD International Conference on Management of
+Data (SIGMOD’08). ACM, New York, NY, 43–54.
+
+SANKARANARAYANAN, J. AND SAMET, H. 2009. Distance oracles for spatial networks. In Proceedings of the
+
+IEEE International Conference on Data Engineering. IEEE, 652–663.
+
+SANKARANARAYANAN, J., ALBORZI, H., AND SAMET, H. 2005. Efﬁcient query processing on spatial
+networks. In Proceedings of the 13th Annual ACM International Workshop on Geographic Information
+Systems (GIS’05). ACM, New York, NY, 200–209.
+
+SANKARANARAYANAN, J., SAMET, H., AND ALBORZI, H. 2009. Path oracles for spatial networks. Proc.
+
+VLDB Endow. 2, 1210–1221.
+
+Received July 2011; revised January 2012, May 2012; accepted July 2012
+
+ACM Transactions on Database Systems, Vol. 37, No. 4, Article 29, Publication date: December 2012.
+
+

@@ -1,0 +1,231 @@
+Applying Aspect Mining Techniques
+to Understand an Existing Program
+
+Fernanda Campos Yadran Eterovic
+
+Pontiﬁcia Universidad Católica de Chile
+
+{mfcampos,yadran}@ing.puc.cl
+
+Abstract
+
+2. Aspect Mining
+
+Research in magnetic resonance imaging requires repro-
+gramming the software that controls the scanner -a difﬁcult
+task. We have successfully applied three aspect mining tech-
+niques to obtain information about several properties of this
+complex, non object oriented program.
+
+Categories and Subject Descriptors D.2.7 [Software]:
+SOFTWARE ENGINEERING—Distribution, Maintenance,
+and Enhancement
+
+Keywords Program understanding, Aspect Mining, Exe-
+cution relations, Event traces, Concept analysis, Random
+Walks.
+
+1.
+
+Introduction
+
+Program comprehension is a practical ﬁeld in software en-
+gineering concerned with understanding existing code for
+reuse, maintenance and refactoring. Research in magnetic
+resonance imaging (MRI), requires reprogramming the soft-
+ware that controls the scanner, which in turn requires identi-
+fying the functions and parameters that must be changed.
+
+Our focus is understanding the program used to control
+a Philips scanner; a large, complex, non object oriented,
+almost not modularized and poorly documented code. It
+contains over 300,000 lines of code written in GOAL-C, a
+special-purpose programming language. A typical execution
+trace obtained by executing a pulse sequence in the scanner
+may contain more than 30,000 function calls. Therefore,
+identifying the changes that have to be made, usually takes
+a very long time. We hypothesized that by applying aspect
+mining to the program we could obtain information about its
+properties (not necessarily it’s aspects), which could help us
+perform the changes required by MRI researchers
+
+Copyright is held by the author/owner(s).
+
+SPLASH’12, October 19–26, 2012, Tucson, Arizona, USA.
+ACM 978-1-4503-1563-0/12/10.
+
+81
+
+Aspect mining is a reverse engineering process, which con-
+sists in ﬁnding crosscutting concerns hidden in existing soft-
+ware. Techniques have been tested mainly on small scale ex-
+periments in object oriented languages. We are interested in
+the application of these techniques to real, non object ori-
+ented code, where they may help understand the program’s
+organization, behavior and important features.
+
+We chose three techniques, that give us different infor-
+mation about the program. Event traces ﬁnds recurring ex-
+ecution traces, indicating general execution patterns in the
+code. Formal concept analysis looks for those functions
+from the same module that are present in all traces, i.e., scat-
+tered code. It computes the list of functions only present in
+a certain trace, i.e., what functions are more related to a spe-
+ciﬁc trace type. Modiﬁed random walks identiﬁes the most
+popular and less signiﬁcant functions; it can also point out
+functions that crosscut the system. Since to obtain the cross-
+cutting concerns we need to compute the popularity and sig-
+niﬁcance of each function, this will also give us the list of
+most signiﬁcant functions.
+
+3. Applying diferent techniques
+
+To apply Event traces, we search for speciﬁc relations be-
+tween functions [1] in the traces. The outside before relation:
+for an execution of function a, function b is executed just be-
+fore a; the inside ﬁrst relation: for execution of function a,
+the ﬁrst function called inside it is function b; outside after
+and inside last relations, with the obvious meanings. Two
+properties are deﬁned over these relations, a relation is uni-
+form, if it exists always in the same composition and cross-
+cutting, if it occurs in more than one calling context in the
+trace. In the original paper execution relations that are both
+uniform and crosscutting are considered aspect candidates.
+For our purposes, these candidates show us information re-
+garding the order in which functions call each other.
+
+By applying this technique to different traces, we ob-
+tained a list of relations between functions. We see multiple
+repetitions of some functions in the relations, called from
+different modules, from at least 20 ﬁles, and from many
+other functions. This suggests the code is coupled.
+
+Multiple types of validations are found among the most
+common relations in all traces; with this technique we can
+obtain which functions are common to the system valida-
+tions, ie: functions called in various validation phases. We
+also found functions belonging to the scan simulation inter-
+face, called when a user selects a protocol page in the sim-
+ulator; for instance, MPIEX_softkey_screen masks enabled
+parameters during validation. Thus, given that the program
+consists of a parameter deﬁnition part (PDF) and a measure-
+ment part (MPF), this information shows which functions
+belong to the PDF part of the program: those concerned with
+the setup and validation of the parameters. What is interest-
+ing is that most relations found in most traces are from this
+part of the program. Only four relations were found which
+belong to the MPF.
+
+Formal concept analysis technique [2] consists in ob-
+taining a concept lattice from traces. The use case associ-
+ated with an execution trace is an object whose attributes
+are the functions in the trace. A concept is the object plus
+its attributes. Aspect candidates are obtained when different
+functions from the same module are executed for more than
+one concept or when a concept has functions from different
+modules (although this is not sufﬁcient to identify a cross-
+cutting concern).
+
+This technique gives us a list of functions that appear on
+all traces. This means each candidate function is executed
+at least once in each trace. The fact that it repeats in dif-
+ferent executions indicates scattered code, but also refers to
+functions that are part of the base of the program, like user
+interface or validation functions. We ﬁnd among the aspect
+candidates functions related to the speciﬁc absorption rate
+restrictions; this makes sense since it is a factor that should
+always be computed before a scan.
+
+Some common functions that execute scans may be con-
+sidered part of the core of these traces, since they perform the
+measurements necessary for obtaining the sequences (MPF).
+For example MPIMN_scan_exec is part of these candidates.
+If we take a closer look we see it is in charge of executing
+the PDF for the scan, after the "start scan" button is pressed
+and before the scan starts it calls certain initializations and
+sets up some parameters for the scan.
+
+We executed heart scan traces and brain scan traces, com-
+paring the results from applying the technique only to heart
+traces with those from applying it to brain traces, we obtain
+candidates that appear in one of the types of sequences and
+not in the other. This identiﬁes functions that are speciﬁc to
+certain procedure types.
+
+Modiﬁed random walks, is the application of a page
+rank algorithm to compute possible concerns by determin-
+ing which elements are more popular and signiﬁcant [3]. We
+modiﬁed the original technique by performing the calcula-
+tions over actual traces. Popularity is the number of times
+an element is visited from different elements. Signiﬁcance
+is the number of distinct elements an element visits. These
+
+ranks help us obtain potential crosscutting concerns in two
+ways. Homogeneous crosscutting: popularity is higher than
+signiﬁcance by a certain threshold. Other possible concerns
+are Heterogeneous crosscutting: elements with much higher
+signiﬁcance than popularity.
+
+Analyzing the results we found that some concerns are
+functions that are also concerns in previous techniques.
+Thus, these functions are not only crosscutting and uniform
+relations but they are also the most popular and least signif-
+icant functions. Only one concern is unique to each type of
+trace. For the heart scans, MPICOIL_get_app_sar_limit, a
+function that gets the maximum amount of speciﬁc absorp-
+tion rate allowed. For the brain scans, MPGGEO_m_matrix-
+_to_sg_matrix, a function that stores a matrix structure.
+
+All candidates for traces of a speciﬁc sequence type are
+the same, and even between different type of traces most of
+them are repeated. Since they don’t vary with the sequence,
+and since they are called multiple times, they can be consid-
+ered part of the application’s core. Because this technique
+requires the candidates to have low signiﬁcance, the results
+are very simple functions, much like getters and setters.
+
+4. Conclusions
+
+The application of all three techniques, combined with the
+scarce documentation available, allowed us to understand
+different properties of the program’s execution. Event traces
+reveals function call sequences found in all traces. Results
+from concept analysis gives us a list of the functions most
+likely to be related to general parts of the execution, such
+as parameter setup and validations. Finally random walks
+identiﬁes more general functions that are called for both
+types of traces.
+
+The combined application of several aspect mining tech-
+niques, based on dynamic analysis, can reveal important
+information about the execution of a complex program.
+Whether this information is related to actual aspects is not
+as important for us, as is understanding the code: relative ex-
+ecution order, function signiﬁcance and popularity, function
+roles and their relationship to speciﬁc sequence types.
+
+Overall the information obtained regarding the programs
+execution is very valuable to improve our understanding of
+the program. While as software engineers we interpret this
+information syntactically, an MRI researcher can infer at
+least part of the programs functionalities.
+
+References
+
+[1] S. Breu and J. Krinke. Aspect mining using event traces.
+In Proc. of the 19th IEEE int. conf. on Automated software
+engineering, 2004. ISBN 0-7695-2131-2.
+
+[2] P. Tonella and M. Ceccato. Aspect mining through the formal
+In Proc. 11th Working
+
+concept analysis of execution traces.
+Conf. on Reverse Engineering, 2004. ISBN 0-7695-2243-2.
+
+[3] C. Zhang and H.-A. Jacobsen. Efﬁciently mining crosscutting
+
+concerns through random walks, 2007.
+
+82
+
+

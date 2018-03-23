@@ -1,0 +1,2563 @@
+An Integrated Pseudo-Associativity and Relaxed-Order
+Approach to Hardware Transactional Memory
+
+ZHICHAO YAN, Huazhong University of Science and Technology
+HONG JIANG, University of Nebraska - Lincoln
+YUJUAN TAN, Chongqing University
+DAN FENG, Huazhong University of Science and Technology
+
+Our experimental study and analysis reveal that the bottlenecks of existing hardware transactional memory
+systems are largely rooted in the extra data movements in version management and in the inefﬁcient schedul-
+ing of conﬂicting transactions in conﬂict management, particularly in the presence of high-contention and
+coarse-grained applications. In order to address this problem, we propose an integrated Pseudo-Associativity
+and Relaxed-Order approach to hardware Transactional Memory, called PARO-TM. It exploits the extra
+pseudo-associative space in the data cache to hold the new value of each transactional modiﬁcation, and
+maintains the mappings between the old and new versions via an implicit pseudo-associative hash algo-
+rithm (i.e., by inverting the speciﬁc bit of the SET index). PARO-TM can branch out the speculative version
+from the old version upon each transactional modiﬁcation on demand without a dedicated hardware com-
+ponent to hold the uncommitted data. This means that it is able to automatically access the proper version
+upon the transaction’s commit or abort. Moreover, PARO-TM augments multi-version support in a chained
+directory to schedule conﬂicting transactions in a relaxed-order manner to further reduce their overheads.
+We compare PARO-TM with the state-of-the-art LogTM-SE, TCC, DynTM, and SUV-TM systems and ﬁnd
+that PARO-TM consistently outperforms these four representative HTMs. This performance advantage of
+PARO-TM is far more pronounced under the high-contention and coarse-grained applications in the STAMP
+benchmark suite, for which PARO-TM is motivated and designed.
+
+Categories and Subject Descriptors: D.1.3 [Programming Techniques]: Concurrent Programming; C.1.2
+[Multiple Data Stream Architectures (Multiprocessors)]: Parallel processors
+
+General Terms: Design, Performance
+
+Additional Key Words and Phrases: chip multi-processor, hardware transactional memory, pseudo-associative
+cache, chained directory
+
+ACM Reference Format:
+Yan, Z., Jiang, H., Tan, Y., and Feng, D. 2013. An integrated pseudo-associativity and relaxed-order approach
+to hardware transactional memory. ACM Trans. Architec. Code Optim. 9, 4, Article 42 (January 2013), 26
+pages.
+DOI = 10.1145/2400682.2400701 http://doi.acm.org/10.1145/2400682.2400701
+
+This work was
+supported by the National Basic Research 973 Program of China under
+Grant no. 2011CB302301, Central Universities Fundamental Research Foundation under grant no.
+0903005203206, National Natural Science Foundation of China (NSFC) under grant no. 61025008, the
+US NSF under grants IIS-0916859, CCF-0937993, CNS-1016609, and CNS-1116606.
+Authors’ addresses: Z. Yan, Wuhan National Lab for Optoelectronics, School of Computer Science and Tech-
+nology, Huazhong University of Science and Technology, China; email: zhichao-yan@mail.hust.edu.cn; H.
+Jiang, Department of Computer Science and Engineering, University of Nebraska-Lincoln; Y. Tan (corre-
+sponding author), College of Computer Science, Chongqing University, China; email: tanyujuan@gmail.com;
+D. Feng (corresponding author), Wuhan National Lab for Optoelectronics, School of Computer Science and
+Technology, Huazhong University of Science and Technology, China; email: dfeng@mail.hust.edu.en.
+Permission to make digital or hard copies of part or all of this work for personal or classroom use is granted
+without fee provided that copies are not made or distributed for proﬁt or commercial advantage and that
+copies show this notice on the ﬁrst page or initial screen of a display along with the full citation. Copyrights for
+components of this work owned by others than ACM must be honored. Abstracting with credit is permitted.
+To copy otherwise, to republish, to post on servers, to redistribute to lists, or to use any component of this
+work in other works requires prior speciﬁc permission and/or a fee. Permissions may be requested from
+Publications Dept., ACM, Inc., 2 Penn Plaza, Suite 701, New York, NY 10121-0701 USA, fax +1 (212)
+869-0481, or permissions@acm.org.
+c(cid:2) 2013 ACM 1544-3566/2013/01-ART42 $15.00
+DOI 10.1145/2400682.2400701 http://doi.acm.org/10.1145/2400682.2400701
+
+42
+
+ACM Transactions on Architecture and Code Optimization, Vol. 9, No. 4, Article 42, Publication date: January 2013.
+
+42:2
+
+Z. Yan et al.
+
+1. INTRODUCTION
+With the emerging and strong trend of many-core computing systems, scaling the
+software performance at the pace of the New Moore’s Law becomes an open and ur-
+gent problem, which means that software programmers must carefully design multi-
+threaded programs competing for the shared data in a shared-memory environment.
+As a result, providing a simple interface of parallel programming to ease the burden
+on programmers becomes critically important and has attracted a great deal of atten-
+tion from both the industry and academia. Transactional Memory (TM) has emerged
+as one of the most promising solutions that can deliver a signiﬁcant parallel perfor-
+mance boost comparable to that based on the traditional hand-crafted ﬁne-grained
+locks [Herlihy and Moss 1993]; [Hammond et al. 2004]; [Moore et al. 2006]; [Rossbach
+et al. 2010]. Recently, several leading IT companies, such as Azul [Click 2009], Sun Mi-
+crosystems [Chaudhry 2008], IBM [Haring 2011], and Intel [2012], have planted TM in
+their processor chips, which represents a huge boost to TM in its real-world applicabil-
+ity. In particular, the recent Intel announcement [Intel 2012] to integrate transactional
+synchronization extensions in its Haswell processor and propose the transactional lan-
+guage constructs for C++ standard speciﬁcation [Adl-Tabatabai et al. 2011] may have
+the potential of ushering in a new era of transactional memory.
+
+TMs essentially wrap their computations as transactions that are executed atom-
+ically and in isolation, which enhances the programming abstraction. Any memory
+modiﬁcations during a transaction cannot be accepted until the transaction commits.
+When two or more memory accesses are issued to the same data, of which at least
+one access comes from a transaction and one of them is a write operation, a transac-
+tional conﬂict occurs. TM systems must detect and resolve this conﬂict to guarantee
+the consistency of the shared data. Meanwhile, TMs also must manage the old and
+new versions of the shared data upon each transactional write operation for abort
+and commit, respectively. As a result, two important design issues, conﬂict manage-
+ment and version management, must be carefully considered to obtain a cost-effective
+design [Harris et al. 2010].
+
+Speciﬁcally, conﬂict management has two main tasks, to detect transactional con-
+ﬂicts during the execution time and to provide a schedule to avoid inconsistency caused
+by transactional conﬂicts. Current implementations of conﬂict management are usu-
+ally decoupled from version management schemes, suffer from various characteristics
+of applications, and do not exploit the potentials of the interplay between conﬂict man-
+agement and version management.
+
+Version management also has two main tasks that organize transactional modiﬁca-
+tions alongside the old values until the end of a transaction and merge two versions
+upon each transactional modiﬁcation with a consistent memory. Current implemen-
+tations of version management either require a dedicated buffer/cache to hold the
+uncommitted data or organize different logs in different levels of the memory hier-
+archy. While the latter approach suffers from the serial accesses to the shared data
+and leads to an extended transaction time that can hurt thread-level parallelism, the
+former relies on a costly extra hardware component considering that it is exclusively
+used for transactional applications.
+
+Along with conﬂict and version managements, TM systems incur static and dynamic
+overheads. The static overhead results from taking a checkpoint at the beginning of a
+transaction, detecting the transactional conﬂicts at runtime, maintaining an undo or
+redo log to hold the uncommitted modiﬁcations, and merging or discarding the transac-
+tional computation on commit or abort. The dynamic overhead, on the other hand, stems
+from stalling the conﬂicted transactions and wasted work spent on the aborted trans-
+actions. Recent studies [Bobba et al. 2007] show that the interplay between the static
+
+ACM Transactions on Architecture and Code Optimization, Vol. 9, No. 4, Article 42, Publication date: January 2013.
+
+An Integrated Pseudo-Associativity Approach to Hardware Transactional Memory
+
+42:3
+
+Transactional Nested 
+
+Level Register
+
+1
+
+MSB
+
+LSB
+
+set index
+
+Pseudo
+
+Associative
+
+Hash
+
+Rehash the address 
+
+written in a 
+
+transaction by flip 
+the most significant
+bit of the set index 
+
+in this case.
+
+Tag
+
+Set Index
+
+.
+.
+.
+
+.
+.
+.
+
+Fig. 1. The mechanism of pseudo-associative and relaxed-order approach.
+
+and dynamic overheads can signiﬁcantly constrain transactional applications’ thread-
+level parallelism, especially under the high-contention and coarse-grained workloads.
+Speciﬁcally, we observe that the bottlenecks of the existing hardware transactional
+memory (HTM) systems are mainly rooted in the extra data movements in version
+management and in the inefﬁcient scheduling of conﬂicting transactions in conﬂict
+management, an urgent and open problem that this article is motivated to address.
+
+More speciﬁcally, we propose in this article an integrated pseudo-associativity and
+relaxed-order approach to HTM, called PARO-TM, as shown in Figure 1, and more de-
+tails are presented in Figure 3. PARO-TM dynamically associates a pseudo-associative
+slot in the data cache as the new space to store the transactional modiﬁcation through
+a pseudo-associative hash module. Moreover, it utilizes the information in a chained
+directory to support relaxed conﬂict management. As a result, PARO-TM can elimi-
+nate the extra memory-access latency associated with a conventional transaction due
+to either commit or abort and expose and exploit more thread-level parallelism in the
+conﬂicted transactions.
+
+The rest of this article is organized as follows. We present the background and some
+experimental and analytical observations to motivate our study in Section 2. Section 3
+describes the architecture of PARO-TM and presents its design and implementation
+details. Section 4 evaluates PARO-TM by comparing it with several state-of-the-art
+schemes. Finally we conclude the article in Section 5.
+
+2. BACKGROUND AND MOTIVATION
+In this section, we present the necessary background information on the state-of-the-
+art HTMs, with an emphasis on performance issues associated with version and conﬂict
+managements, along with some insightful observations to motivate our research.
+
+2.1. Background
+Since Herlihy [Herlihy and Moss 1993] introduced the notion of TM as an alternative
+to traditional synchronization techniques, TM has attracted a great deal of attention
+in the computer architecture, compiler, programming languages, and operating sys-
+tems research communities, resulting in the design and implementation of various
+TM systems. These systems, including hardware TMs, software TMs, and hybrid TMs,
+aim to ease the difﬁculty of parallel programming while promoting performance of
+
+ACM Transactions on Architecture and Code Optimization, Vol. 9, No. 4, Article 42, Publication date: January 2013.
+
+42:4
+
+Z. Yan et al.
+
+multithreaded applications in the many-core era [Harris et al. 2010]; [Guerraoui and
+Kapalka 2010].
+
+While TM’s advantages over the traditional lock mechanism on managing the race
+blocks have been studied and demonstrated by a large body of research [Rajwar and
+Goodman 2002]; [Hammond et al. 2004]; [Moore et al. 2006], its scalability faces an
+increasing challenge brought on by the emerging high-contention and coarse-grained
+applications [Ansari et al. 2008]; [Minh et al. 2008]; [Kestor et al. 2009]. For example,
+the geometric mean speedup of the STAMP benchmark suite on a state-of-the-art
+HTM is roughly 3.6 when executed in a 16-core conﬁguration [Blake et al. 2009].
+It may be partly due to the fact that the STAMP benchmark suite is designed for
+future TM applications that spend most time on high-contention and coarse-grained
+transactions without handcrafted optimizations on their irregular parallel structures.
+It indicates that there is an ample room for improvement if the TM technology is
+to be considered a viable support for parallel programming in the future. Recently,
+general-purpose microprocessor vendors such as IBM and Intel have integrated limited
+transactional memory support in their products. In order for the HTM technology to
+become widely accepted in the many-core era, we must ﬁnd effective ways to optimize
+TM’s architecture.
+
+2.2. Observation
+TM systems organize possible race blocks in transactions and hold the old values and
+new uncommitted values associated with a transaction until it ends. Existing version
+management schemes explicitly organize these values in either an undo or redo log,
+where the lazy schemes [Hammond et al. 2004; Shriraman et al. 2007, 2008; [Minh
+et al. 2007]; [Dice et al. 2009] buffer the new values in a redo log and the eager
+schemes [Ananian et al. 2005]; [Moore et al. 2006]; [Yen et al. 2007]; [Blundell et al.
+2007]; [Bobba et al. 2008]; [Lupon et al. 2009]] book the old values in an undo log. This
+is very similar to the prior works on version management for thread-level speculation
+to use their tricks to differentiate multiple speculative copies of the same cache block in
+the associative set of a cache [Gopal et al. 1998]; [Garzar ´an et al. 2003]; [Colohan et al.
+2006]. Depending on the types of logs, either the lazy schemes redo the transactional
+updates on commit, or the eager schemes undo the transactional updates on abort. Once
+the transactional data overﬂows from the data cache, HTMs need to allocate pages to
+hold this overﬂowed data and usually deallocate the pages at the end of the transaction
+after merging the proper version of the data to the memory [Ananian et al. 2005];
+[Chung et al. 2006b]; [Chuang et al. 2006]. Due to the different methods employed by
+version management, both the lazy and eager schemes have their own pros and cons.
+A lazy scheme combines updating the transactional modiﬁcations in its buffer with
+transactional write operations on the same data path, similar to a write-back opera-
+tion in the cache coherence protocol. This approach avoids the extra per-store access
+penalty to store the new value to the redo log, a penalty that is required of an eager
+scheme as it stores the old value to the undo log before in-place update. A lazy scheme
+will redo the transactional modiﬁcations, on commit, in the write buffer, which may
+slow down the commit operation especially in a transaction with a lot of transactional
+modiﬁcations. Moreover, if the transactional data overﬂows from the write buffer, more
+data movements will be needed, thus widening the isolation windows of the shared
+variables and hurting the performance. As coarse-grained and high-contention appli-
+cations are poised to dominate future transactional applications, a small buffer will
+not be able to handle such coarse transactions with a lot of modiﬁcations. On the other
+hand, an eager scheme will undo all transactional modiﬁcations, on abort, in the undo
+log in a ﬁrst-in-last-out order to restore to the state before the transaction execution,
+which makes the expected (i.e., more common) commit operations fast but slows down
+
+ACM Transactions on Architecture and Code Optimization, Vol. 9, No. 4, Article 42, Publication date: January 2013.
+
+An Integrated Pseudo-Associativity Approach to Hardware Transactional Memory
+
+42:5
+
+ 
+
+i
+
+e
+m
+T
+n
+o
+i
+t
+u
+c
+e
+x
+E
+
+Begin Transaction 1
+
+Begin Transaction 2
+
+Begin Transaction 3
+
+store 100, X;
+
+store 200, X;
+
+load X;
+
+Commit Transaction 1
+
+memory
+
+Commit Transaction 2
+
+Commit Transaction 3
+
+chained directory
+
+X
+
+80
+
+X
+
+100
+
+X
+
+200
+
+X
+
+80 | 200 | 100
+
+Relaxed order scheme will select a proper version and maintain 
+
+their dependence relationships to guarantee the correctness
+
+Fig. 2. An example of three conﬂicting transactions.
+
+the abort operations that may conﬂict with other accesses to the shared data during
+its restore process. In any case, there exists a worst-case path in which data must be
+transferred from the undo/redo log at the end of the transaction, thus widening the
+exclusive window either on commit or abort. To make things worse, this case will likely
+induce more conﬂicted transactions under the high-contention and coarse-grained ap-
+plications, possibly resulting in a vicious cycle.
+
+Apart from the extra data movements in the version management schemes, the
+scheduling of the conﬂicted transactions can signiﬁcantly affect the performance of
+HTMs. An inefﬁcient scheduling, for example, will waste a great amount of computa-
+tion by either aborting conﬂicted transactions that can actually commit successfully
+or continually executing conﬂicted transactions that are eventually aborted due to
+the cycle-dependent transactional conﬂicts. Existing methods [Carlstrom et al. 2007]
+usually rely on a two-phase locking algorithm to provide a fast response to the trans-
+actional conﬂicts but can easily limit the thread-level parallelism because they force
+the executions of many conﬂicted transactions to be serialized.
+
+For example, Figure 2 shows 3 different transactions (TXs) concurrently accessing
+the shared data X. If a TM detects conﬂict eagerly with a requester-win policy, TX 2 will
+abort TX 1 and TX 3 will abort TX 2, while TX 1 will stall TX 2 and TX 3 with a requestor-
+stall policy. Meanwhile, if a TM detects conﬂict lazily, TX 3 can commit successfully
+and TX 2 will abort TX 1. The existing two-phase locking algorithms cannot execute
+without aborting or stalling the access operations. On the other hand, in a relaxed-
+order scheme, like the one in our proposed PARO-TM, conﬂicted transactions can
+continuously execute, provided that it is done efﬁciently and with minimum overhead.
+
+2.3. Analysis
+In pursuit of full exploitation of thread-level parallelism, programmers try to overlap as
+many transactions as possible, resulting in high-contention and coarse-grained appli-
+cations. In light of HTM’s static and dynamic overheads discussed in Section 1, the in-
+terplay between these two kinds of overheads will become more signiﬁcant under these
+high-contention and coarse-grained applications. There is a rich body of research on
+minimizing these overheads. For example, while TCC, UTM, VTM, LogTM, PTM, XTM,
+RTM, Scalable-TCC, ObjectTM, FasTM, Reconﬁgurable-TM, SEL-TM and SUV-TM
+[Hammond et al. 2004]; [Ananian et al. 2005]; [Rajwar et al. 2005]; [Moore et al. 2006];
+[Chuang et al. 2006]; [Chung et al. 2006b]; [Shriraman et al. 2007]; [Chaﬁ et al. 2007];
+[Khan et al. 2008]; [Lupon et al. 2008] [Lupon et al. 2009]; [Armejach et al. 2011]; [Zhao
+et al. 2012]; [Yan et al. 2012] focus on reducing static overheads on version management,
+OneTM, DATM, SBCRHTM, ProactiveTM, EasyTM, DynTM, SON-TM, BFGTS-TM,
+
+ACM Transactions on Architecture and Code Optimization, Vol. 9, No. 4, Article 42, Publication date: January 2013.
+
+42:6
+
+Z. Yan et al.
+
+and ZEBRA [Blundell et al. 2007]; [Ramadan et al. 2008]; [Titos et al. 2009]; [Blake et al.
+2009]; [Tomic et al. 2009]; [Lupon et al. 2010]; [Aydonat and Abdelrahman 2010]; [Blake
+et al. 2011]; [Titos-Gil et al. 2011] propose different TM architectures to alleviate the
+dynamic overheads incurred by transactional conﬂicts. However, most of these methods
+decouple conﬂict management from version management and do not exploit opportuni-
+ties availed by the interplay between conﬂict management and version management.
+We believe that it is important to reduce both dynamic and static overheads to
+fully exploit performance beneﬁts. In general, the reduction of dynamic overheads is
+correlated to that of static overheads. Our preliminary analysis on transactional ap-
+plications reveals that each accessed variable owns an exclusive window during the
+execution, which induces a conﬂict with another access to the same variable if either
+access performs a store operation. This exclusive window includes two important time
+components involving data movements, namely, the time spent on maintaining trans-
+actional versions and the time spent on either restoring the old versions on abort or
+merging the new versions to memory on commit. Thus, under the high-contention and
+coarse-grained applications, more concurrent accesses lead to a lengthened exclusive
+window for each shared data due to data movements and cause unnecessary conﬂicts,
+which in turn increase the dynamic conﬂicts and result in more stalled or aborted
+transactions. Our integrated pseudo-associativity and relaxed-order approach to HTM
+is an attempt to effectively couple version and conﬂict managements to reduce data
+movements in each transaction and exploit the potentials in conﬂicted transactions.
+
+From the preceding analysis, we conclude that: (1) existing HTMs face a serious
+scalability challenge especially under the high-contention and coarse-grained applica-
+tions; (2) reducing data movements in version management not only reduces its static
+overheads but also reduces the chance for transactions to conﬂict; and (3) to further
+reduce the dynamic overheads, a less strict concurrency control algorithm is required
+to allow more transactions to run concurrently.
+
+3. DESIGN AND IMPLEMENTATION
+In this section, we ﬁrst present the PARO-TM architecture, and then elaborate on its
+design and implementation from both the hardware and software viewpoints.
+
+3.1. The PARO-TM Architecture
+PARO-TM couples a pseudo-associative version management scheme with an eager
+conﬂict detection scheme. The latter is supported by a modiﬁed relaxed-ordering
+conﬂict management scheme instead of the policy that stalls the requester until a cycle
+is detected. Figure 3 depicts a complete system stack with the runtime environment,
+transactional library, and hardware components that support PARO-TM functions.
+While the runtime environment collects the dynamic information to schedule the
+transactions, the transactional library provides the interface for the basic transactional
+commands, and the hardware is added to the chip multiprocessor to provide hardware
+support. We highlight the integration of our pseudo-associative relaxed-order scheme
+into the existing LogTM-SE [Yen et al. 2007] HTM framework to realize PARO-TM.
+
+PARO-TM’s design goal is to maintain both old and new versions of transactional
+modiﬁcations in the same level of memory hierarchy to avoid extra cross-level data
+movements and schedule the conﬂicting transactions in a relaxed order. It achieves
+this goal by reusing the Bloom ﬁlter signature [Ceze et al. 2006] to detect transactional
+conﬂicts, holding different versions of the shared data in conﬂict in a cache set
+and its pseudo-associative counterpart, and employing our relaxed-order scheduling
+to resolve the transactional conﬂicts. Speciﬁcally, it uses a chained directory to
+allow multiple transactions to modify the shared data, hold multiple versions, along
+
+ACM Transactions on Architecture and Code Optimization, Vol. 9, No. 4, Article 42, Publication date: January 2013.
+
+An Integrated Pseudo-Associativity Approach to Hardware Transactional Memory
+
+42:7
+
+Transactional Memory Applications
+
+Compiler
+
+Run-time Environment
+
+Operating System
+
+Transactional Memory Library
+
+Register Checking Points
+
+Register Checking Points
+
+Register Checking Points
+
+Processor
+
+Processor
+Core
+
+Processor
+Core
+
+Core
+
+The L1 Data
+
+The L1 Data
+Cache
+The L1 Data
+Cache
+with
+with
+Pseudo-
+
+Cache
+with
+Pseudo-
+Associativity
+
+Pseudo-
+Associativity
+Support
+
+Associativity
+Support
+
+Support
+
+The L1
+
+The L1 
+Instruction
+
+The L1
+Instruction
+Cache
+
+Instruction
+Cache
+
+R&W Signatures and Vectors
+
+Cache
+R&W Signatures and Vectors
+for Conflict-Management
+
+R&W Signatures and Vectors
+for Conflict-Management 
+
+for Conflict-Management
+
+Interconnect
+
+Shared L2 Data Cache
+
+Directory
+
+CMP Processor with HTM Support
+
+Access 0x800040
+
+Multi-versions Relaxed Order
+
+Pseudo
+
+Associativity
+
+Pseudo Associative
+
+Level Register
+
+1
+
+MSB
+
+LSB
+
+set index
+
+Pseudo
+
+Associative
+
+Hash
+
+.
+.
+.
+
+.
+.
+.
+
+Rehash the 
+
+address written 
+in a transaction
+by flip the most 
+significant bit 
+of the set index
+
+in this case.
+
+Tag
+
+Set Index
+
+address
+
+cache
+
+Chained directory
+maintains multi-
+
+versions of the shared 
+
+data as a reorder
+
+buffer with the guide
+
+information of the
+
+runtime environment
+
+ 
+
+c
+h
+a
+i
+n
+e
+d
+d
+i
+r
+e
+c
+t
+o
+r
+y
+
+m
+e
+m
+o
+r
+y
+
+Overflow?
+
+Trans 1
+
+Trans 2
+
+...
+
+Trans N
+
+Runtime environment collects transaction s remained computation,
+
+,
+
+data contention to reorder the conflicted transactions
+
+schedule
+
+feedback
+
+Track the dependence relationship of multi-versions
+
+X value
+
+pointer
+
+X value
+
+pointer
+
+...
+
+X value
+
+pointer
+
+Yes
+
+chained directory behaves as a reorder buffer with the guide
+
+information of the runtime environment
+
+No
+
+Pseudo
+
+Associative Pool
+
+TLB
+Virtual Page
+
+Physical Page
+
+Number
+
+0x400
+0x7fe41
+
+Number
+
+0x600
+0x801
+
+State
+
+valid
+valid
+
+Virtual Index, Physical Tagged L1 Data Cache
+
+Set
+
+Tag
+
+State
+
+0b0000001
+
+0x600
+
+TO
+
+Data
+
+XXX
+
+0b1000001
+
+0x600
+
+TN
+
+YYY
+
+v
+e
+c
+t
+o
+r
+
+page
+
+Overflowed Mapping Table
+
+page number
+
+selector vector
+
+0x7fe41
+
+0x2
+
+Fig. 3. Architectural overview of PARO-TM.
+
+ACM Transactions on Architecture and Code Optimization, Vol. 9, No. 4, Article 42, Publication date: January 2013.
+
+42:8
+
+Z. Yan et al.
+
+M
+M
+
+E
+E
+
+S
+S
+
+I
+I
+
+T
+O
+
+T
+N
+
+T
+R
+
+Main State Transitions
+
+Current State
+
+Event
+
+Next State
+
+M,E,S,I
+M,E,S,I
+
+M,E
+TR
+TR
+TO
+TO
+TN
+TN
+
+PseudoBranch
+
+TLoad
+TStore
+TStore
+Abort
+Abort
+
+Commit
+
+Abort
+
+Commit
+
+Main Messages 
+
+TN
+TR
+TO
+TO
+
+I
+M
+I
+I
+M
+
+Message
+
+Description
+
+PseudoBranch
+
+Branch a pseudo associative slot
+
+TLoad
+TStore
+TGetS
+TGetX
+Load
+Store
+GetS
+GetX
+
+Commit
+
+Abort
+
+Transactional load
+Transactional store
+
+Transactional read request
+Transactional write request
+
+Normal load
+Normal store
+Read request
+Write request
+
+Commit the transaction
+
+Abort the transaction
+
+Main States
+
+State Description
+
+This line is modified that is read-writable, forwardable and dirty
+
+This line is exclusive that is read-writable and clean
+
+This line is shared among different processes which is read-only
+
+Invalid means this line is in an uninitialized state
+
+This line is read by a load instruction in a transaction
+
+This line holds the old value for a transactional modification
+This line holds the new value for a transactional modification
+
+State
+
+M
+E
+S
+I
+
+TR
+TO
+TN
+
+Fig. 4. Main state-transition diagram of the PA-MESI Protocol.
+
+with their dependence relationships, to guarantee data consistency in its conﬂict
+management.
+
+3.2. Pseudo Associativity
+The pseudo-associative cache design in PARO-TM is inspired by the structure of the
+column-associative cache [Agarwal and Pudar 1993]; [Calder et al. 1996]; [Powell et al.
+2001] also known as pseudo-associative cache, that has the potential to provide more
+slots to handle the different versions in the transaction execution process. We modify
+the commonly used “MESI-CMP-Filter-Directory” cache coherence protocol in HTMs
+to handle the pseudo associativity (PA) in PARO-TM. This results in a PA-MESI-CMP-
+Filter-Directory (or PA-MESI for short) cache coherence protocol, which is integrated
+into the existing HTM framework.
+
+As illustrated in Figure 4, the PA-MESI protocol includes 7 stable states, M, E, S, I,
+TR, TO, and TN, whose deﬁnitions are listed in the lower part of the ﬁgure. To reduce
+cluttering and increase the ease of understanding for our scheme, we have to omit some
+transient transitions that are needed to cope with the possible race conditions. Like
+most other cache coherence protocols, there are far more states (along with even more
+
+ACM Transactions on Architecture and Code Optimization, Vol. 9, No. 4, Article 42, Publication date: January 2013.
+
+An Integrated Pseudo-Associativity Approach to Hardware Transactional Memory
+
+42:9
+
+transitions) than can be drawn within a ﬁgure in our PA-MESI protocol. In the state
+transition diagram of Figure 4, the 4 states on the left, M, E, S and I, are nontransac-
+tional and the 3 states on the right, TR, TO, and TN, are transactional. PARO-TM uses
+the “PseudoBranch” message to allocate the pseudo-associative slot and converts the
+original cache line in the M, E, S, or I state to the TN state on demand to hold the uncom-
+mitted new value, where the cache line in TN is then either transitioned to M on commit
+or to I on abort. When a nontransactional cache line (i.e., in the M, E, S, or I state) is
+read during the transaction, it is transitioned to TR that is in turn either transitioned
+to S on commit or to I on abort. The state is transitioned to TO with a transactional
+write to a cache line in the M, E, or TR state, where the TO state is then either transi-
+tioned to I on commit or to M on abort. These transitions usually need some transient
+transitions to avoid the race conditions. In the worst case, a transition such as switch-
+ing from TO to I or a similar one needs up to 5 extra transitions. We have compared it
+with the traditional MESI protocol and veriﬁed that this latency does not impact the
+performance. PARO-TM also couples the conﬂict management with the PA-MESI pro-
+tocol with the aid of the Bloom ﬁlter signatures to detect the conﬂict. It then piggybacks
+the NACK messages to negotiate with the competing transactions to solve the conﬂict
+in a relaxed order, where a conﬂict occurs either when any write request from another
+processor is issued to a cache line in the M, E, S, TR, TO or TN state, or when any read
+request from another processor is issued to a cache line in the M, TO, or TN state.
+
+The basic function of the pseudo-associative algorithm is to invert the most
+signiﬁcant bit of the SET index as indicated in the right part of Figure 3. This basic
+function can sufﬁciently support ﬂattened nested transactions, in which it only needs
+to hold the old value of the outermost transaction and the new value of the current
+transaction. This mode works like the reconﬁgurable cache [Armejach et al. 2011] and
+SUV [Yan et al. 2012] but without changing the existing hardware structure to reduce
+the data movements. In order to expose and exploit more thread-level parallelism,
+we extend the basic function of the pseudo-associative algorithm to invert the Nth
+most signiﬁcant bit of the SET index to provide more slots than existing TCC with
+multi-tracking or associativity-based support [?]; [McDonald et al. 2006] to hold
+the uncommitted data in the nested transactions, where N is the Nth uncommitted
+versions of a shared data. Throughout this article, we assume the L1 data cache to be
+of 32KB in size and 4-way associative with 64 bytes per cache line. It contains 7 bits
+in the SET index so as to support up to 7 levels of nested transactions, a sufﬁcient
+depth of nested transactions for most transactional applications [Chung et al. 2006a].
+Moreover, extended pseudo associativity with more slots can hold the uncommitted
+data if suspended transactions are scheduled in a relaxed order. This process is
+handled by the pseudo-associative hash module that is shown in Figure 3.
+
+During execution, some lines may overﬂow from the small ﬁrst-level data cache.
+Bloom ﬁlter signatures are used to represent transactional read and write sets for
+conﬂict detection that does not require all lines to reside in the ﬁrst-level data cache.
+When transactional data overﬂows from the ﬁrst-level data cache, the overﬂowed trans-
+actional data will be collected in a reserved pool whose size can be adjusted on demand
+and are held for the duration of the whole application, rather than per transaction as in
+the existing HTM proposals, along with the mapping information, in the main memory.
+This method provides an opportunity for other transactions of the same application to
+reuse the mapping information. More details on implementation and operation of this
+approach will be introduced in the following paragraphs.
+
+3.3. Relaxed Ordering
+Generally speaking, a transaction is composed of a series of operation code that takes
+some time to execute, which provides an opportunity to obtain a good relaxed-order
+
+ACM Transactions on Architecture and Code Optimization, Vol. 9, No. 4, Article 42, Publication date: January 2013.
+
+42:10
+
+Z. Yan et al.
+
+schedule. Traditional conﬂict management schemes usually adopt a two-phase locking
+algorithm to schedule the conﬂicted transactions, which is too strict and conﬁned to
+expose and exploit the potential thread-level parallelism among the conﬂicted but
+serializable transactions. Our relaxed-order scheme utilizes the multi-version support
+from the pseudo-associativity scheme and schedules the conﬂicted transactions to allow
+as much thread-level parallelism to be exploited as possible. It achieves this goal by
+incorporating a chained directory to maintain multiple versions of the shared data
+and track their dependence relationships in a chained directory. Once the dependence
+relationships from the multiple versions of a shared data are determined, an efﬁcient
+schedule of those transactions that have accessed the shared data can be obtained.
+
+The chained directory scheme, unlike the conventional full-map and limited direc-
+tory schemes, does not utilize the broadcast mechanism to realize a scalable direc-
+tory solution, which is more suitable for many-core CMPs [Chaiken et al. 1990]. As
+shown in Figure 3, multiple transactions can modify the shared data. In the meantime,
+PARO-TM records the multi-version values in the chained directory and maintains the
+dependence relationships among these conﬂicted transactions in the runtime environ-
+ment until it becomes impossible to maintain a serializable schedule of the conﬂicted
+transactions. The partial orders of transactions are determined while tracking the
+multi-version values of the shared data and stored in the run-time environment. And
+this partial-order information can guide the subsequent transactional access operations
+to maintain the dependence relationships of the multiple versions of the shared data.
+These dependence relationships are represented by a sequence of chained pointers in
+the chained directory. When a conﬂicted access from a new transaction arrives, this
+transaction will be inserted into a reorder schedule based on the characteristics of its
+peer (conﬂicting) transactions in the runtime environment. If a conﬂicted transaction
+cannot be inserted into the reorder schedule, it indicates that this transaction leads to
+a nonserializable schedule and PARO-TM will abort it and schedule it on a conﬂicted
+competitor thread. Otherwise, the new conﬂicted transaction’s access operations will
+be assigned a proper version of the multi-version values based on the partial order
+of the existing transactions. And this transaction’s modiﬁcations on the shared data
+will be inserted into the chained directory to maintain the dependence relationships
+among the concurrently conﬂicted transactions. We use the amount of residual work of
+the conﬂicting transactions as the main criteria to reorder them, if a new transaction
+is not in any partial-order dependence relationships of the concurrent transactions.
+For example, the runtime environment can calculate the amount of residual work of
+each transaction and compare it with a conﬂicting transaction to determine which
+one should precede another and it can obtain the uncommitted data forwarded from
+the preceding transactions. We assume the dynamically calculated mean length of each
+static transaction to be the length of the new dynamic transaction instance. This length
+minus the ﬁnished work is the residual work. As a result, PARO-TM stores each static
+transaction’s mean length in the runtime, and for each dynamic transaction, there
+is a counter to record the work it has already completed. These metadata are stored
+in transaction’s log, along with each transaction’s other metadata, similar to LogTM-
+SE, and we allocate them in the L1 cache. When a transaction conﬂicts with another
+transaction, if this transaction still executes its transactional work, its counter will
+continually count its completed work; if this transaction is stalled by its competitor,
+its counter will not count this stalling time as its completed work until it restarts to
+execute its transactional work. Once a preceding transaction is ﬁnally aborted, the
+dependent transactions that access the forwarded and uncommitted data will also be
+aborted to maintain the data consistency.
+
+PARO-TM will aggressively exploit the potential performance improvement in
+aborted and rescheduled transactions by adjusting the chained multi-version structure
+
+ACM Transactions on Architecture and Code Optimization, Vol. 9, No. 4, Article 42, Publication date: January 2013.
+
+An Integrated Pseudo-Associativity Approach to Hardware Transactional Memory
+
+42:11
+
+in the chained directory to reuse their aborted computation. Thus, the structure of
+the chained directory is important to this exploitation. The chained directory can be
+implemented in either a single-directed or a double-directed chain, where the latter
+performs well in ﬁnding the predecessor versions because it maintains two pointers
+to point to both the predecessor and successor versions. Through our evaluation,
+however, we ﬁnd that a single-directed chain provides comparable performance to a
+double-directed chain with much less space overheads. The main reasons are twofold.
+First, the number of concurrently running conﬂicted transactions is generally too
+small to incur signiﬁcant traversal overhead on the chained multi-version entry.
+Second, the uncommon case of a large number of conﬂicted transactions usually leads
+to too many abort operations to obtain a correct schedule. So the single-directed chain
+is sufﬁcient for our relaxed-order scheme.
+
+In addition to maintaining the partial order of conﬂicted transactions, another con-
+cern is the complication brought to the chained directory scheme by the possible replace-
+ment operation of a cache block. Assuming the shared data X modiﬁed by N conﬂicted
+transactions, there will be N + 1 versions of X. If the ith version is mapped with a slot
+that is also mapped for variable Y in the cache map, when the thread reads Y , the ith
+version of X may be evicted from the data cache. Usually, the system can traverse the
+chain and splice the ith version from the directory or invalidate the ith version if we ig-
+nore the dependence among the conﬂicted transactions. Since the chain maintains the
+relationships, this operation may destroy this chain. Because we also record the trans-
+action’s dependence relationship in the runtime environment, we can avoid traversing
+the chain to ﬁnd the relative order if it can be obtained from the runtime environment.
+
+3.4. Other Design and Implementation Issues
+In fact, the PA-MESI protocol is adequate in handling the bounded transactions that
+do not cause transactional data overﬂows and other exceptions (i.e., context switch,
+etc.) during execution. Otherwise, like most existing HTM proposals, PARO-TM will
+resort to the software to handle the unbounded transactions, which is implemented in
+the runtime environment and transactional interface.
+
+Once the transactional data overﬂows from the data cache during execution, PARO-
+TM will collect the overﬂowed data (i.e., the cache line in the TN state) in the reserved
+pool, whose size can increase on demand to make room to hold the overﬂowed specula-
+tive data. In addition to storing the overﬂowed data, the mapping information between
+the old and new versions must be constructed to guide the subsequent executions. As
+shown in Figure 3, PARO-TM collects the new values to a page (i.e., with logical page
+number 0x7 f e41) to hold the speculative data overﬂowed from the pseudo-associative
+slot. It maps the old physical address 0x A00040 to the new physical address 0x1002040
+and the mapping entry is stored in the overﬂowed mapping table. Because the over-
+ﬂowed data is associated with the old version, it is not necessary for PARO-TM to fetch
+the overﬂowed data from the main memory and merge it to the original address. In-
+stead, the data is kept in the reserved pseudo-associative pool to avoid the extra data
+movements. To do this, a mechanism is required to guide the subsequent accesses to
+the original address to the actual address in the pseudo-associative pool. PARO-TM
+uses a Counting Bloom Filter to implement this mechanism by recording the address
+set of the already associated data and removing the address if the committed data is
+written back to the original address in the subsequent transactions. Here we use a 4-bit
+counter to avoid the possible overﬂow of the Counting Bloom Filter since the probability
+of a counter overﬂow with a 4-bit counter is less than 1.37 × 10−15 × m = 2.80 × 10−12
+(i.e., m is the vector size of the Bloom ﬁlter, and we choose 2048 as the vector size in
+this article) [Fan et al. 2000]. This is especially useful in high-contention applications.
+For example, when the new address, 0x1002040, holds the new value in a committing
+
+ACM Transactions on Architecture and Code Optimization, Vol. 9, No. 4, Article 42, Publication date: January 2013.
+
+42:12
+
+Z. Yan et al.
+
+transaction, PARO-TM frees the old address, 0x A00040, and uses it to hold the new
+value of the same shared data in subsequent transactions of the same application. This
+allows the existing mapping information to be reused and reduces the space for storing
+the mapping information without extra data movements. Once the Counting Bloom
+Filter overﬂows, the overﬂowed slot in the Counting Bloom Filter should always be set
+to “valid” to guarantee the correctness. Alternatively, we can increase the counter size
+or add a software handler to handle this case if the overﬂows happen frequently.
+
+In order to support context switching and thread migration, PARO-TM adds several
+tag bits to hold the transaction ID. This enables PARO-TM to identify the suspended
+transaction or the current running transaction in the data cache and store/restore its
+state information, such as signatures, checkpoints, etc., to/from memory. The system
+automatically maintains the mappings between the old and new values, which can
+forward the proper value to the new thread.
+
+3.5. Putting It All Together
+In order to verify PARO-TM’s functionality, we have implemented it on GEMS [Martin
+et al. 2005], a popular simulation platform based on the Simics simulator [Magnusson
+et al. 2002], which provides a standard “magic instruction” interface to researchers
+to add their customized function interface on the simulation platform. Programmers
+need to instrument the magic instructions to the target parallel programs to mark their
+critical sections as transactions. Once the magic instruction is executed, Simics will
+stop the simulation and invoke a user-deﬁned proﬁling control program, from which
+PARO-TM can collect the simulation data of the system to proﬁle its execution. In what
+follows, we will put the pseudo-associative and relaxed-order schemes together to show
+the key operations of PARO-TM.
+
+To illustrate PARO-TM’s operational mechanism clearly, for cases when no trans-
+actional data is overﬂowed from the ﬁrst-level data cache, we list in Figure 5 three
+representative operations: (1) conﬂict detection, (2) ﬂushing the committed pseudo-
+associative data, and (3) supporting a nested transaction. The case with overﬂowed
+transactional data is illustrated in Figure 6.
+
+In Figure 5(a), a transactional store may branch a pseudo-associative slot and convert
+the line’s state. When a remote read request reaches this “TO” line, a transactional
+conﬂict happens and PARO-TM can detect it eagerly. In our relaxed-order conﬂict
+management scheme, the transaction on core 2 can be scheduled before or after the
+transaction on core 1 based on their running behavior. Suppose that the transaction
+on core 1 is scheduled as the one preceding the transaction on core 2 in their partial
+order, as shown in Figure 5(b).
+
+When the transaction on core 1 commits its computation (i.e., operation 1 in
+Figure 5(b)), the cache lines with state “TO” will transit to “I” and the cache lines with
+state “TN” will change to “M”. Note that the “P” tag before the original lines indicates
+that this line is pseudo associative with another slot. This feature is especially
+useful after a transaction commits its work and leaves some pseudo-associative slots
+containing the latest version of the shared data. Back to Figure 5(b), this tag can assist
+subsequent access requests to obtain the proper data (steps 3 and 4). In order to avoid
+extra operations during steps 3 and 4, PARO-TM will ﬂush the pseudo-associative slot
+to transfer the data back to the original address and remove the P tag (step 5).
+
+In Figure 5(c), we show how PARO-TM works under a nested transaction. PARO-TM
+branches two pseudo-associative slots to hold the speculative data, and increases the P
+tag to indicate the pseudo-associative state, where P=2 means that subsequent accesses
+may be associative with two slots, and the latest speculative data is in a slot with its
+second most signiﬁcant bit of SET index ﬂipped (recall the pseudo-associative hash
+module in Figure 3). In step 6, the inner transaction commits its work, while PARO-TM
+
+ACM Transactions on Architecture and Code Optimization, Vol. 9, No. 4, Article 42, Publication date: January 2013.
+
+An Integrated Pseudo-Associativity Approach to Hardware Transactional Memory
+
+42:13
+
+(a). Detect The Transactional Conflict
+
+core 1
+
+Begin_Transaction
+
+...
+
+store i;
+
+...
+
+End_Transaction
+
+1
+
+TStore
+
+2
+
+PseudoBranch
+
+P=1
+
+@i
+
+TO
+
+pseudo@i
+
+TN
+
+3
+
+TGetS
+
+core 2
+
+Begin_Transaction
+
+...
+...
+
+load i;
+
+...
+
+End_Transaction
+
+(b). Flush The Committed Pseudo Associative Data
+
+core 1
+
+Begin_Transaction
+
+...
+
+store i;
+
+End_Transaction
+
+I
+
+M
+
+P=1
+
+@i
+
+pseudo@i
+
+1
+
+Commit
+
+3
+
+CheckPseudoSlot
+
+5
+
+Flush
+
+I
+
+M
+
+@i
+
+2
+
+TGetS
+
+core 2
+
+Begin_Transaction
+
+...
+...
+
+load i;
+
+...
+
+End_Transaction
+
+4
+
+Get Latest (i)
+
+(c). Support The Nested Transaction
+
+core 1
+
+Begin_Transaction
+
+...
+
+store i;
+
+Begin_Transaction
+
+...
+
+store i;
+
+...
+
+End_Transaction
+
+...
+
+End_Transaction
+
+1
+
+TStore
+
+2 PseudoBranch
+
+P=1
+
+@i
+TO
+
+pseudo@i #1
+
+TN
+
+4
+
+PseudoBranch
+
+3
+
+TStore
+
+pseudo@i #2
+
+TN
+
+5 Increase Pseudo Level
+
+P=2
+
+6 Commit
+
+8
+
+Commit
+
+P=2
+
+@i
+OT
+
+9
+
+Change Cache State
+
+pseudo@i #1
+
+NT
+
+pseudo@i #2
+
+M
+
+P=2
+
+@i
+
+pseudo@i #2
+
+7 Expose Associative Slot
+
+I
+
+M
+
+Fig. 5. Representative PARO-TM operations when no transactional data is overﬂowed from the L1 data
+cache.
+
+ACM Transactions on Architecture and Code Optimization, Vol. 9, No. 4, Article 42, Publication date: January 2013.
+
+42:14
+
+Set Index
+0b0000001
+
+Pseudo
+
+Associative
+
+Set
+
+0b1000001
+
+4-way
+Pseudo
+
+Associative
+Data Cache
+
+Tag
+
+State
+
+Data
+
+A TN line overflows from the cache  (e.g., the line 0x200040 swaps out)
+
+Z. Yan et al.
+
+0x100
+
+TO
+
+0x200
+
+TO
+
+0x300
+
+TO
+
+0x400
+
+TO
+
+A
+
+B
+
+C
+
+D
+
+0x100
+
+TN
+
+AA
+
+0x200
+
+TN
+
+BB
+
+0x300
+
+TN
+
+CC
+
+0x400
+
+TN
+
+DD
+
+1 determine the page number for this  line
+
+Preserved Prefix
+
++
+
+Set Index
+
+4 Construct the mapping information
+
+0xffc
+
++
+
+0b1000001
+
+=
+
+0x7fe41
+
+page number
+
+selector vector (128bit)
+
+2
+
+hash the Tag to get in-page offset for this  line
+
+0x7fe41
+
+0x2
+
+Tag[20:14]
+
+xor
+
+Tag[13:7]
+
+xor
+
+Tag[6:0]
+
+0x02
+
+3 overflowed line is stored in 0xffc82080
+
+v
+
+e
+
+o
+
+rflo
+
+w
+
+r
+o
+t
+c
+e
+V
+
+r
+o
+t
+c
+e
+l
+e
+S
+
+AA
+
+page
+
+0x7fe41
+
+page
+
+page
+
+hash conflict tag table
+
+The Preserved Pseudo
+
+Associative Pool
+
+Merge selector vector and
+
+5
+
+update bloom filter
+counter on commit
+
+Counting Bloom Filter
+
+0x200040
+
+6
+
+Discard the mapping
+information on abort
+
+It also has the capability to 
+flush pseudo associative back
+original address on subsequent
+
+7
+
+access
+
+Fig. 6. Structures and operations when transactional data overﬂows from the L1 data cache.
+
+exposes the pseudo-associative slot no. 2 in step 7. Because the outer transaction has
+not modiﬁed i since the inner transaction committed its work, the pseudo-associative
+slot no. 1 will be discarded when the outer transaction commits its work in step 8
+while the P tag is still equal to 2. The subsequent accesses will be redirected to the
+pseudo-associative slot no. 2 because it is the latest version. The extra P tag needs 3
+bits to label this information in the 32KB 4-way associative ﬁrst-level data cache.
+
+Once transactional data overﬂows from the ﬁrst-level data cache, the speculative data
+in “TN”will be written to a reserved pseudo-associative pool and a mapping between
+the old and new values will be constructed because the pseudo-associative cache cannot
+maintain their relationship when data is overﬂowed.
+
+Figure 6 shows that the pseudo-associative pool allocates new pages, called pseudo-
+associative pages in this article, on demand while the page number is determined by
+concatenating a reserved preﬁx and SET index bits of the overﬂowed line, and the
+in-page offset is calculated by hashing the tag bits. To handle the possible hash conﬂict
+problem, the preserved pseudo-associative pool constructs a hash conﬂict tag table to
+help indicate the conﬂicted block’s in-page offset. In addition to storing the overﬂowed
+data to the pseudo-associative pool, PARO-TM constructs the overﬂowed mapping
+information in a mapping table that contains the pseudo-associative page number and
+its vector selector. Each bit of a pseudo-associative page’s vector selector corresponds
+to a slot containing an overﬂowed data item associated with this page. Once the
+transaction commits its computation, it will merge the vector selector of the mapping
+table with its pseudo-associative page. By looking up the vector selector, a subsequent
+access to any overﬂowed data can determine whether to check the pseudo-associative
+page or directly go to the memory to fetch the data. A Counting Bloom Filter checking is
+incorporated to help PARO-TM make the right decision. While the number of the over-
+ﬂow entries in the table may grow quickly, the pseudo-associative data can in fact be
+ﬂushed back to the original address, a common practice in transactional applications.
+Now, back to Figure 2, TX 3 has the least amount of residual work and is not in any
+partial-order dependence relationships with TX 1 and TX 2. We use the dynamically
+calculated mean length of each static transaction minus the ﬁnished work to estimate
+
+ACM Transactions on Architecture and Code Optimization, Vol. 9, No. 4, Article 42, Publication date: January 2013.
+
+An Integrated Pseudo-Associativity Approach to Hardware Transactional Memory
+
+42:15
+
+/* Initially a = b = c = d = 0 */
+
+Trans 2
+
+4
+
+Trans 3
+
+conflict
+
+load c;
+load a;
+
+store 4, b;
+
+7
+
+conflict
+
+load a;
+load b;
+
+store 3, c; 
+
+Trans3's
+remained
+
+5
+
+work is more 
+than that of 
+
+8
+
+Trans1
+
+Schedule
+
+Trans4 after 
+than Trans3 
+
+by their access 
+
+order on c
+
+Trans 4
+
+load d;
+
+store 5, c;
+
+load b
+
+Metadata to maintain 
+transaction dependence 
+
+relationships
+
+3
+
+Trans1 < Trans2
+
+Trans1 < Trans3
+Trans2 < Trans3
+
+Trans3 < Trans4
+
+6
+
+9
+
+Metadata to 
+
+estimate transaction
+
+remained work 
+
+C
+h
+r
+o
+n
+o
+l
+o
+g
+i
+c
+a
+l
+ 
+
+O
+r
+d
+e
+r
+
+1
+
+2
+
+3
+
+4
+
+5
+
+6
+
+7
+
+8
+
+9
+
+Trans 1
+
+store 1, a;
+
+1
+
+load b;
+
+conflict
+
+store 2, c; 
+
+2
+
+Trans1's
+remained
+work is less
+than that 
+of Trans2
+
+Trans 1
+
+Trans 2
+
+Trans 3
+
+Trans 4
+
+static mean length
+completed counter
+
+static mean length
+completed counter
+
+static mean length
+completed counter
+
+static mean length
+completed counter
+
+a
+
+0
+
+pointer
+
+a
+
+1
+
+pointer
+
+b 0
+
+pointer
+
+b 4
+
+pointer
+
+c
+
+0
+
+pointer
+
+c
+
+2
+
+pointer
+
+c
+
+3
+
+pointer
+
+c
+
+5
+
+pointer
+
+Multi-versions dependence relationships of the shared datum in the chained directory
+
+Fig. 7. A Complex example in relaxed order schedule.
+
+the residual work for each dynamic transaction instance of the static transaction.
+Here we suppose this method can correctly gauge the residual work of the concurrent
+transactions. In our relaxed-order scheme, the oldest version 80 will be loaded by TX 3
+and TX 3 should be scheduled to run ahead of TX 1 and TX 2.
+
+Figure 7 shows a more complex example in relaxed-order scheduling. The operations
+labeled with numbers are ordered in chronological sequence. First, TX 1 and TX 2 are
+ordered by the amount of their residual work. Then, because TX 3 has more residual
+work than TX 1 and TX 2, it loads the old version of b (i.e., 0), TX 3 is scheduled to
+follow TX 2. Finally, since TX 4 tries to change c and TX 3 has loaded the forwarded
+value of c (i.e., 3) from TX 2, TX 4 should commit after TX 3. Different from the rule,
+which says “suppose A has forwarded a line to B, if C reads that line, then C should
+receive the line from B, not A” and is used in DATM [Ramadan et al. 2008] to track
+the dependence among the conﬂicting transactions, our multi-version-based relaxed-
+ordering method can schedule the conﬂicting transactions B and C in a more relaxed
+manner to exploit more thread-level parallelisms. Multi-version support lets PARO-
+TM have more freedom to select the proper version to better exploit the parallelism in
+conﬂicting transactions.
+
+In summary, PARO-TM does not require any extra, dedicated hardware support,
+except for the extension of the cache coherence protocol and the Counting Bloom Fil-
+ter signatures. It must be noted that most existing HTMs modify the cache coherence
+protocol to incorporate HTM functionalities. At the same time, it will construct some
+software structures to hold the dependence relationships among the concurrent dy-
+namic transactions, the statistical mean length of each static transaction, the over-
+ﬂowed data and their mappings, and the other necessary transactional metadata used
+in LogTM-SE. Through the evaluation, which will be presented in the next section, it is
+demonstrated that PARO-TM’s software overhead is reasonably low while it provides
+a notable performance gain over the existing state-of-the-art proposals.
+
+ACM Transactions on Architecture and Code Optimization, Vol. 9, No. 4, Article 42, Publication date: January 2013.
+
+42:16
+
+Z. Yan et al.
+
+Table I. Conﬁguration of the simulated CMP System
+
+Processor
+
+1.2 GHz in-order, single issue
+
+L1 Cache
+
+L2 Cache
+Memory
+Interconnect
+
+Signature
+
+32 KB 4-way, 64-byte line, write-back, 1-cycle latency, with
+1-cycle latency to check the pseudo-associative slot
+
+8 MB 8-way, write-back, 15-cycle latency
+4 GB, 4 banks, 150-cycle latency
+Mesh, 2-cycle wire latency, 1-cycle route latency
+2K-bit in vector size of the Bloom Filter signature, with 4-bit
+Counting Bloom Filter signature
+
+Table II. Workload Characteristics of The STAMP Benchmark Suite
+
+Input Parameters
+
+kmeans (L&F)
+ssca2 (L&F)
+vacation(L&C)
+intruder(H&F)
+genome(H&C)
+labyrinth(H&C)
+yada(H&C)
+
+40/40 clusters, 2048 rows
+8k nodes, 3 edges, 3 length
+4 queries, 4k transactions, 16k relations
+10 attacks, 4 length, 2k ﬂow
+16k segs, 256 gene, 16 length
+32x32x3 maze, 64 routes
+20 angle, 633.2 input mesh
+
+Length
+
+106
+21
+2.1K
+237
+1.7K
+317K
+6.8K
+
+Read-set
+
+Write-set
+
+avg
+3.8
+2.0
+56.9
+5.5
+24.1
+91.1
+37.3
+
+max
+7
+3
+99
+30
+234
+311
+421
+
+avg
+1.7
+2.0
+8.2
+3.4
+5.9
+90.7
+30.2
+
+max
+2
+2
+18
+23
+151
+252
+370
+
+Here L, H, F, and C represent the low-contention, high-contention, ﬁne-grained, and coarse-grained charac-
+teristics of the application, respectively.
+
+4. EVALUATION AND ANALYSIS
+The design and implementation of PARO-TM described in Section 3 qualitatively show
+its beneﬁts. In this section, we assess PARO-TM’s effectiveness quantitatively by exe-
+cuting the STAMP benchmark suite on an execution-driven CMP simulator.
+
+4.1. Evaluation Environment and Workload
+We conﬁgure a 16-core CMP with the HTM functionality on the GEMS 2.1 simula-
+tor [Martin et al. 2005], where each core has a private L1 data cache and shares
+an L2 data cache. Table I summarizes the conﬁguration parameters of the simulated
+CMP system. In order to examine the performance impact of the high-contention and
+coarse-grained applications for which PARO-TM is designed, we choose the STAMP
+benchmark suite as the evaluation workload and list the input parameters in Table II.
+Note that we have excluded the bayes application from our evaluation because it has
+been shown to exhibit unpredictable behavior and high variability in its execution
+time [Minh et al. 2008; Dragojevic and Guerraoui 2010]. At the same time, we have
+adopted some optimizations to improve the scalability of the STAMP benchmark suite.
+These optimizations include: (1) the alignment of data at the cache line boundary by
+padding around the shared data, (2) the use of a 32-core machine to model a 16-core
+HTM conﬁguration while leaving cpu0 for OS usage to avoid the interference from the
+operation system, (3) the labeling of the private data in transaction to alleviate the
+possible false conﬂict by the Bloom ﬁlter signature, and (4) the adoption of the hybrid
+policy to overcome the starving writer pathology in LogTM-SE. That is, if a transaction
+believes that it is a starving writer, it will force other readers to abort and use the
+requester-stall policy for everything else.
+
+To assess PAROT-TM’s performance beneﬁt, we compare it against LogTM-SE, TCC,
+DynTM, and SUV-TM, four of the state-of-the-art HTM schemes. LogTM-SE is derived
+from GEMS and is conﬁgured to use the hybird policy to resolve transactional conﬂicts.
+
+ACM Transactions on Architecture and Code Optimization, Vol. 9, No. 4, Article 42, Publication date: January 2013.
+
+An Integrated Pseudo-Associativity Approach to Hardware Transactional Memory
+
+42:17
+
+Fig. 8. The execution times of STAMP on various HTMs, where L, T, D, S, and P represent LogTM-SE, TCC,
+DynTM, SUV-TM, and PARO-TM, respectively and all execution times are normalized to that of LogTM-SE.
+The speedup measures obtained for the applications when running on a 16-core LogTM-SE conﬁguration
+are included.
+
+Meanwhile, we follow the instructions provided by GEMS to simulate the TCC scheme
+with row associativity [McDonald et al. 2006], which uses the committer-wins policy
+to resolve transactional conﬂicts. To emulate the side-effects caused by the redo log
+overﬂows, we have modiﬁed it appropriately by limiting the size of the write buffer and
+inserting some waiting times, which is estimated by the overﬂowed size and network’s
+latency and congestion, to block the data access operations. Based on LogTM-SE, we
+have implemented DynTM and SUV-TM that represent the latest progress in HTM
+systems. While DynTM uses the hybrid policy in eager mode and the committer-wins
+policy in lazy mode to resolve transactional conﬂicts, SUV-TM uses the hybrid policy
+to resolve transactional conﬂicts. We run the simulation 10 times for each workload to
+obtain statistically meaningful results, where the same workload is used to warm the
+cache and obtain a checkpoint to rerun the whole application for each simulation.
+
+4.2. Experimental Results and Analysis
+In order to obtain a comprehensive understanding of the overheads incurred by various
+HTMs, we break down the execution time into these components: time due to nontrans-
+actional work (NoTrans), time due to unstalled transactional work (Trans), time due
+to waiting on a barrier (Barrier), time due to stall after an abort (Backoff), time due
+to stall to resolve the conﬂict (Stalled), time due to wasted work when a transaction
+is aborted (Wasted), time due to rolling back during abort (Abort), and time to make a
+speculative modiﬁcation globally visible on commit (Commit).
+
+As shown in Figure 8, PARO-TM consistently achieves the best performance among
+the HTMs compared, outperforming the latest and the state-of-the-art LogTM-SE,
+
+ACM Transactions on Architecture and Code Optimization, Vol. 9, No. 4, Article 42, Publication date: January 2013.
+
+42:18
+
+Z. Yan et al.
+
+TCC, DynTM, and SUV-TM by the average performance gains of 34.6%, 34.5%, 8.3%,
+23.6% respectively across all the 7 applications in the STAMP benchmark suite. PARO-
+TM’s performance margins are widened to 65.4%, 61.7%, 26.2%, and 49.9% over the
+four schemes respectively under the 3 high-contention and coarse-grained applications
+in the STAMP benchmark suite. LogTM-SE suffers from the delays resulting from
+restoring the old values on abort and stalling some conﬂicting transactions to save the
+transactional computation. However, the cyclical dependency among the conﬂicting
+transactions must be resolved by aborting some transactions and providing a random
+back-off to prevent the same conﬂicts from happening again in the near future. This
+usually happens in high-contention applications with the extra data movements on
+aborted transactions, which can lead to a vicious cycle in the eager approach. TCC
+performs better than LogTM-SE, but its commit operations will waste a lot of time
+especially when the redo log overﬂows from the data cache. In this case, it will abort
+the competing transactions on commit, which wastes signiﬁcant transactional compu-
+tation. Through the evaluation, we ﬁnd that PARO-TM outperforms TCC, because the
+former organizes different versions in the same L1 data cache by the PA-MESI protocol
+to avoid data movements in both transactional abort and commit operations, and the
+relaxed-order conﬂict management also contributes more to performance improvement
+than TCC’s conﬂict resolution on commit. DynTM combines the EE (i.e., eager conﬂict
+detection and eager version management) and LL (i.e., lazy conﬂict detection and lazy
+version management) approaches. This helps DynTM reduce the time spent on Backoff,
+Stalled, Wasted, Commit, and Abort only when the selector makes the correct choice.
+PARO-TM does not rely on a predictor to select the proper execution mode. Rather, it
+associates a pseudoslot to hold the speculative update of the transaction, switches to
+the proper version with the help of the PA-MESI protocol and schedules the conﬂicting
+transactions in a relaxed order. This allows PARO-TM to reduce the overhead due to
+the Stalled, Wasted, and Abort components and enables it to consistently perform the
+best. PARO-TM also avoids the potential data movements across the memory hierarchy
+in DynTM when the dirty data already exists in the data cache before the transaction
+begins or restarts the aborted transaction to load the shared data. SUV-TM avoids
+extra data movements via a redirection table, but it fails to reduce the dynamic over-
+heads on conﬂicting transactions. So it performs better than LogTM-SE and TCC but
+worse than DynTM and PARO-TM. In summary, PARO-TM exploits the most amount
+of thread-level parallelism of the concurrent transactions via the pseudo-associativity
+and relaxed-ordering schemes to reduce both the static and dynamic transactional
+overheads among the state-of-the-art HTM schemes.
+
+One main performance concern of the pseudo-associativity version management
+scheme in PARO-TM is the possibility for the PA-MESI protocol to slow fast hits down
+to slow hits if they frequently hit in the pseudo-associative slot, which may lengthen
+the hit time. We collected and analyzed the access operations to the shared data and
+summarized the hit rates of these access operations in Table III. Here, we have found
+that the PA-MESI protocol not only avoids the PARO-TM going to the next (lower)
+level of the memory hierarchy to access the shared data, but is also able to dynamically
+reverse the roles of the pseudo-associative slot and the original address to minimize
+the number of slow hits by ﬂushing the committed data, whose operation is shown in
+Figure 5(b). From the statistics in Table III, PA-MSEI slows down the memory access
+no more than 30% from the fast hit in the L1 cache, which is much better than the
+schemes that store logs in the L2 cache or the main memory that will access the lower
+level of the hierarchy to fetch the data. We believe that this behavior is very dependent
+on the characteristics of transactional workloads, but the concurrent accesses to the
+shared data from multiple transactions will provide a lot of opportunity to exploit this
+feature.
+
+ACM Transactions on Architecture and Code Optimization, Vol. 9, No. 4, Article 42, Publication date: January 2013.
+
+An Integrated Pseudo-Associativity Approach to Hardware Transactional Memory
+
+42:19
+
+Table III. The Hit Rates in the PA-MESI Protocol
+
+Hit in The Data Cache
+Pseudo Hit
+Fast Hit
+
+Hit in The Main Memory
+Pseudo Hit
+Fast Hit
+
+kmeans
+ssca2
+vacation
+intruder
+genome
+labyrinth
+yada
+
+70.1%
+69.3%
+73.2%
+72.6%
+65.2%
+57.1%
+56.8%
+
+29.7%
+30.5
+26.5%
+26.8%
+22.2%
+20.7%
+22.3%
+
+0.1%
+0.1%
+0.1%
+0.1%
+4.7%
+4.7%
+4.2%
+
+0.1%
+0.1%
+0.2%
+0.5%
+7.9%
+17.5%
+16.7%
+
+(a) Study on Genome
+
+(b) Study on Labyrinth
+
+(c) Study on Yada
+
+Fig. 9. Sensitivity study on the size of the L1 data cache on various HTMs, where L, T, D, and P represent
+LogTM-SE, TCC, DynTM, and PARO-TM respectively and the execution times are normalized to that of
+PARO-TM with a 32kb L1 data cache.
+
+To better understand the performance impact of the size of the L1 pseudo-associative
+data cache and verify the beneﬁt of PARO-TM on managing transactional overﬂowed
+data, we carry out a sensitivity study on the size of the L1 data cache. We divide the
+execution time into four parts: time due to nontransactional work with barrier waiting
+time (NoTran&Bar), time due to nonconﬂicting transactional work without version-
+ing time (NoConTran), time due to conﬂicting transactional work without versioning
+time (ConTran), and time due to version management on organizing different versions,
+merging data on commit, and repairing data on abort (VerMan). From Figure 9, we
+ﬁnd that PARO-TM is consistently the best performer among the competing schemes.
+LogTM-SE does not work well under the high-contention and coarse-grained transac-
+tional workload because it will block the conﬂicting transactions eagerly and incur a
+high cost on aborting the conﬂicting transactions. TCC may waste the computations on
+the conﬂicting transactions that are deferred to solve on commit, and this problem will
+worsen under the coarse-grained workload with many transactional overﬂows. DynTM
+will suffer the same pathology when transactional data overﬂows the ﬁrst-level data
+cache, although it can mitigate much of this overhead by its transactional mode se-
+lector. Moreover, when the cache size shrinks down to 8KB, we ﬁnd that PARO-TM’s
+extra time spent on NoT ran&Bar is comparable to that by DynTM, which veriﬁes
+that the extra space overhead in PARO-TM is not a problem. At the same time, these
+results also demonstrate PARO-TM’s performance beneﬁts of avoiding the data move-
+ments across the memory hierarchy with a small data cache in the pseudo-associative
+pages by effectively managing the overﬂowed transactional modiﬁcations. When we
+scale the cache size to 1MB, we ﬁnd that PARO-TM can obtain more beneﬁts than
+other schemes, which suggests that our design is more suitable for designs aimed at
+handling emerging applications with higher contention and coarser granularity. So we
+believe that the pseudo-associativity scheme provides more performance beneﬁts than
+existing schemes.
+
+ACM Transactions on Architecture and Code Optimization, Vol. 9, No. 4, Article 42, Publication date: January 2013.
+
+42:20
+
+Z. Yan et al.
+
+Fig. 10. A case study of four conﬂict management policies with the pseudo-associativity version management
+scheme, where all execution times are normalized to that of PARO-TM.
+
+From Figure 8, we ﬁnd that reducing the data movements induced by version
+management alone, like SUV-TM, cannot effectively and efﬁciently exploit the poten-
+tial thread-level parallelism, especially under the coarse-grained and high-contention
+workloads. DynTM and PARO-TM have partially addressed this problem by adopting
+new conﬂict management schemes to better schedule and resolve conﬂicted trans-
+actions. To evaluate the performance beneﬁts of the relaxed-order conﬂict manage-
+ment scheme proposed in PARO-TM, we design an experiment to combine the pseudo-
+associativity version management scheme with several commonly used conﬂict man-
+agement schemes other than PARO-TM’s multi-version-based relaxed-order method
+for a fair comparison. Because the pseudo-associativity version management scheme
+maintains both the old and new versions in the same memory hierarchy, it can be
+implemented in either eager or lazy mode. Here we compare our relaxed-order method
+with three policies: (1) detect conﬂict eagerly and the requester wins, (2) detect con-
+ﬂict eagerly and the requester stalls until a cyclic dependence happens to abort the
+requester, (3) detect conﬂict lazily and the committer wins. As shown in Figure 10,
+we have divided the whole execution time into two parts: one is due to the conﬂicted
+time (i.e., including Backoff, Stalled, Wasted, and Abort) and another is due to non-
+conﬂicted time (i.e., including NoTrans, Trans, Barrier, and Commit), from which we
+can see that PARO-TM is able to exploit more conﬂicted parallelism especially under
+the high-contention and coarse-grained applications. The relaxed-order method per-
+forms well in most cases except for the low-contention and ﬁne-grained ssca2, where
+
+ACM Transactions on Architecture and Code Optimization, Vol. 9, No. 4, Article 42, Publication date: January 2013.
+
+An Integrated Pseudo-Associativity Approach to Hardware Transactional Memory
+
+42:21
+
+the relaxed-order method’s overheads overshadow its beneﬁt and make it underper-
+form the existing policies. Overall, PARO-TM’s relaxed-order conﬂict management only
+incurs 1% extra overheads.
+
+To better understand impact of the software runtime overheads on PARO-TM’s per-
+formance, we conduct a sensitivity study on this impact by scaling the software over-
+heads incurred in the relaxed-order schedule by incorporating a hardware accelerator
+to speed up the software operations. Software’s overheads stem from the dynamic cal-
+culation of the mean length of each static transaction, the residual work of conﬂicted
+dynamic transaction instances, and maintenance and lookup of the dependence rela-
+tionships of the concurrent uncommitted transactions. We argue that the calculation
+of the length and residual work can be easily handled by adding several hardware
+counters at a very low hardware cost. Meanwhile, the system can avoid calculating
+the residual work when the conﬂicted transaction has already been put in the ex-
+isting partial-order dependence relationship. Most overheads, therefore, come from
+managing the partial-order dependency graph to ﬁnd a circle in the graph. When the
+multiversion-supported hardware directory detects a conﬂict, it will invoke the soft-
+ware runtime to update the partial-order dependency graph. In our evaluation, we
+ﬁnd that in most cases when more than 4 concurrent conﬂicted transactions access the
+same shared data, there is usually no way to guarantee a searializable schedule even
+in our partial-order approach. One obvious optimization is to stall the new conﬂicted
+transaction until the number of the concurrent conﬂicted transactions accessing the
+same shared data is less than 4. So it is easy to utilize this feature to limit the software
+overheads on managing the partial-order dependency graph. Moreover, in some very
+high-contention transactional workloads such as labyrinth and yada, spending more
+time on software to schedule the conﬂicted transactions usually does not signiﬁcantly
+degrade the performance because this extra time can help PARO-TM to serialize the
+conﬂicted transactions more accurately. At the same time, to reduce the software over-
+heads on small transactions, we dynamically bypass the partial-order schedule when
+the size of the transaction is less than 1k instructions. Figure 11 presents the execution
+time with the different runtime overheads, where we make PARO-TM run in these four
+conﬁgurations: (1) the basic PARO-TM without any software overhead optimization,
+(2) PARO-TM assisted by hardware counters, (3) PARO-TM with limited concurrent
+conﬂicts and assisted by hardware counters, and (4) PARO-TM with limited concur-
+rent conﬂicts, assisted by hardware counters and bypassing small transactions. From
+Figure 11, we ﬁnd that the hardware counters do not improve the performance signiﬁ-
+cantly, while limiting the number of concurrent conﬂicted transactions and bypassing
+small transactions can boost the performance signiﬁcantly. The reasons are twofold.
+First, a smaller number of conﬂicted transactions requires signiﬁcantly lower overhead
+on maintaining the partial-order relationships. Second, limiting conﬂicted transactions
+alleviates the high contention to reduce the conﬂicts while bypassing small transac-
+tions works well under the workloads with many contended and small transactions,
+such as intruder in our evaluation. In summary, although the runtime overheads may
+impact the performance, we argue that it is acceptable considering it can help exploit
+more thread-level parallelism in the conﬂicted transactions.
+
+4.3. Complexity Analysis
+PARO-TM has incorporated the pseudo-associative cache and multi-version chained
+directory to better exploit the thread-level parallelism of the transactional workloads.
+Throughout our evaluation, these two optimizations are shown to have great potentials
+for improving HTM’s performance. These performance beneﬁts of PARO-TM, however,
+come at some hardware cost as it complicates the hardware structure of the existing
+data cache and directory to some extent. Here we will analyze the complexity introduced
+
+ACM Transactions on Architecture and Code Optimization, Vol. 9, No. 4, Article 42, Publication date: January 2013.
+
+42:22
+
+Z. Yan et al.
+
+Fig. 11. A Case study of overheads on runtime, where all execution times are normalized to that of basic
+PARO-TM without any optimization.
+
+Table IV. Estimated Overheads on Area and Power
+
+Component
+
+Area (um2)
+
+Power (mW)
+
+Signature’s Overhead per Core
+Pseudo Associativity’s Overhead per Core
+Chained Directory’s Overhead per Core
+
+Total Overheads per Core
+Overhead Normalized to That of Rock
+
+22983.67
+74292.52
+58652.21
+
+155928.40
+
+1.1%
+
+8.87
+25.46
+18.52
+
+52.85
+0.53%
+
+by PARO-TM and discuss whether it is worthwhile to add these hardware components
+into the existing hardware transactional memory systems.
+
+PARO-TM needs to add the countering Bloom ﬁlter signatures, extend the cache
+coherence protocol to support pseudo associativity, and modify the directory’s structure
+to add the pointers to point to the next slots. However, in the current GEMS simulator,
+it is difﬁcult to accurately estimate the area and power overheads of the PA-MESI
+protocol and multi-version chained directory. As a result, we have implemented PARO-
+TM’s pseudo-associative cache and multi-version chained directory in Verilog HDL and
+use Synopsys Design Compiler to estimate their area and power overheads. Table IV
+summarizes the area and power estimations based on Sun’s Rock processor, which is
+fabricated in the 65nm technology and each of the 16 cores has an area of 14mm2 and
+an estimated power consumption of 10W [Tremblay and Chaudhry 2008]. We target at
+the 65nm cell library and set the clock frequency to 1.2 GHz to constrain the synthesis
+process to obtain the results. The results in Table 4.3 indicate that PARO-TM is able to
+obtain signiﬁcant performance beneﬁts with a very small area and power overheads.
+
+In addition to the hardware components added, PARO-TM will construct a software
+structure to guide the subsequent accesses to the overﬂowed transactional data in
+
+ACM Transactions on Architecture and Code Optimization, Vol. 9, No. 4, Article 42, Publication date: January 2013.
+
+An Integrated Pseudo-Associativity Approach to Hardware Transactional Memory
+
+42:23
+
+the pseudo-associative pool. The space overhead of the software structure designed to
+hold the mapping information is no more than 29KB throughout our evaluation. At the
+same time, the space requirement of the pseudo-associative pool is about 440KB, which
+can be totally placed in the L2 data cache. On the other hand, the relaxed ordering
+schedule needs less than 1KB space for each core to store the metadata. Moreover, we
+ﬁnd that the overhead incurred by our relaxed-order schedule may increase the access
+latency. But in our evaluation we ﬁnd that the overhead incurred by this extra latency
+is less than 3.9% on average when an average of more than 8.1% performance gain on
+execution time is achieved by this method. Adding some hardware components may
+further reduce this overhead, a research topic we plan to study in our future work.
+
+In summary, we believe that the design philosophy of PARO-TM to reduce the data
+movements across the memory hierarchy and exploit the parallelism in the conﬂicted
+transactions is in the right direction to design a better HTM system. Through our
+evaluation and analysis, the overhead of PARO-TM is reasonably low and thus is
+acceptable and practical in our opinions.
+
+5. CONCLUSION
+In this article, we propose an integrated pseudo-associativity and relaxed-order ap-
+proach to hardware transactional memory, called PARO-TM, which provides a new
+framework to couple conﬂict management with version management to simultaneously
+reduce the data movement overheads and exploit the potential parallelism among con-
+ﬂicting transactions by means of a pseudo-associative cache and chained directory.
+
+We evaluate PARO-TM by comparing it with LogTM-SE, TCC, DynTM, and SUV-
+TM. Through extensive execution-driven experiments under the STAMP benchmark
+suite that represents a wide spectrum of coarse-grained and high-contention applica-
+tions, PARO-TM is shown to achieve average performance gains of 34.6%, 34.5% 8.3%,
+23.6% across the 7 selected applications in the STAMP benchmark suite over LogT-SE,
+TCC, DynTM, and SUV-TM, respectively. Its performance margins over these compet-
+ing HTMs are widened to 65.4%, 61.7%, 26.2%, and 49.9%, respectively, under the 3
+high-contention and coarse-grained applications in the STAMP benchmark suite that
+represent the likely future workloads on the TM systems. The area and power over-
+heads of PARO-TM are estimated to be 1.1% and 0.53% of Sun’s Rock processor.
+
+REFERENCES
+
+ADL-TABATBAI, A.-R., SHPEISMAN, T., AND GOTTSCLICH, J. 2011. Draft speciﬁcation of transactional language
+
+constructs for c++. http://www.open-std.org/Jtc1/sc22/wg14/www/docs/n1613.pdf.
+
+AGARWAL, A. AND PUDAR, S. D. 1993. Column-Associative caches: A technique for reducing the miss rate
+of direct-mapped caches. In Proceedings of the 20th Annual International Symposium on Computer
+Architecture (ISCA’93). 179–190.
+
+ANANIAN, C., ASANOVIC, K., KUSZMAVI, B. C., LEISERSON, C. E., AND LIE, S. 2005. Unbounded transactional mem-
+ory. In Proceedings of the 11th International Symposium on High Performance Computer Architecture
+(HPCA’05). 316–327.
+
+ANSARI, M., KOTSELIDIS, C., WATSON, I., KIRKHAM, C., LUJAN, M., AND JARVIS, K. 2008. Lee-TM: A non-trivial
+benchmark for transactional memory. In Proceedings of the 8th International Conference on Algorithms
+and Architectures for Parallel Processing. 196–207.
+
+ARMEJACH, A., SEYEDI, A., TITOS-GIL, R., HUR, I., CRISTAL, A., ET AL. 2011. Using a reconﬁgurable L1 data
+cache for efﬁcient version management in hardware transactional memory. In Proceedings of the 20th
+International Conference on Parallel Architectures and Compilation Techniques (PACT’11). 361–371.
+
+AYDONAT, U. AND ABDELRAHMAN, T. S. 2010. Hardware support for relaxed concurrency control in transactional
+memory. In Proceedings of the 43rd Annual IEEE/ACM International Symposium on Microarchitecture
+(MIRCO’10). 15–26.
+
+BLAKE, G., DRESLINSKI, R., AND MUDGE, T. 2009. Proactive transactional scheduling for contention manage-
+ment. In Proceedings of the 42nd Annual IEEE/ACM International Symposium on Microarchitecture
+(MICRO’09). 156–167.
+
+ACM Transactions on Architecture and Code Optimization, Vol. 9, No. 4, Article 42, Publication date: January 2013.
+
+42:24
+
+Z. Yan et al.
+
+BLAKE, G., DRESLINSKI, R., AND MUDGE, T. 2011. Bloom ﬁlter guided transaction scheduling. In Proceedings of
+the 17th IEEE International Symposium on High Performance Computer Architecture (HPCA’11). 75–86.
+BLUNDEL, C., DEVIETTI, J., LEWIS, E. C., AND MARTIN, M. M. K. 2007. Making the fast case common and
+the uncommon case simple in unbounded transactional memory. In Proceedings of the 34th Annual
+International Symposium on Computer Architecture (ISCA’07). 24–34.
+
+BOBBA, J., GOYAL, N., HILL, M., SWIFT, M., AND WOOD, D. 2008. TokenTM: Efﬁcient execution of large
+transactions with hardware transactional memory. In Proceedings of the 35th Annual International
+Symposium on Computer Architecture (ISCA’08). 127–138.
+
+BOBBA, J., MOORE, K., VOLOS, H., YEN, L., HILL, M. D. ET.AL. 2007. Performance Pathologies in Hardware
+Transactional Memory. In Proceedings of the 34th Annual International Symposium on Computer
+Architecture (ISCA). 81–91.
+
+CALDER, B., GRUNWALD, D., AND EMER, J. 1996. Predictive sequential associative cache. In Proceedings of the
+
+2nd IEEE Symposium on High Performance Computer Architecture (HPCA’96). 244–253.
+
+CARLSTROM, B. D., MCDONALD, A., CARBIN, M., KOZYRAKIS, C., AND OLUKOTUN, K. 2007. Transactional collection
+classes. In Proceedings of the 12th ACM SIGPLAN Symposium on Principles and Practice of Parallel
+Programming (PPoPP’07). 56–67.
+
+CEZE, L., TUCK, J., AND TORRELLAS, J. 2006. Bulk disambiguation of speculative threads in multiprocessors. In
+Proceedings of the 33rd Annual International Symposium on Computer Architecture (ISCA’06). 227–238.
+CHAFI, H., CASPER, J., CARLSTROM, B. D., MCDONALD, A., CAO, C., ET AL. 2007. A scalable, non-blocking
+approach to transactional memory. In Proceedings of the IEEE 13th International Symposium on High
+Performance Computer Architecture (HPCA’07). 97–108.
+
+CHAIKEN, D., FIELDS, C., KURIHARA, K., AND AGARWAL, A. 1990. Directory-Based cache coherence in large scale
+
+multiprocessors. Compt. 23, 6, 49-58.
+
+CHAUDHRY, S. 2008. Rock: A third generation 65nm, 16-core, 32 thread + 32 scout-threads cmt sparc processor.
+
+In 20th HotChips Conference.
+
+CHUANG, W., NARAYANASAMY, S., VENKATESH, G., SAMPSON, J., VAN BIESBROUCK, M., ET AL. 2006. Unbounded
+page-based transactional memory. In Proceedings of the 12th International Conference on Architectural
+Support for Programming Languages and Operating Systems (ASPLOS’06). 347–358.
+
+CHUNG, J., CHAFI, H., MINH, C.C., MCDONALD, A., CARLSTROM, B. D., ET AL. 2006a. The common case trans-
+actional behavior of multithreaded programs. In Proceedings of the 12th International Symposium on
+High Performance Computer Architecture (HPCA’06). 266–277.
+
+CHUNG, J., MINH, C. C., MCDONALD, A., SKARE, T., CHAFI, H., ET AL. 2006b. Tradeoffs in transactional
+memory visualization. In Proceedings of the 12th International Conference on Architectural Support for
+Programming Languages and Operating Systems (ASPLOS’06). 371–381.
+
+CLICK, C. 2009. Azul’s experiences with hardware transactional memory. In Transactional Memory Workshop.
+COLOHAN, C. B., AILAMAKI, A., STEFFAN, J. G., AND MOWRY, T. C. 2006. Tolerating dependences between large
+speculative threads via sub-threads. In Proceedings of the 33rd Annual International Symposium on
+Computer Architecture (ISCA’06). 216-226.
+
+DICE, D., LEV, Y., MOIR, M., NUSSBAUM, D., AND OLSZEWSKI, M. 2009. Early experience with a commercial
+hardware transactional memory implementation. In Proceedings of the 14th International Conference
+on Architectural Support for Programming Languages and Operating Systems (ASPLOS’09). 157–168.
+DRAGOJEVIC, A. AND GUERRAOUI, R. 2010. Predicting the scalability of an stm a pragmatic approach. In
+
+Proceedings of the 5th ACM SIGPLAN Workshop on Transactional Computing (TRANSACT).
+
+FAN, L., CAO, P., ALMEIDA, J., AND BRODER, A. 2000. Summary cache: A scalable wide-area web cache sharing
+
+protocol. IEEE/ACM Trans. Netw. 8, 3, 281–293.
+
+GARZARAN, M. J., PRVULOVIC, M., LLABERIA, J. M., VINALS, V., RAUCHWERGER, L., ET AL. 2003. Tradeoffs in buffering
+memory state for thread-level speculation in multiprocessors. In Proceedings of the 9th International
+Symposium on High Performance Computer Architecture (HPCA’03). 191-202.
+
+GOPAL, S., VIJAYKUMAR, T., SMITH, J., AND SOHI, G. 1998. Speculative versioning cache. In Proceedings of the
+
+4th International Symposium on High-Performance Computer Architecture (HPCA’98). 195–206.
+
+GUERRAOUI, R. AND KAPALKA, M. 2010. Principles of Transactional Memory. Morgan and Claypool.
+HAMMOND, L., WONG, V., CHEN, M., CARLSTROM, B. D., DAVIS, J. D., ET AL. 2004. Transactional memory coherence
+and consistency. In Proceedings of the 31st Annual International Symposium on Computer Architecture
+(ISCA’04). 102–113.
+
+HARING, R. 2011. The IBM blue gene/q compute chip+simd ﬂoating-point unit. In Proceedings of the 23rd
+
+IEEE International Symposium on High Performance Chips (HotChips’11).
+
+HARRIS, T., LARUS, J., AND RAJWAR, R. 2010. Transactional Memory, 2nd ed. Morgan and Claypool.
+
+ACM Transactions on Architecture and Code Optimization, Vol. 9, No. 4, Article 42, Publication date: January 2013.
+
+An Integrated Pseudo-Associativity Approach to Hardware Transactional Memory
+
+42:25
+
+HERLIHY, M. AND MOSS, J. 1993. Transactional memory: Architectural support for lock-free data structures.
+In Proceedings of the 20th Annual International Symposium on Computer Architecture (ISCA’93). 289–
+300.
+
+INTEL. 2012. Intel architecture instruction set extensions programming reference. http://software.intel.
+
+com/sites/default/ﬁles/m/a/b/3/4/d/41604-319433-012a.pdf.
+
+KESTOR, G., STIPIC, S., UNSAL, O., CRISTAL, A., VALERO, M. 2009. RMS-TM: A transactional memory benchmark
+for recognition, mining and synthesis applications. In the 4th Workshop on Transactional Computing
+(TRANSACT’09).
+
+KHAN, B., HORSNELL, M., ROGERS, I., LUJAN, M., DINN, A., ET AL. 2008. An object-aware hardware transactional
+memory system. In Proceedings of the 10th IEEE International Conference on High Performance
+Computing and Communications (HPCC’08). 93–102.
+
+LUPON, M., MAGKLIS, G., AND GONZALEZ, A. 2008. Version management alternatives for hardware transactional
+memory. In Proceeding of the 9th Workshop on Memory Performance : Dealing with Applications, Systems
+and Architecture. 69–76.
+
+LUPON, M., MAGKLIS, G., AND GONZALEZ, A. 2009. FasTM: A log-based hardware transactional memory with
+fast abort recovery. In Proceedings of the 18th International Conference on Parallel Architectures and
+Compilation Techniques (PACT’09). 293–302.
+
+LUPON, M., MAGKLIS, G., AND GONZALEZ, A. 2010. A dynamically adaptable hardware transactional memory. In
+Proceedings of the 43rd Annual IEEE/ACM International Symposium on Microarchitecture (MICRO’10).
+27–38.
+
+MAGNUSSON, P., CHRISTENSSON, M., ESKILSON, J., FORSGREN, D., HAILBERG, G., ET AL. 2002.
+
+Simics: A full system simulation platform. IEEE Comput. 35, 50–58.
+
+MARTIN, M., SORIN, D., BECKMANN, B. M., MARTY, M. R., XU, M., ET AL. 2005. Multifacet’s general execution-driven
+
+multiprocessor simulator (GEMS) toolset. SIGARCH Comput. Archit. News 33, 92–99.
+
+MCDONALD, A., CHUNG, J., CARLSTROM, B. D., MINH, C. C., CHAFI, H., ET AL. 2006. Architectural semantics
+for practical transactional memory. In Proceedings of the 35th Annual International Symposium on
+Computer Architecture (ISCA’06). 53–65.
+
+MINH, C., CHUNG, J., KOZYRAKIS, C., AND OLUKOTUN, K. 2008. STAMP: Stanford transactional applications for
+multi-processing. In Proceedings of the 4th IEEE International Symposium on Workload Characteristics
+(IISWC’08). 35–46.
+
+MINH, C., TRAUTMANN, M., CHUNG, J. W., MCDONALD, A., BRONSON, N., ET AL. 2007. An effective hybrid
+transactional memory system with strong isolation guarantees. In Proceedings of the 34th Annual
+International Symposium on Computer Architecture (ISCA’07). 69–80.
+
+MOORE, K., BOBBA, J., MORAVAN, M. J., HILL, M. D., AND WOOD, D. A. 2006. LogTM: Log-Based transactional
+memory. In Proceedings of the 12th IEEE Symposium on High Performance Computer Architecture
+(HPCA’06). 254-265.
+
+POWELL, M. D., AGARWAL, A., VIJAYKUMAR, T. N., FALSAFI, B., AND ROY, K. 2001. Reducing set-associative cache
+energy via way-prediction and selective direct-mapping. In Proceedings of the 34th Annual ACM/IEEE
+International Symposium on Microarchitecture (MICRO’01). 54–65.
+
+RAJWAR, R. AND GOODMAN, J. 2002. Transactional lock-free execution of lock-based programs. In Proceedings of
+the 10th International Conference on Architectural Support for Programming Languages and Operating
+Systems (ASPLOS’02). 5–17.
+
+RAJWAR, R., HERLIHY, M., AND LAI, K. 2005. Virtualizing transactional memory. In Proceedings of the 32nd
+
+Annual International Symposium on Computer Architecture (ISCA’05). 494–505.
+
+RAMADAN, H. E. ROSSBACH, C. J., AND WITCHEL, E. 2008. Dependence-Aware transactional memory for
+increased concurrency. In Proceedings of the 41st Annual IEEE/ACM International Symposium on
+Microarchitecture (MICRO’08). 246–257.
+
+ROSSBACH, C., HOFMANN, O., AND WITCHEL, E. 2010. Is transactional programming really easier. In Proceedings
+of the 15th ACM SIGPLAN Symposium on Principles and Practice of Parallel Programming (PPoPP’10).
+47–56.
+
+SHRIRAMAN, A., DWARKADAS, S., AND SCOTT, M. 2008. Flexible decoupled transactional memory support. In
+Proceedings of the 35th Annual International Symposium on Computer Architecture (ISCA ’08). 139–150.
+SHRIRAMAN, A., SPEAR, M., HOSSAIN, H., MARATHE, V. J., DWARKADAS, S., ET AL. 2007. An integrated hardware-
+software approach to ﬂexible transactional memory. In Proceedings of the 34th Annual International
+Symposium on Computer Architecture (ISCA’07). 104–115.
+
+TITOS, R., ACACIO, M. E., AND GARCIA, J. M. 2009. Speculation-Based conﬂict resolution in hardware trans-
+actional memory. In Proceedings of the IEEE International Symposium on Parallel and Distributed
+Processing (IPDPS’09). 1–12.
+
+ACM Transactions on Architecture and Code Optimization, Vol. 9, No. 4, Article 42, Publication date: January 2013.
+
+42:26
+
+Z. Yan et al.
+
+TITOS-GIL, R., NEGI, A., ACACIO, M. E., GARCIA, J. M., AND STENSTROM, P. 2011. ZEBRA: A data-centric hybrid-
+policy hardware transactional memory design. In Proceedings of the 25th International Conference on
+Supercomputing (ICS’11). 53–62.
+
+TOMIC, S., PERFUMO, C., KULKARNI, C., ARMEJACH, A., CRISTAL, A., ET AL. 2009. Eazyhtm: Eager-lazy hardware
+transactional memory. In Proceedings the 42nd Annual IEEE/ACM International Symposium on
+Microarchitecture (MICRO’09). 145–155.
+
+TREMBLAY, N. AND CHAUDHRY, S. 2008. A third-generation 65nm 16-core 32-thread + 32-scout-thread cmt
+sparc processor. In Digest of Technical Papers of IEEE International Solid-State Circuits Conference
+(ISSCC’08). 82–83.
+
+YAN, Z., JIANG, H., FENG, D., TIAN, L., AND TAN, Y. 2012. SUV:A novel single update version-management
+scheme for hardware transactional memory systems. In Proceedings of the IEEE International
+Symposium on Parallel and Distributed Processing (IPDPS’12). 131–143.
+
+YEN, L., BOBBA, J., MARTY, M. R., MOORE, K. E., VOLOS, H., ET AL. 2007. LogTM-SE:Decoupling hardware
+transactional memory from caches. In Proceedings of the IEEE 13th International Symposium on High
+Performance Computer Architecture (HPCA’07). 261–272.
+
+ZHAO, L., CHOI, W., AND DRAPPER, J. 2012. SEL-TM: Selective eager-lazy management for improved concur-
+rency in transactional memory. In Proceedings of the IEEE International Symposium on Parallel and
+Distributed Processing (IPDPS’12). 95–106.
+
+Received June 2012; revised September 2012; accepted November 2012
+
+ACM Transactions on Architecture and Code Optimization, Vol. 9, No. 4, Article 42, Publication date: January 2013.
+
+

@@ -1,0 +1,2430 @@
+Online Windowed Subsequence Matching over 
+
+Probabilistic Sequences
+
+Zheng Li 
+
+University of Massachusetts, Lowell 
+
+zli@cs.uml.edu 
+
+Tingjian Ge 
+
+University of Massachusetts, Lowell 
+
+ge@cs.uml.edu
+
+ 
+
+ABSTRACT 
+Windowed  subsequence  matching  over  deterministic  strings  has 
+been  studied  in  previous  work  in  the  contexts  of  knowledge  dis-
+covery, data mining, and molecular biology. However, we observe 
+that  in  these  applications,  as  well  as  in  data  stream  monitoring, 
+complex  event  processing,  and  time  series  data  processing  in 
+which streams can be mapped to strings, the strings are often noisy 
+and  probabilistic.  We  study  this  problem  in  the  online  setting 
+where  efficiency  is  paramount.  We  first  formulate  the  query  se-
+mantics, and propose an exact algorithm. Then we propose a ran-
+domized  approximation  algorithm  that  is  faster  and,  in  the  mean 
+time, provably accurate. Moreover, we devise a filtering algorithm 
+to  further  enhance  the  efficiency  with  an  optimization  technique 
+that  is  adaptive  to  sequence  stream  contents.  Finally,  we  propose 
+algorithms for patterns with negations. In order to verify the algo-
+rithms,  we  conduct  a  systematic  empirical  study  using  three  real 
+datasets and some synthetic datasets. 
+
+Categories and Subject Descriptors 
+H.2.4 [Database Management]: Systems – query processing. 
+
+General Terms 
+Algorithms, Performance, Experimentation, Security, Theory. 
+
+Keywords 
+Online, Subsequence matching, Uncertain sequence. 
+
+1.  INTRODUCTION 
+Informally, a windowed subsequence match is as follows: given a 
+
+pattern (cid:1868)=(cid:1868)(cid:2869)(cid:1868)(cid:2870)…(cid:1868)(cid:3039) and a sequence (cid:1876)=(cid:1876)(cid:2869)…(cid:1876)(cid:3041), find the occur-
+rence  of (cid:1868)  within  a  window  of  size (cid:1875)	(cid:4666)(cid:1875)(cid:3410)(cid:1864)(cid:4667)  in (cid:1876) ,  where 
+(cid:1868)(cid:2869),…,(cid:1868)(cid:3039) appear in the same order but need not be contiguous (i.e., 
+
+it  is  a  subsequence,  rather  than  a  substring).  This  problem  has 
+been  studied  in  previous  work  for  deterministic  sequences  [1], 
+with  its  applications  in  knowledge  discovery,  data  mining  (e.g., 
+finding  frequent  subsequence  patterns)  [18,  19],  and  molecular 
+biology  (e.g.,  DNA  patterns  with  variable-length  “don’t  care” 
+symbols in the middle) [17, 13]. However, in these and many other 
+modern data management applications, such as data stream moni-
+toring,  complex  event  processing,  and  finding  patterns  in  time 
+
+ 
+
+Permission to make digital or hard copies of all or part of this work for 
+personal or classroom use is granted without fee provided that copies are 
+not  made  or  distributed  for  profit  or  commercial  advantage  and  that 
+copies  bear  this  notice  and  the  full  citation  on  the  first  page.  To  copy 
+otherwise,  or  republish,  to  post  on  servers  or  to  redistribute  to  lists, 
+requires prior specific permission and/or a fee. 
+SIGMOD’12, May 20–24, 2012, Scottsdale, Arizona, USA.
+Copyright 2012 ACM  978-1-4503-1247-9/12/05...$10.00. 
+ 
+
+277
+
+series, it is often the case that we need to efficiently perform win-
+dowed  subsequence  matching  over  probabilistic  and  uncertain 
+sequences. We now look at some examples. 
+
+Time series data is often discretized into symbols so that data min-
+ing and data analysis algorithms (including the ones in this work) 
+can be applied. A lot of work uses this approach starting from the 
+popular  SAX  methods  [16].  For  instance,  in  many  hospitals, 
+Holter  monitors  are  used,  in  which  sensors  are  attached  to  heart 
+disease patients and continuously send out ECG signals through a 
+wireless  network  to  a  central  server.  As  was  exemplified  in  the 
+widely  used  MIT-BIH  Arrhythmia  dataset  [33],  the  ECG  signals 
+can be digitized at 360 samples per second per channel with 11-bit 
+resolution over a 10 mV range. Figure 1 from [31] shows a possi-
+ble  ECG  signal,  with  the  annotated  turning  points  P,  Q,  R,  S,  T, 
+etc. Note that due to the very noisy nature of both sensing devices 
+and wireless communication, the received ECG signals would not 
+be as clear-cut as in Figure 1; we need to model each sample as a 
+probability  distribution  (otherwise  we  may  miss  true  occurrences 
+of a pattern). 
+
+ 
+
+         
+
+ 
+
+Figure 1.  Illustration of a typical ECG signal and R-R 
+intervals [31]. 
+
+ 
+
+ 
+
+Many  monitoring  tasks  on  the  real-time  ECG  signals  can  be  ac-
+complished  through  windowed  subsequence  matching.  A  sudden 
+occurrence of dangerous patterns in ECG signals may indicate an 
+emergent  condition  [20].  For  instance,  a  doctor  might  want  to  be 
+notified  when  a  patient’s  R-R  interval  is  too  long  or  too  short, 
+even momentarily. If we discretize a signal sample into values 0 to 
+3  based  on  the  voltage  range,  detecting  a  too-short  R-R  interval 
+
+can  be  achieved  through  matching  a  subsequence (cid:1868)=(cid:885)(cid:882)(cid:882)(cid:882)(cid:885) 
+within  a  short  window  size (cid:1875)(cid:2869),  where  a  “3”  matches  an  R  peak 
+larly,  a  pattern (cid:1868)=(cid:885)(cid:882)(cid:885)(cid:3364)(cid:882)(cid:885)(cid:3364)  with  a  long  window (cid:1875)(cid:2870) can  detect  a 
+too-long R-R interval, where the first (cid:885)(cid:3364) requires no occurrence of 
+(cid:885) between  the  two  matching (cid:882)’s  around  it,  and  the  second (cid:885)(cid:3364) re-
+quires  no  occurrence  of (cid:885) between  the  previous  matching (cid:882) and 
+
+and a “0” matches any of the flat points in between two R’s. Simi-
+
+the end of the window. 
+
+As another example, there has been a proliferation of smartphones 
+that can provide location estimates using a variety of sensors, such 
+as  GPS,  WiFi,  and/or  cellular  triangulation  [28].  This  opens  up 
+great  opportunity  for  business  intelligence.  In  a  shopping  mall, 
+
+customer locations combined with a map can give a noisy, proba-
+bilistic stream of each customer’s visit sequence. An entrepreneur 
+may query the subsequence <restaurant, dessert shop, movie thea-
+ter>  of  a  customer  to  discover  consuming  patterns  and  service 
+qualities. Likewise, RFID sensors have been installed on shopping 
+carts or shelves in a supermarket to observe a shopper’s shopping 
+path  [14]  or  to  detect  shoplifting  [29]  through  windowed  subse-
+quence  matching  queries.  Additionally,  we are collaborating  with 
+researchers  at  the  Kentucky  Transportation  Center  (KTC)  [32], 
+who install sensors on highways to monitor passing vehicles’ driv-
+ing  behaviors.  Using  subsequence  queries,  we  detect  multiple 
+truck tailgaters in short time windows (which incur a higher risk of 
+chain accidents), the details of which are discussed in the experi-
+ment section. 
+
+1.1  Related Work 
+As  discussed  earlier,  windowed  subsequence  matching  on  deter-
+ministic strings has been studied before [1], with its applications in 
+knowledge discovery, data mining, and molecular biology [18, 19, 
+17,  13].  In  recent  years,  there  has  also  been  quite  some  work  on 
+data stream monitoring (e.g., [26, 2, 3], to list but a few), complex 
+event  processing  (e.g.,  [9,  29,  4]),  and  pattern  matching  in  time 
+series  data  (e.g.,  [16,  30]).  Windowed  subsequence  matching  is 
+often a  crucial  query  type  and/or  a  building  block  for  more  com-
+plex query types in these applications.  
+
+On  the  other  hand,  it  is  observed  that  the  sequence  data  in  these 
+applications  is  often  uncertain  and  probabilistic  (e.g.,  [22,  12,  8] 
+for  DNA  sequences,  [5,  15]  for  RFID  and  data  streams,  and  [25] 
+for time series). In the context of RFID data, there has been previ-
+ous work on event queries on probabilistic streams [23]. However, 
+it has a very different focus than our work (e.g., different types of 
+queries and different applications). It handles event queries includ-
+ing regular queries, but it does not handle windowed subsequence 
+matching as in our work. As also pointed out by Boasson et al. [1], 
+the  problem  is  easier  without  the  window-size  constraint.  In  par-
+ticular,  the  deterministic  version  is  trivially  solved  by  a  linear 
+
+parse of the stream and using a |(cid:1868)|+(cid:883) state automaton (where |(cid:1868)| 
+portion of  (cid:1868) again).  More importantly, a richer set of applications 
+
+denotes  the  pattern  length)  that  enters  the  next  state  whenever 
+there is a character match (i.e., no need to go back to the matched 
+
+do require the window constraint for practical queries (like in our 
+Holter  monitor  example  and  the  real  datasets  in  Section  7).  In 
+particular,  we  study  the  window  constraint  combined  with  front 
+and  rear  negations.  Indeed,  the  real-time  monitoring  queries  that 
+we study in this work all require window-size constraints and can-
+not be achieved through the queries in [23]. Thus, our work targets 
+a  broad  range  of  real-time  continuous  monitoring  applications. 
+Furthermore, our contributions also include a randomized approx-
+imation algorithm and an adaptive filtering optimization. 
+
+A concept that is related to windowed subsequence matching is the 
+dynamic  time  warping  (DTW)  that  measures  the  similarity  be-
+tween  two  sequences  [24].  DTW  has  been  used  in  automatic 
+speech  recognition,  etc.  Windowed  subsequence  matching  has  a 
+different  semantics  and  is  a  different  problem.  For  example,  the 
+detections of too-short and too-long R-R intervals in the aforemen-
+tioned ECG monitoring application cannot be accomplished using 
+DTW.  
+
+There is also some previous work on approximate string matching 
+over  sequence  data  (e.g.,  [27,  10,  8]).  However,  as  discussed  in 
+Section  2,  there  are  fundamental  differences  between  the  seman-
+tics of subsequence and string matches; hence they require differ-
+ent query processing algorithms. 
+
+ 
+
+278
+
+1.2  Our Contributions 
+We  formulate  the  semantics  of  probabilistic  windowed  subse-
+quence  matching  (PWSM)  queries  with  and  without  negations. 
+Following  the  semantics,  we  give  an  exact  algorithm  EXACT-
+
+MATCH  of  complexity (cid:1841)(cid:4666)(cid:1864)∙(cid:1875)(cid:4667)  per  data  item  to  answer  such 
+queries,  where (cid:1864) is  the  length  of  the  pattern,  and (cid:1875) is  the  window 
+size  threshold.  Since (cid:1875)  can  be  large  for  many  applications,  we 
+with  a  reduced  cost  of (cid:1841)(cid:4666)(cid:1864)⋅√(cid:1875)(cid:4667) per  data  item  in  the  sequence. 
+
+Importantly,  this  complexity  bound  has  theoretical  significance. 
+We  prove  that,  with  this  complexity,  the  error  rate  of  APPROX-
+MATCH can be arbitrarily small.  
+
+devise a randomized approximation algorithm APPROX-MATCH 
+
+As  efficiency  is  crucial  for  online  real-time  matching,  we  further 
+devise a technique called an Adaptive Filtering (AF) that only tries 
+to match a prefix of the pattern most of the time. Using the gradi-
+ent  descent  optimization  technique,  we  choose  the  parameters  of 
+AF adaptively based on the contents of the sequence stream. Final-
+ly,  we  propose  algorithms  that  handle  three  forms  of  negation: 
+surrounded,  front,  and  rear  negations,  with  front  and  rear  nega-
+tions  being  inherently  harder  and  requiring  extra  overhead.  To 
+summarize, the contributions of this work include: 
+
+ 
+ 
+ 
+
+ 
+
+ 
+
+ 
+
+A formulation of the semantics of PWSM queries. 
+An exact algorithm for PWSM. 
+A  randomized  approximation  algorithm  that  is more  ef-
+ficient and has accuracy guarantees. 
+A filtering algorithm and an optimization that is adaptive 
+to  dynamic  stream  contents  using  the  gradient  descent 
+technique. 
+Algorithms  that  handle  three  types  of  negations  in  pat-
+terns.  
+A  systematic  experimental  evaluation  on  real  and  syn-
+thetic datasets. 
+
+Paper Organization.  The remainder of the paper is organized as 
+follows: We present the semantics of probabilistic windowed sub-
+sequence  matching  with  and  without  negations  in  Section  2.  In 
+Section  3,  we  devise  an  exact  algorithm,  EXACT-MATCH,  to 
+answer  a  PWSM  query  without  negation.  We  also  prove  its  cor-
+rectness and analyze its complexity. Then, in Section 4, we present 
+a  randomized  approximation  algorithm  and  prove  its  accuracy 
+with a properly chosen parameter value. We present the AF algo-
+rithm in Section 5, and devise algorithms for handling negations in 
+Section 6. Finally, we perform an experimental evaluation in Sec-
+tion 7 and conclude in Section 8. 
+
+2.  PRELIMINARIES AND QUERY 
+SEMANTICS 
+
+Note  that  we  use  the  terms  sequence  and  string  interchangeably; 
+but  there  is  a  fundamental  difference  between  subsequence  and 
+substring, as discussed below. 
+
+We consider a sequence (cid:1850)=(cid:1850)[(cid:883)](cid:1850)[(cid:884)]…, where (cid:1850)[(cid:1861)]∈Σ ((cid:1861)(cid:3410)(cid:883)), 
+and  Σ  is  called  the  alphabet.  A  pattern (cid:1868) has  the  form (cid:1868)[(cid:883)](cid:1868)[(cid:884)] 
+…(cid:1868)[(cid:1864)], where (cid:1864) is the length of (cid:1868) (denoted as l = |p|) and (cid:1868)[(cid:1861)]∈Σ. 
+matching  (DWSM)  problem  is  to  report  all  indexes (cid:1861) of  the  se-
+quence  X,  in  ascending  order,  for  which  there  exist (cid:1861)−(cid:1875)+(cid:883)(cid:3409)
+(cid:1861)(cid:2869)<(cid:1861)(cid:2870)<⋯<(cid:1861)(cid:3039)(cid:3409)(cid:1861)  satisfying (cid:1850)[(cid:1861)(cid:2869)]=(cid:1868)[(cid:883)] ,  …, (cid:1850)[(cid:1861)(cid:3039)]=(cid:1868)[(cid:1864)] , 
+that (cid:1861)(cid:3037) is the matching position of (cid:1868)[(cid:1862)] in X (for (cid:883)(cid:3409)(cid:1862)(cid:3409)(cid:1864)). 
+
+Definition  1  (DWSM). The deterministic windowed subsequence 
+
+where w is a parameter called the window size threshold. We say 
+
+       end for 
+
+Note  that the  substring  matching  problem  [1]  is  a  special case  of 
+
+There is a well-known algorithm to solve DWSM with time com-
+plexity  O(l)  per  data  item  in  the  sequence,  and  space  complexity 
+O(l) overall. The algorithm is as follows [1]: 
+
+subsequence  matching  where (cid:1861)(cid:3037)(cid:2878)(cid:2869)=(cid:1861)(cid:3037)+(cid:883) ,  for (cid:883)(cid:3409)(cid:1862)(cid:3409)(cid:1864)−(cid:883) . 
+for each (cid:1861)∈[(cid:883)…(cid:1864)] do (cid:1871)[(cid:1861)]←(cid:882)  end for 
+for each (cid:1861)(cid:3410)(cid:883) in increasing order do 
+       if (cid:1850)[(cid:1861)]=(cid:1868)[(cid:883)] then (cid:1871)[(cid:883)]←(cid:1861) end if 
+       for each (cid:1862)∈[(cid:884)…(cid:1864)] do 
+              if (cid:1850)[(cid:1861)]=(cid:1868)[(cid:1862)] then (cid:1871)[(cid:1862)]←(cid:1871)[(cid:1862)−(cid:883)] end if 
+       if (cid:1861)−(cid:1871)[(cid:1864)]<(cid:1875) then report (cid:1861)  end if  
+Thus,  in  the  second  to  last  line,  if  the  window  size (cid:1861)−(cid:1871)[(cid:1864)]<(cid:1875), 
+
+In this algorithm, s[j] is the starting position in the sequence X of 
+the  most  recently  seen  minimal  substring  containing  p[1]…p[j]. 
+
+we report the index i as a match (i.e., it is the end of a match win-
+dow).  Our  exact  algorithm  (Section  3)  substantially  modifies  and 
+extends  this  algorithm  for  probabilistic  sequences.  Furthermore, 
+we  devise  a  number  of  novel  techniques  –  a  provably  accurate 
+randomized approximation algorithm, an adaptive filtering optimi-
+zation,  and  algorithms  that  handle  negations  –  to  meet  the  real-
+time continuous monitoring needs. 
+
+end for 
+
+tion. 
+
+the negation of c. We denote the subsequence of p that consists of 
+
+Definition 2 (DWSM with Negation). We extend the alphabet of 
+
+positive  characters  c1  to  the  left  and  c2  to  the  right,  but  no 
+other positive characters between c1 and c2 in p, there must 
+not be an occurrence of c between the matching position of 
+
+acters) as p−. Moreover, let l+ = |p+| and l− = |p−| (hence, l+ + l− 
+= l). The DWSM with negation is the DWSM problem of pattern 
+p+ over string X with the following constraints: 
+
+a pattern to be (cid:2001)(cid:3552)=(cid:2001)⋃(cid:2001)(cid:3364), where (cid:1855)∈(cid:2001)⟺(cid:1855)̅∈(cid:2001)(cid:3364). Here, (cid:1855)̅ is called 
+all characters in (cid:2001) (called positive characters) as p+, and the sub-
+sequence that consists of all characters in (cid:2001)(cid:3364) (called negative char-
+(1)  For a negative character (cid:1855)̅ (i.e., negation of (cid:1855)) in p that has 
+c1  and  that  of  c2  in  X.  We  say  that (cid:1855)̅ is  a  surrounded  nega-
+(2)  For  a  negative  character (cid:1855)̅  that  does  not  have  a  positive 
+character to the left in (cid:1868), it is required that the last charac-
+ter  of (cid:1868) must  be  positive  (i.e., (cid:1868)[(cid:1864)]∈(cid:2001)).  Let (cid:1868)[(cid:1864)]’s  match  in 
+X  be (cid:1850)[(cid:1861)(cid:3039)],  and  let  the  first  positive  character  in (cid:1868) be (cid:1855)(cid:2868) . 
+Then  the  matching  dictates  that  between  index (cid:1861)(cid:3039)−(cid:1875)+(cid:883) 
+and the matching position of (cid:1855)(cid:2868) in X, there is no occurrence 
+of (cid:1855). We say that (cid:1855)̅ is a front negation. 
+(3)  Similarly,  for  a  negative  character (cid:1855)̅ that  does  not  have  a 
+positive  character  to  the  right  in (cid:1868),  it  is  required  that  the 
+first  character  of (cid:1868)  must  be  positive  (i.e., (cid:1868)[(cid:883)]∈(cid:2001) ).  Let 
+(cid:1868)[(cid:883)]’s match in X be (cid:1850)[(cid:1861)(cid:2869)], and let the last positive charac-
+ter  in (cid:1868) be (cid:1855)(cid:2868).  Then  the  matching  dictates  that  between  the 
+matching  position  of (cid:1855)(cid:2868) and  index (cid:1861)(cid:2869)+(cid:1875)−(cid:883) in  X,  there  is 
+no occurrence of (cid:1855). We say that (cid:1855)̅ is a rear negation. 
+Example  1.  Consider  the  pattern (cid:1868)=(cid:885)(cid:882)(cid:885)(cid:3364)(cid:882)(cid:885)(cid:3364)  in  Section  1  that 
+detects  a  too-long  R-R  interval.  Let (cid:1875)=(cid:885)(cid:888)(cid:882).  Then (cid:1868)(cid:2878)=(cid:885)(cid:882)(cid:882), 
+(cid:1864)(cid:2878)=(cid:885), (cid:1868)(cid:2879)=(cid:885)(cid:3364)(cid:885)(cid:3364), and (cid:1864)(cid:2879)=(cid:884). The first (cid:885)(cid:3364) is a surrounded negation 
+requiring no (cid:885)’s between two matching (cid:882)’s around it. The second 
+(cid:885)(cid:3364) is a rear negation, requiring that, between the matching position 
+of the  previous positive character  in (cid:1868) (i.e.,  0)  and  the  end  of the 
+window (i.e., distance (cid:1875)=(cid:885)(cid:888)(cid:882) from the matching position of the 
+
+ 
+
+279
+
+tects  no  two  R  peaks  within  a  large  window  of  size  360,  which 
+implies that the R-R interval is too long. 
+
+We  are  now  ready  to  define  the  subsequence  matching  problem 
+over a probabilistic sequence, which is the focus of this work. 
+
+first (cid:885)),  there  is  no  occurrence  of (cid:885)’s.  Therefore,  the  pattern  de-
+Definition  3  (PWSM).  Let each (cid:1850)[(cid:1861)] in string (cid:1850) be an independ-
+over (cid:2001), for (cid:1861)(cid:3410)(cid:883). The probabilistic windowed subsequence match-
+extra parameter (cid:2028), called the probability threshold. An index posi-
+tion (cid:1861) is  reported  if  and  only  if  the  probability  that  it  is  reported 
+(cid:2028). 
+
+ing (PWSM) problem (with or without negation) is the probabilis-
+tic version of the corresponding DWSM (Definition 1 or 2) with an 
+
+ent  random  variable  that  has  a  probability  mass  function  (PMF) 
+
+over all (deterministic) possible worlds based on DWSM is at least 
+
+Our  focus  in  this  work  is  efficient  continuous  online  monitoring 
+PWSM  queries  that  detect  subsequence  patterns.  Thus,  high 
+throughput and low memory consumption are of paramount signif-
+icance. 
+
+ward  approach  for  PWSM  is  to  consider  all  possible  worlds  of  a 
+
+It turns out that we can have a much more efficient algorithm that 
+
+make  the  presentation  of  the  algorithms  more  succinct,  we  start 
+with some notations. 
+
+clearly  infeasible  due  to  the  exponential  number  of  possible 
+worlds.  
+
+3.  AN EXACT ALGORITHM 
+We  start  with  the  PWSM  problem  without  negations;  negations 
+
+3.1  Notations 
+We first define a data type called truncated window size distribu-
+
+will  be  discussed  in  Section  6.  For  an  index (cid:1861) in  the  sequence, 
+define a random variable (cid:1849)[(cid:1861)] to be the size of the minimal win-
+dow  to  the  left  of (cid:1861)  that  contains (cid:1868)  as  a  subsequence.  In  other 
+words,  the  window  from  index (cid:1861)−(cid:1849)[(cid:1861)]+(cid:883)  to  index (cid:1861)  should 
+contain (cid:1868) as  a  subsequence,  and  is  minimal.  Then  a  straightfor-
+sequence  up  to  index (cid:1861) and  calculate Pr	(cid:4666)(cid:1849)[(cid:1861)](cid:3409)(cid:1875)(cid:4667) by  summing 
+the  probabilities  of  all  possible  worlds  in  which (cid:1849)[(cid:1861)](cid:3409)(cid:1875).  The 
+index (cid:1861) is  reported  if Pr	(cid:4666)(cid:1849)[(cid:1861)](cid:3409)(cid:1875)(cid:4667),  for  each (cid:1861).  However,  this  is 
+takes  time (cid:1841)(cid:4666)(cid:1864)∙(cid:1875)(cid:4667) per  data  item  and  space (cid:1841)(cid:4666)(cid:1864)∙(cid:1875)(cid:4667) overall.  To 
+tion, denoted as (cid:2289)(cid:2270). A (cid:2289)(cid:2270) type object d essentially describes a 
+being (cid:1861) is (cid:1868)(cid:3036) ,  where ∑ (cid:1868)(cid:3036)
+(cid:3050)(cid:3036)(cid:2880)(cid:2868) <(cid:883),  with  proba-
+bility (cid:883)−∑ (cid:1868)(cid:3036)
+(cid:3050)(cid:3036)(cid:2880)(cid:2868)
+not matter in that case).  For a (value, probability) pair (cid:4666)(cid:1861),(cid:1868)(cid:3036)(cid:4667), we 
+write (cid:4666)(cid:1861),(cid:1868)(cid:3036)(cid:4667)∈(cid:1856) if (cid:4666)(cid:1861),(cid:1868)(cid:3036)(cid:4667) is an element of the PMF of d.  
+We  now  define  a  few  operators  over (cid:2289)(cid:2270).  Unless  otherwise  de-
+fined,  we  let (cid:1856) be  a (cid:2289)(cid:2270) object  that  encodes  a  PMF  {(cid:4666)(cid:1861),	(cid:1868)(cid:3036)(cid:4667),  for 
+(cid:882)(cid:3409)(cid:1861)(cid:3409)(cid:1875)}. For convenience of quick reference, we also summa-
+  We write (cid:2186)≽(cid:2254) if ∑ (cid:1868)(cid:3036)
+(cid:3050)(cid:3036)(cid:2880)(cid:2868) (cid:3410)(cid:2028). 
+The  operation  ++d  produces  a (cid:2289)(cid:2270) object  that  has  a  PMF 
+{(cid:4666)(cid:1861)+(cid:883),(cid:1868)(cid:3036)(cid:4667), for (cid:882)(cid:3409)(cid:1861)(cid:3409)(cid:1875)−(cid:883)}. That is, all values that are 
+ties. If (cid:1856)=⊥ (i.e., null), then ++(cid:1856)=⊥. 
+
+PMF over values [0…w]. The PMF is a set of (value, probability) 
+pairs {(0, p0), (1, p1), …, (w, pw)}, denoting that the probability of 
+
+(cid:3050)(cid:3036)(cid:2880)(cid:2868) (cid:3409)(cid:883).  When ∑ (cid:1868)(cid:3036)
+
+less than w are increased by 1 and have the same probabili-
+
+, the value is greater than w (the exact values do 
+
+rize these notations in Table 1 that follows. 
+
+ 
+
+Similarly,  for  a  real  value (cid:882)(cid:3409)(cid:1868)(cid:3409)(cid:883),  the  expression (cid:2198)⋅(cid:2186) 
+denotes  a (cid:2289)(cid:2270)  object  that  has  a  PMF  {(cid:4666)(cid:1861),(cid:1868)∙(cid:1868)(cid:3036)(cid:4667) ,  for 
+(cid:882)(cid:3409)(cid:1861)(cid:3409)(cid:1875)}. That is, all probabilities are multiplied by (cid:1868). If 
+(cid:1856)=⊥ (i.e., null), then (cid:1868)⋅(cid:1856)=⊥. 
+For  two (cid:2289)(cid:2270) objects  d1  and  d2,  we  define (cid:2186)=(cid:2186)(cid:2778)⋃(cid:2186)(cid:2779) as  a 
+(cid:2289)(cid:2270) object  whose  PMF  is  constructed  as  follows: ∀(cid:4666)(cid:1861),(cid:1868)(cid:4667)∈
+(cid:1856)(cid:2869) ((cid:1856)(cid:2870),  respectively),  if (cid:1485)(cid:1868)′,(cid:1871).(cid:1872).(cid:4666)(cid:1861),(cid:1868)′(cid:4667)∈(cid:1856)(cid:2870) ((cid:1856)(cid:2869),  respective-
+ly),  then (cid:4666)(cid:1861),(cid:1868)(cid:4667)∈(cid:1856).  Moreover, ∀(cid:4666)(cid:1861),(cid:1868)(cid:4667)∈(cid:1856)(cid:2869),(cid:3435)(cid:1861),(cid:1868)′(cid:3439)∈(cid:1856)(cid:2870),  we 
+have (cid:4666)(cid:1861),(cid:1868)+(cid:1868)′(cid:4667)∈(cid:1856). d does not contain any other element. If 
+d  constructed  as  such  violates  the  constraint ∑ (cid:1868)(cid:3036)
+(cid:3050)(cid:3036)(cid:2880)(cid:2868) (cid:3409)(cid:883) , 
+then (cid:1856)=⊥. If (cid:1856)(cid:2870)=⊥, then (cid:1856)(cid:2869)⋃(cid:1856)(cid:2870)=(cid:1856)(cid:2870)⋃(cid:1856)(cid:2869)=(cid:1856)(cid:2869). Intuitive-
+ly, (cid:1856)(cid:2869)⋃(cid:1856)(cid:2870) is the “merge” of (cid:1856)(cid:2869) and (cid:1856)(cid:2870) into one PMF. 
+∑ (cid:1868)(cid:3036)
+(cid:3050)(cid:3036)(cid:2880)(cid:2868) (cid:3410)(cid:2028) for (cid:4666)(cid:1861),(cid:1868)(cid:3036)(cid:4667)∈(cid:1856) 
+(cid:2186)≽(cid:2254) 
+A (cid:2289)(cid:2270) object with a PMF {(cid:4666)(cid:1861)+(cid:883),(cid:1868)(cid:3036)(cid:4667)}, 
+for (cid:882)(cid:3409)(cid:1861)(cid:3409)(cid:1875)−(cid:883),(cid:4666)(cid:1861),(cid:1868)(cid:3036)(cid:4667)∈(cid:1856). 
+A (cid:2289)(cid:2270) object  with  a  PMF  {(cid:4666)(cid:1861),(cid:1868)∙(cid:1868)(cid:3036)(cid:4667)}, 
+(cid:2198)⋅(cid:2186) 
+for (cid:882)(cid:3409)(cid:1861)(cid:3409)(cid:1875), (cid:4666)(cid:1861),(cid:1868)(cid:3036)(cid:4667)∈(cid:1856). 
+The “merge” of (cid:1856)(cid:2869) and (cid:1856)(cid:2870) into one 
+(cid:2186)(cid:2778)⋃(cid:2186)(cid:2779) 
+
+Table 1. Summary of Notations 
+
+Meaning 
+
+PMF. 
+
+Expression 
+
+++d 
+
+ 
+
+ 
+
+ 
+
+Output: all positions in X that are PWSM matches 
+
+Input: X: uncertain sequence, p: pattern without negations, 
+
+smallest window to the left of current character in the stream that 
+
+of  the  stream  are  updated  based  on  their  values  at  the  previous 
+position. The EXACT-MATCH algorithm is shown below. 
+
+3.2  The Algorithm 
+The key idea of the algorithm is that we always maintain a length 
+
+(cid:1864)+(cid:883) array  of (cid:2289)(cid:2270) ((cid:1856)[(cid:882)…(cid:1864)])  that  records  the  distribution  of  the 
+smallest  past  window  that  contains  each  prefix  of (cid:1868) as  a  subse-
+quence.  That  is, (cid:1856)[(cid:1862)] ((cid:883)(cid:3409)(cid:1862)(cid:3409)(cid:1864))  is  the  distribution  of  the  size  of 
+contains (cid:1868)[(cid:883)]…(cid:1868)[(cid:1862)] as a subsequence. The (cid:1856)[∙]’s at each position 
+Algorithm EXACT-MATCH(cid:4666)(cid:1850),(cid:1868),(cid:1875),(cid:2028)(cid:4667) 
+            w: window size threshold, (cid:2028): probability threshold 
+// Initialization of an array of (cid:2289)(cid:2270) objects with parameter w 
+1:  d[0] ← {(0, 1)}     //a (cid:2289)(cid:2270) object – value 0 with probability 1 
+for each (cid:1861)∈[(cid:883)…(cid:1864)] do 
+        (cid:1856)[(cid:1861)]←⊥           //a null (cid:2289)(cid:2270) object 
+for each (cid:1861)(cid:3410)(cid:883) in increasing order do 
+        for each (cid:1862)←(cid:1864)	(cid:1856)(cid:1867)(cid:1875)(cid:1866)(cid:1872)(cid:1867)	(cid:883) do        // l is the length of p 
+                (cid:1868)(cid:2869)←Pr	(cid:4666)(cid:1850)[(cid:1861)]=(cid:1868)[(cid:1862)](cid:4667)       // probability of a match 
+                (cid:1868)(cid:2870)←(cid:883)−(cid:1868)(cid:2869) 
+                (cid:1856)[(cid:1862)]←[(cid:1868)(cid:2869)⋅(cid:4666)++(cid:1856)[(cid:1862)−(cid:883)](cid:4667)]	⋃	[(cid:1868)(cid:2870)⋅(cid:4666)++(cid:1856)[(cid:1862)](cid:4667)] 
+11:          if (cid:1856)[(cid:1864)]≽(cid:2028) then 
+12:                  report (cid:1861) 
+In  lines  1  to  4,  the  algorithm  first  initializes  an  array  of (cid:2289)(cid:2270) ob-
+jects (cid:1856)[(cid:882)] (initialized to a single value 0 with probability 1), (cid:1856)[(cid:883)], 
+
+5: 
+6: 
+7: 
+8: 
+9: 
+10:         end for 
+
+13:         end if 
+14:    end for 
+
+// Scan the sequence 
+
+2: 
+3: 
+4: 
+
+end for 
+
+ 
+
+280
+
+…, (cid:1856)[(cid:1864)] (each initialized to ⊥). Then, for each uncertain character 
+(cid:1850)[(cid:1861)] in the sequence (line 5), we update the (cid:1856)[⋅] array. Specifical-
+ly, (cid:1856)[(cid:1862)] is  updated  based  on  the  previous  values  of (cid:1856)[(cid:1862)−(cid:883)] and 
+(cid:1856)[(cid:1862)] in  line  9.  Here, (cid:1856)[(cid:1862)] is  the  distribution  of  minimal  size  of  a 
+window  that  ends  at  position (cid:1861)  and  contains  the  pattern  prefix 
+(cid:1868)[(cid:883)..(cid:1862)] as a subsequence. Thus, (cid:1856)[(cid:1864)] is the distribution of minimal 
+size of a window that contains the whole pattern (cid:1868). By comparing 
+(cid:2028) with the total probability of this window size being no more than 
+(cid:1875), we tell if there is a match that ends at position (cid:1861) (line 11). 
+Example  2.  Figure  2  illustrates  EXACT-MATCH.  Here (cid:1868)=(cid:885)(cid:882)(cid:885) 
+and  X  contains  a  probabilistic  sequence  as  shown,  where  “(cid:884)/(cid:885)” 
+denotes the distribution of two possible values (cid:884) and (cid:885) with prob-
+ability (cid:882).(cid:887) each.  For  simplicity,  we  only  use  two  possible  values 
+for  an  uncertain  character  as  such.  The  window  size  threshold (cid:1875) 
+is (cid:886).  This  example  is  similar  to  finding  a  short  R-R  interval  de-
+scribed in Section 1, where the two (cid:885)’s in (cid:1868) are two peaks. 
+The  first  column  shows  how  we  initialize  the (cid:1856)[∙] array.  We  then 
+character “(cid:884)/(cid:885)”, it has probability 1/2 matching (cid:1868)[(cid:883)]. Thus, (cid:1856)[(cid:883)] 
+is updated based on the current values of (cid:1856)[(cid:882)] (value 0 with prob-
+ability  1)  and (cid:1856)[(cid:883)] (⊥),  and  is  changed  to (cid:4666)(cid:883),(cid:883)/(cid:884)(cid:4667),  i.e.,  value (cid:883) 
+with  probability (cid:883)/(cid:884).  We  incrementally  make  changes  to (cid:1856)[⋅] as 
+find  a  match  where,  with  probability (cid:883)/(cid:886),  the  matching  window 
+size is (cid:885), and with probability (cid:883)/(cid:890) it is (cid:886). Thus, at this position in 
+X, the probability of a match (within (cid:1875)=(cid:886)) is (cid:2869)(cid:2872)+(cid:2869)(cid:2876)=(cid:2871)(cid:2876), and we 
+will compare it with (cid:2028). 
+
+update  this  same  array  (shown  in  the  corresponding  column)  for 
+each character in X. For example, when seeing the first uncertain 
+
+shown  in  each  column.  In  the  fifth  column  and  the  last  row,  we 
+
+ 
+
+ 
+
+Figure 2.  Illustration of EXACT-MATCH with w = 4. 
+
+Theorem 1 below establishes the correctness of EXACT-MATCH. 
+
+ 
+
+Theorem 1.  The algorithm EXACT-MATCH is correct. 
+
+the minimal matching window size is one plus the minimal match-
+
+Proof.    We  only  need  to  show  that  line  9  of  EXACT-MATCH 
+
+gives the correct distribution for (cid:1856)[(cid:1862)]. Recall that (cid:1856)[(cid:1862)] is defined as 
+the  size  of  the minimal  window  that  contains (cid:1868)[(cid:883)..(cid:1862)].  Consider  a 
+possible world (cid:2024) in which (cid:1850)[(cid:1861)]=(cid:1868)[(cid:1862)]. Then (cid:1856)[(cid:1862)]=(cid:1856)[(cid:1862)−(cid:883)]+(cid:883), 
+where (cid:1856)[(cid:1862)−(cid:883)] is  from  the  previous  character (cid:1850)[(cid:1861)−(cid:883)].  That  is, 
+ing window size of (cid:1850)[(cid:1861)−(cid:883)] for (cid:1868)[(cid:883)..(cid:1862)−(cid:883)]. Similarly, for a pos-
+sible  world (cid:2024) in  which (cid:1850)[(cid:1861)]≠(cid:1868)[(cid:1862)],  we  can  just  increase (cid:1856)[(cid:1862)] by 
+previous  best  match  window  size  for (cid:1868)[(cid:883)..(cid:1862)].  Therefore,  combin-
+ing position if the probability of matching is above the threshold (cid:2028). 
+
+ing all possible worlds (i.e., they are weighted by their probabili-
+ties), we have the result in line 9. Lines 11 and 12 report a match-
+
+This concludes the proof.                                                          □ 
+
+one.  That  is,  the  minimal  matching  window  size  is  one  plus  the 
+
+9. 
+
+b, we approximate each value with the closest “bar”.  
+
+bility)  pairs  in  which  the  probability  is  non-zero  in  its  PMF.  We 
+
+PMF over values [0…w]. The basic idea of APPROX-MATCH is 
+
+4.  A RANDOMIZED APPROXIMATION 
+ALGORITHM AND ITS ANALYSIS 
+
+bars only; the probability of each value can be regarded as a verti-
+cal bar in a plot where the x-axis is value and the y-axis is proba-
+
+ly)  to  denote  the  maximum  (minimum,  respectively)  value  in  the 
+PMF of d that has a non-zero probability. We then define a binary 
+
+This is a significant saving for most applications that we are aware 
+of (where windows are reasonably large).  
+
+The  approximation  algorithm,  which  we  call  APPROX-MATCH, 
+is  a  randomized  algorithm  that  is  based  on  EXACT-MATCH. 
+
+is the pattern length and w is the window size threshold. This can 
+still  be  very  expensive,  especially  for  online  streaming  applica-
+tions when w is large. In this section, we show an approximation 
+
+defined in Section 3, except that we limit the size of the result to 
+be  no  more 
+than  b,  using  an  algorithm  RANDOM-
+ATTACHMENT  as  shown  below.  Then  APPROX-MATCH’s 
+
+The exact algorithm in Section 3 has an (cid:1841)(cid:4666)(cid:1864)⋅(cid:1875)(cid:4667) time complexity 
+per item in the sequence and takes (cid:1841)(cid:4666)(cid:1864)⋅(cid:1875)(cid:4667) overall space, where l 
+algorithm that lowers the time and space complexity to (cid:1841)(cid:4666)(cid:1864)⋅√(cid:1875)(cid:4667). 
+Recall  that,  in  EXACT-MATCH,  a (cid:2289)(cid:2270)  object  encapsulates  a 
+that,  instead  of  having  w+1  vertical  “bars”,  we  use (cid:1854)=(cid:1841)(cid:4666)√(cid:1875)(cid:4667) 
+bility. When the number of values in a (cid:2289)(cid:2270) object is greater than 
+For a (cid:2289)(cid:2270) object d, we denote as |(cid:1856)| the number of (value, proba-
+say  that |(cid:1856)| is the  size  of  d.  We  use max	(cid:4666)(cid:1856)(cid:4667) (min	(cid:4666)(cid:1856)(cid:4667),  respective-
+operator ⋃(cid:3029) ,  which  is  almost  identical  to  the ⋃ operator  that  is 
+only change from EXACT-MATCH is to replace ⋃ by ⋃(cid:3029) in line 
+Algorithm RANDOM-ATTACHMENT (cid:4666)(cid:1856),(cid:1854)(cid:4667) 
+Input: d: a (cid:2289)(cid:2270) object with a size greater than b, 
+           b: the required size of the output  (cid:2289)(cid:2270) object 
+Output: a (cid:2289)(cid:2270) object of size b 
+1:  (cid:1859)(cid:1853)(cid:1868)←[max(cid:4666)(cid:1856)(cid:4667)−min(cid:4666)(cid:1856)(cid:4667)]∕(cid:4666)(cid:1854)−(cid:883)(cid:4667) 
+2:  (cid:1870)←(cid:1870)(cid:1853)(cid:1866)(cid:1856)(cid:1867)(cid:1865)(cid:4666)min(cid:4666)(cid:1856)(cid:4667)−(cid:3034)(cid:3028)(cid:3043)(cid:2870) ,min(cid:4666)(cid:1856)(cid:4667)+(cid:3034)(cid:3028)(cid:3043)(cid:2870)(cid:4667) 
+for each (cid:1861)←(cid:883)…(cid:1854) do 
+    (cid:1874)(cid:1853)(cid:1864)(cid:1873)(cid:1857)[(cid:1861)]←(cid:1870)+(cid:4666)(cid:1861)−(cid:883)(cid:4667)∙(cid:1859)(cid:1853)(cid:1868)    //two bars are “gap” away 
+    (cid:1868)(cid:1870)(cid:1867)(cid:1854)(cid:1853)(cid:1854)(cid:1861)(cid:1864)(cid:1861)(cid:1872)(cid:1877)[(cid:1861)]←(cid:882) 
+for each pair (cid:4666)(cid:1874)(cid:1853)(cid:1864),(cid:1868)(cid:1870)(cid:1867)(cid:1854)(cid:4667)∈(cid:1856) do 
+    choose (cid:1862) s.t. (cid:1874)(cid:1853)(cid:1864)(cid:1873)(cid:1857)[(cid:1862)] is closest to (cid:1874)(cid:1853)(cid:1864) among (cid:1874)(cid:1853)(cid:1864)(cid:1873)(cid:1857)[(cid:883)..(cid:1854)] 
+    (cid:1868)(cid:1870)(cid:1867)(cid:1854)(cid:1853)(cid:1854)(cid:1861)(cid:1864)(cid:1861)(cid:1872)(cid:1877)[(cid:1862)]+=(cid:1868)(cid:1870)(cid:1867)(cid:1854) 
+11:  return  a (cid:2289)(cid:2270)  object (cid:1856)′  that  encapsulates (cid:1874)(cid:1853)(cid:1864)(cid:1873)(cid:1857)[(cid:883)..(cid:1854)],
+(cid:1868)(cid:1870)(cid:1867)(cid:1854)(cid:1853)(cid:1854)(cid:1861)(cid:1864)(cid:1861)(cid:1872)(cid:1877)[(cid:883)..(cid:1854)] 
+Since  we  are  limited  to (cid:1854)  bars,  in  line  1  of  RANDOM-
+ty  of min(cid:4666)(cid:1856)(cid:4667).  The  positions  of  all (cid:1854) bars  are  fixed  accordingly 
+((cid:1874)(cid:1853)(cid:1864)(cid:1873)(cid:1857)[∙] in lines 3-6). Then we attach each bar in the input object 
+to  the  closest  one  within  the (cid:1854)  bars  that  we  have  just  selected 
+(cid:1874)(cid:1853)(cid:1864)(cid:1873)(cid:1857)[(cid:1861)] is rounded to the closest integer ((cid:883)(cid:3409)(cid:1861)(cid:3409)(cid:1854)). 
+
+ATTACHMENT, we calculate the gap between two adjacent bars. 
+In line 2, we choose the initial bar position randomly in the vicini-
+
+3: 
+4: 
+5: 
+6: 
+7: 
+8: 
+9: 
+10:  end for 
+
+// Determine the gap between two bars and the random 
+// position (r) of the first bar 
+
+(lines  7-10).  In  line  11,  we  return  the  approximate  object,  where 
+
+end for 
+
+ 
+
+281
+
+in 
+
+mal distribution. 
+
+each  of  which 
+
+is  bounded  by  a  uniform  distribution 
+
+the probability that the match is misplaced at the wrong side of the 
+
+RANDOM-ATTACHMENT has an error component (lines 8 and 
+
+tions of the bars are random in its neighborhood for each value in 
+
+of  the  random  walk,  which  is  also  one  invocation  of  RANDOM-
+ATTACHMENT.  Note  that  RANDOM-ATTACHMENT  makes 
+
+Theorem  2.  Consider  an  actual  occurrence  of (cid:1868) in (cid:1850)  within  a 
+minimal  window  size (cid:2012)∙(cid:1875)	(cid:4666)(cid:2012)>(cid:882)(cid:4667).  When (cid:1854)= √(cid:2871)(cid:3083)
+(cid:2874)|(cid:2869)(cid:2879)(cid:3083)|(cid:1878)(cid:3106)√(cid:1875)+(cid:883), 
+threshold  w  by  APPROX-MATCH  is  no  more  than (cid:2035).  Here (cid:1878)(cid:3106) is 
+the (cid:1878) value that locates an area of (cid:2035) to its right in a standard nor-
+Proof.    Consider  an  occurrence  of (cid:1868) as  a  subsequence  within  a 
+window  of  minimal  size (cid:2012)(cid:1875) (an  integer)  of  the  sequence.  In  the 
+APPROX-MATCH  algorithm,  the (cid:1856)[∙]  value  (for  that  possible 
+world)  must  have  increased (cid:2012)(cid:1875) times  (each  time  by  1),  starting 
+from 0. That is, RANDOM-ATTACHMENT is invoked (cid:2012)(cid:1875) times, 
+once  for  each ⋃(cid:3029)  operator.  Furthermore,  each  invocation  of 
+9) that follows a uniform distribution within (cid:4666)−(cid:3034)(cid:3028)(cid:3043)(cid:2870) ,(cid:3034)(cid:3028)(cid:3043)(cid:2870)(cid:4667). This is 
+because there is a distance of (cid:1859)(cid:1853)(cid:1868) between two bars, and the posi-
+(cid:1856) alone.  Since  line  1  of  the  algorithm  indicates  that (cid:1859)(cid:1853)(cid:1868)(cid:3409) (cid:3050)(cid:3029)(cid:2879)(cid:2869), 
+we  can  consider  the  overall  error  as  a  random  walk  of (cid:2012)(cid:1875) steps, 
+(cid:4666)− (cid:3050)(cid:2870)(cid:4666)(cid:3029)(cid:2879)(cid:2869)(cid:4667), (cid:3050)(cid:2870)(cid:4666)(cid:3029)(cid:2879)(cid:2869)(cid:4667)(cid:4667). 
+Thus,  the  total  error  is (cid:1850)=∑ (cid:1850)(cid:3036)
+,  where  each (cid:1850)(cid:3036) has  a  uniform 
+(cid:3083)(cid:3050)(cid:3036)(cid:2880)(cid:2869)
+distribution (cid:1847)(cid:4666)− (cid:3050)(cid:2870)(cid:4666)(cid:3029)(cid:2879)(cid:2869)(cid:4667), (cid:3050)(cid:2870)(cid:4666)(cid:3029)(cid:2879)(cid:2869)(cid:4667)(cid:4667).  Each (cid:1850)(cid:3036)  corresponds  to  one  step 
+an  independent  fresh  random  choice  for  each (cid:1850)(cid:3036) (line  2),  and  the 
+(cid:1850)(cid:3036)’s are i.i.d.. From the Central Limit Theorem [6], and especially 
+and  a  variance (cid:2869)(cid:2869)(cid:2870)∙ (cid:3050)(cid:3118)
+(cid:4666)(cid:3029)(cid:2879)(cid:2869)(cid:4667)(cid:3118)∙(cid:2012)(cid:1875). In  order  for  APPROX-MATCH  to 
+is  necessary  that (cid:1850)>|(cid:1875)−(cid:2012)(cid:1875)|.  From  the  property  of  a  normal 
+than (cid:2035) when (cid:1878)(cid:3106)∙(cid:3495)(cid:2869)(cid:2869)(cid:2870)∙ (cid:3050)(cid:3118)
+(cid:4666)(cid:3029)(cid:2879)(cid:2869)(cid:4667)(cid:3118)∙(cid:2012)(cid:1875)=|(cid:1875)−(cid:2012)(cid:1875)|.  This  gives  us  the 
+result (cid:1854)= √(cid:2871)(cid:3083)
+(cid:2874)|(cid:2869)(cid:2879)(cid:3083)|(cid:1878)(cid:3106)√(cid:1875)+(cid:883), concluding the proof.                       □ 
+(cid:1854). Note that the theorem limits both false positive and false nega-
+tive  errors.  When (cid:882)<(cid:2012)<(cid:883), (cid:2012)(cid:1875) is  to  the  left  of  the  threshold (cid:1875) 
+of (cid:1875), causing a false negative. Similarly, (cid:2012)>(cid:883) gives the result for 
+a  false  positive  error.  Thus,  the  parameter (cid:1854) provides  a  tradeoff 
+cates that, when (cid:1854)=(cid:1841)(cid:4666)√(cid:1875)(cid:4667), with a time complexity of (cid:1841)(cid:4666)(cid:1864)⋅√(cid:1875)(cid:4667) 
+per item and an overall space complexity of (cid:1841)(cid:3435)(cid:1864)⋅√(cid:1875)(cid:3439), APPROX-
+Example  3.    First  consider (cid:2012)=(cid:882).(cid:889)(cid:887),  i.e.,  the  minimal  matching 
+window  of (cid:1868)  is  within  the  threshold (cid:1875) .  Let (cid:1875)=(cid:883)(cid:882)(cid:882)(cid:882)  and 
+(cid:2035)=(cid:882).(cid:882)(cid:887).  Then,  Theorem  2  requires (cid:1854)=(cid:887)(cid:885).  Similarly,  consider 
+(cid:2012)=(cid:883).(cid:884)(cid:887), i.e., a minimal matching that is outside the threshold (cid:1875), 
+and limit the false positive rate within (cid:2035)=(cid:882).(cid:882)(cid:887). Theorem 2 gives 
+(cid:1854)=(cid:888)(cid:890). Clearly, having only 68 bars, instead of the original 1000, 
+
+for the sum of independent uniform distributions, it converges to a 
+normal  distribution  extremely  fast  (called  an  Irwin–Hall  distribu-
+tion  [11]).  Hence,  X  follows  a  normal  distribution  with  a  mean  0 
+
+between  accuracy  and  performance,  which  is  important  for  many 
+real-time  data  stream  monitoring  applications.  Theorem  2  indi-
+
+place this instance of match at the wrong side of the threshold w, it 
+
+distribution,  the  misplacement  happens  with  probability  no  more 
+
+Theorem 2 provides the theoretical underpinning for the choice of 
+
+(i.e., a true match), an error in this case will misplace it to the right 
+
+MATCH’s error rates can be arbitrarily small constants. 
+
+is a significant saving. 
+
+5.  ADAPTIVE FILTERING 
+The  APPROX-MATCH  algorithm  in  Section  4  reduces  the  com-
+
+plexity  from (cid:1841)(cid:4666)(cid:1864)⋅(cid:1875)(cid:4667) to (cid:1841)(cid:4666)(cid:1864)⋅√(cid:1875)(cid:4667) per  item.  In  this  section,  we 
+duces the complexity on the “(cid:1864)” part. That is, it further reduces the 
+
+devise  a  technique  called  adaptive  filtering  (AF)  that  further  re-
+
+cost especially for long patterns. 
+
+Our observation is as follows: Subsequence matching is frequently 
+used in event monitoring. Usually, the event being monitored oc-
+curs rarely. In other words, the selectivity of the pattern p is low. 
+Thus,  it  is  quite  wasteful  to  pay  the  “full  cost”  of  subsequence 
+matching, just to discard the majority of the sequence in the end. 
+This motivates us to have an efficient algorithm to preprocess and 
+filter the sequence. Only when the filtering algorithm cannot rule 
+out  a  piece  of  the  sequence,  do  we  finish  the  full  subsequence 
+matching for that piece. 
+
+5.1  The AF Algorithm 
+The  AF  algorithm  works  as  follows:  Instead  of  maintaining  an 
+
+array of size l of (cid:2289)(cid:2270) objects, we shorten the array to be of size (cid:1864)(cid:2869), 
+where (cid:1864)(cid:2869) will  be  determined  shortly.  Thus,  we  hope  to  only  do  a 
+subsequence matching on a prefix of length (cid:1864)(cid:2869) of p for the majority 
+
+of  time.  AF  can  be  based  on  either  EXACT-MATCH  or  AP-
+PROX-MATCH, resulting in an improvement over the respective 
+version. Hence, we only describe the changes to EXACT-MATCH 
+for  AF.  Similar  changes  can  also  be  applied  to  APPROX-
+MATCH. 
+
+We use Figure 3 to illustrate the AF algorithm. The big rectangle 
+represents  the  dynamic  programming  table  of  EXACT-MATCH 
+(same  as  in  Figure  2).  We  have  the  sequence  X  in  the  horizontal 
+direction  and  p  in  the  vertical  direction.  For  instance,  at  index  i, 
+the  sequence  has  an  uncertain  character  a/b,  denoting  that  it  has 
+possible  values  a  and  b,  each  with  probability  0.5.  Each  column 
+
+corresponds  to  the  updates  of  array (cid:1856)[∙] in  EXACT-MATCH  at  a 
+position of X, and each cell corresponds to an element of (cid:1856)[∙] (e.g., 
+at (cid:1850)[(cid:1861)], (cid:1829)(cid:2869) corresponds to (cid:1856)[(cid:1864)(cid:2869)] while (cid:1829)(cid:2870) corresponds to (cid:1856)[(cid:1864)]). 
+
+ 
+
+Figure 3. Illustrating the AF algorithm. 
+
+ 
+
+ 
+
+The first change of AF is at line 6 of EXACT-MATCH, where we 
+
+illustrate  this,  in  Figure  3,  only  the  gray  rounded  rectangle  of 
+
+change (cid:1864) to (cid:1864)(cid:2869). That is, we only match a prefix of p of length (cid:1864)(cid:2869). To 
+height (cid:1864)(cid:2869)  is  computed.  Accordingly,  in  line  11  of  EXACT-
+MATCH, we change (cid:1864) to (cid:1864)(cid:2869).  
+In  line  12,  instead  of  reporting  index (cid:1861),  we  need  to  complete  the 
+size w that ends at (cid:1850)[(cid:1861)]. That is, we calculate the cells in the line 
+shaded  parallelogram  area  starting  from  the  cell  at index (cid:1861)−(cid:1875)+
+(cid:1864)(cid:2869) and  row (cid:1864)(cid:2869)+(cid:883);  one  can  easily  verify  that  these  are  the  cells 
+
+subsequence matching of the whole pattern p within a window of 
+
+ 
+
+282
+
+Theorem 3.  The AF algorithm gives the correct result. 
+
+true  either.  Thus,  the  filtering  is  correct.  In  the  case  where 
+
+needed  to  compute (cid:1829)(cid:2870) .  Clearly,  in  order  to  do  this  “make  up” 
+computation, we need to store a window of history data (cid:1850)[(cid:1861)−(cid:1875)+
+(cid:1864)(cid:2869)],…,(cid:1850)[(cid:1861)] .  Finally,  when  we  obtain (cid:1829)(cid:2870) ,  i.e., (cid:1856)[(cid:1864)]  at (cid:1850)[(cid:1861)] ,  if 
+(cid:1856)[(cid:1864)]≽(cid:2028), we report index (cid:1861) to be a match.  
+Proof.  We first show that, at position (cid:1861) in the sequence, (cid:1856)[(cid:1864)]≽(cid:2028) 
+implies (cid:1856)[(cid:1864)(cid:2869)]≽(cid:2028).  If (cid:1856)[(cid:1864)]≽(cid:2028),  i.e., ∑ (cid:1868)(cid:3036)
+(cid:3050)(cid:3036)(cid:2880)(cid:2868) (cid:3410)(cid:2028),  then,  with  proba-
+bility at  least (cid:2028),  pattern  p  is a  subsequence in  the past  window  of 
+size  w  before (cid:1850)[(cid:1861)] .  Whenever  p  is  a  subsequence,  its  prefix 
+(cid:1868)[(cid:883)..(cid:1864)(cid:2869)] is also a subsequence in that window. Hence, with proba-
+bility  at  least (cid:2028), (cid:1868)[(cid:883)..(cid:1864)(cid:2869)] is  a  subsequence  in  the  past  window  of 
+size w before (cid:1850)[(cid:1861)]. In turn, this is equivalent to (cid:1856)[(cid:1864)(cid:2869)]≽(cid:2028).  
+Therefore,  in  AF,  if (cid:1856)[(cid:1864)(cid:2869)]≽(cid:2028) is  not  satisfied, (cid:1856)[(cid:1864)]≽(cid:2028) cannot  be 
+(cid:1856)[(cid:1864)(cid:2869)]≽(cid:2028) is  true,  the  AF  algorithm  makes  up  the  computation  of 
+the cells that lead to (cid:1856)[(cid:1864)] and tells whether (cid:1856)[(cid:1864)]≽(cid:2028).                 □ 
+the  saving.  This  has  to  do  with  the  unresolved  parameter (cid:1864)(cid:2869),  the 
+5.2  Adaptive Optimization in Choosing (cid:2194)(cid:2778) 
+The optimal choice of (cid:1864)(cid:2869) would require the knowledge of selectivi-
+ties of p and of (cid:1868)[(cid:883)..(cid:1864)(cid:2869)]. Unfortunately, these selectivities heavily 
+depend  on  the  actual  contents  of  data  sequence (cid:1850),  which  are  not 
+known  beforehand,  and  on (cid:1868) itself.  We  have  a  novel  solution  to 
+
+It is clear that the amortized time of the AF algorithm is always no 
+more than EXACT-MATCH (or APPROX-MATCH), as the cells 
+that are computed in Figure 3 by AF are a subset of those comput-
+ed  by  EXACT-MATCH.  The  question  is  how  we  can  maximize 
+
+length  of  the  prefix  of  p  that  AF  always  tries  to  match  first.  We 
+study this problem next. 
+
+this  problem.  Our  optimization  algorithm  is  adaptive  to  the  con-
+tents of the sequence stream and p.  
+
+ 
+
+                 
+ 
+ 
+ 
+The algorithm is based on gradient descent [21], which is an itera-
+tive method to find the minimum value of a function. In our case, 
+we  try  to  find  the  minimum  workload  of  the  AF  algorithm,  as  a 
+
+Figure 4. Illustrating gradient descent to choose (cid:2194)(cid:2778). 
+function of (cid:1864)(cid:2869). As illustrated in Figure 4, the original gradient de-
+scent  method  assumes  the  function (cid:1858)(cid:4666)(cid:1876)(cid:4667) is  known  and,  starting 
+from an initial guess of (cid:1876), it iteratively takes steps proportional to 
+converging  to  the  minimum (cid:1858)(cid:4666)(cid:1876)(cid:4667).  Unfortunately,  we  do  not  even 
+know our workload as a function of (cid:1864)(cid:2869). Our solution to this prob-
+For  an  arbitrary  input  initial  value  of (cid:1876)(cid:2868)  (say, (cid:1864)/(cid:884)),  STREAM-
+
+lem is to evaluate the function values and gradients on the fly, as 
+shown  in  the  STREAM-ADAPTIVE-GD  (GD  for  gradient  de-
+scent) algorithm below. 
+
+ADAPTIVE-GD  makes  two  trials  of  running  the  AF  algorithm 
+
+the  negative  of  the  gradient  of  the  function  at  the  current  point, 
+
+MATCH can be modified similarly. The key ideas are as follows: 
+We start with using EXACT-MATCH on the positive subsequence 
+
+of p (i.e., p+). For each (cid:1855)∈(cid:1868)(cid:2878), if a character in (cid:1850) matches a char-
+acter in (cid:1832)(cid:1845)(cid:4666)(cid:1855)(cid:4667) in a possible world, we set the (cid:1856)[∙] value of c to the 
+(cid:1856)[∙] value  of  the  positive character  immediately  following c  in  p. 
+
+The intuition is that, if we encounter a forbidden character after c, 
+we must abort the current match of the prefix of p up to c, and set 
+it to the next smallest window, which contains the prefix up to the 
+next positive character. We present an algorithm MATCH-WITH-
+NEGATION below that can handle surrounded negation, and is a 
+building block for front and rear negations. 
+
+three  distributions.  It  is  easy  to  see  that  the  complexity  of 
+MATCH-WITH-NEGATION  is  the  same  as  that  of  EXACT-
+MATCH  (or  APPROX-MATCH).  Theorem  4  establishes  its  cor-
+rectness. 
+
+In  lines  7  to  9  of  the  algorithm,  we  let (cid:1868)(cid:2871) be  the  probability  that 
+(cid:1850)[(cid:1861)] matches one of the forbidden characters after (cid:1868)(cid:2878)[(cid:1862)], but does 
+not  match (cid:1868)(cid:2878)[(cid:1862)].  Then  in  lines  11-12,  with  weight (cid:1868)(cid:2871),  we  update 
+(cid:1856)[(cid:1862)] to  be (cid:1856)[(cid:1862)+(cid:883)],  which,  as  discussed  above,  essentially  aborts 
+the current match of the prefix (cid:1868)(cid:2878)[(cid:883)…(cid:1862)] due to the appearance of 
+the  forbidden  character.  Lines  11-12  assign (cid:1856)[(cid:1862)] to  a  mixture  of 
+Algorithm MATCH-WITH-NEGATION (cid:4666)(cid:1850),(cid:1868),(cid:1875),(cid:2028)(cid:4667) 
+           w: window size threshold, (cid:2028): probability threshold 
+// Initialization of an array of (cid:2289)(cid:2270) objects with parameter w 
+1:  d[0] ← {(0, 1)}     //a (cid:2289)(cid:2270) object – value 0 with probability 1 
+for each (cid:1861)∈[(cid:883)…(cid:1864)(cid:2878)+(cid:883)] do           // l+ is the length of p+ 
+        (cid:1856)[(cid:1861)]←⊥           //a null (cid:2289)(cid:2270) object 
+for each (cid:1861)(cid:3410)(cid:883) in increasing order do 
+        for each (cid:1862)←(cid:1864)(cid:2878)	(cid:1856)(cid:1867)(cid:1875)(cid:1866)(cid:1872)(cid:1867)	(cid:883) do 
+             (cid:1868)(cid:2869)←Pr(cid:4666)(cid:1850)[(cid:1861)]=(cid:1868)(cid:2878)[(cid:1862)](cid:4667) 
+Pr(cid:4666)(cid:1850)[(cid:1861)]=(cid:1855)(cid:4667)
+             (cid:1868)(cid:2870)←∑
+(cid:3030)∈(cid:3007)(cid:3020)(cid:4666)(cid:3043)(cid:3126)[(cid:3037)](cid:4667)
+             (cid:1868)(cid:2871)←(cid:4666)(cid:883)−(cid:1868)(cid:2869)(cid:4667)∙(cid:1868)(cid:2870) 
+10:               (cid:1868)(cid:2872)←(cid:4666)(cid:883)−(cid:1868)(cid:2869)(cid:4667)∙(cid:4666)(cid:883)−(cid:1868)(cid:2870)(cid:4667) 
+11:               (cid:1856)[(cid:1862)]←[(cid:1868)(cid:2869)⋅(cid:4666)++(cid:1856)[(cid:1862)−(cid:883)](cid:4667)]	⋃	[(cid:1868)(cid:2872)⋅(cid:4666)++(cid:1856)[(cid:1862)](cid:4667)] 
+12: 																																																																	⋃	(cid:4666)(cid:1868)(cid:2871)∙(cid:1856)[(cid:1862)+(cid:883)](cid:4667) 
+14:         if (cid:1856)[(cid:1864)(cid:2878)]≽(cid:2028) then 
+15:               report (cid:1861) 
+
+Input: X: uncertain sequence, p: pattern with surrounded negations, 
+
+Output: all positions in X that are PWSM matches 
+
+16:         end if 
+17:   end for 
+
+// Scan the data stream 
+
+13:         end for 
+
+end for 
+
+ 
+
+ 
+
+11:  end while 
+
+no work is wasted; even with initial suboptimal parameter values, 
+AF  still  saves  computation  compared  to  APPROX-MATCH  or 
+EXACT-MATCH. 
+
+        // loop until convergence 
+1:  while true do 
+2: 
+3: 
+4: 
+5: 
+6: 
+7: 
+8: 
+9: 
+
+over  two  successive  pieces  of  sequence (cid:1850) of  length (cid:1842) (e.g., (cid:884)(cid:882)(cid:1875)) 
+each, one with (cid:1864)(cid:2869)=(cid:1876)(cid:2868)−(cid:2012) and the other with (cid:1864)(cid:2869)=(cid:1876)(cid:2868)+(cid:2012), where 
+(cid:2012) is a small integer value. Note that the algorithm is adaptive and 
+Algorithm STREAM-ADAPTIVE-GD (cid:4666)(cid:1876)(cid:2868)(cid:4667) 
+Input: (cid:1876)(cid:2868): an initial value of (cid:1864)(cid:2869) 
+Output: the (cid:1864)(cid:2869) value of choice 
+        run AF with (cid:1864)(cid:2869)←(cid:1876)(cid:2868)−(cid:2012) over a length of (cid:1842) in (cid:1850) 
+        (cid:1858)(cid:2879)(cid:3083)←#(cid:1855)(cid:1857)(cid:1864)(cid:1864)(cid:1871)	(cid:1855)(cid:1867)(cid:1865)(cid:1868)(cid:1873)(cid:1872)(cid:1857)(cid:1856)	(cid:1861)(cid:1866)	(cid:1864)(cid:1861)(cid:1866)(cid:1857)	(cid:884) 
+        run AF with (cid:1864)(cid:2869)←(cid:1876)(cid:2868)+(cid:2012) over a length of (cid:1842) in (cid:1850) 
+        (cid:1858)(cid:3083)←#(cid:1855)(cid:1857)(cid:1864)(cid:1864)(cid:1871)	(cid:1855)(cid:1867)(cid:1865)(cid:1868)(cid:1873)(cid:1872)(cid:1857)(cid:1856)	(cid:1861)(cid:1866)	(cid:1864)(cid:1861)(cid:1866)(cid:1857)	(cid:886) 
+        if |(cid:1858)(cid:3083)−(cid:1858)(cid:2879)(cid:3083)|<(cid:1868)(cid:1870)(cid:1857)(cid:1855)(cid:1861)(cid:1871)(cid:1861)(cid:1867)(cid:1866) then   //convergence 
+10:          (cid:1876)(cid:2868)←(cid:1876)(cid:2868)−(cid:2013)∙(cid:3033)(cid:3331)(cid:2879)(cid:3033)(cid:3127)(cid:3331)
+(cid:2870)(cid:3083)
+12:  return (cid:1876)(cid:2868) 
+During these two trials, we collect statistics on the number of (cid:1856)[∙] 
+ and  update  the (cid:1864)(cid:2869) 
+Otherwise,  we  estimate  the  gradient  as (cid:3033)(cid:3331)(cid:2879)(cid:3033)(cid:3127)(cid:3331)
+(cid:2870)(cid:3083)
+(such as (cid:2013), a.k.a. learning rate), we follow the standard choices in 
+choice of (cid:1864)(cid:2869) based on the dynamic changes in stream contents. 
+
+array  cells  that  actually  need  to  be  calculated  (i.e.,  both  the  grey 
+and line-shaded areas in Figure 3). When the algorithm reaches its 
+convergence  at  the  minimum  point,  the  difference  between  these 
+two values should be small, and we can stop the trials (lines 6-8). 
+
+               break 
+       end if 
+       // step size proportional to the negative of gradient 
+
+the  machine  learning  literature  (e.g.,  [21]).  Indeed,  STREAM-
+ADAPTIVE-GD can be repeatedly run, constantly optimizing the 
+
+values based on the gradient descent. Note that for its parameters 
+
+6.  HANDLING NEGATIONS 
+In  this  section,  we  consider  negations  in  a  pattern  p.  There  are 
+three  cases  as  categorized  in  Definition  2,  namely  surrounded 
+negations,  front  negations,  and  rear  negations.  They  need  to  be 
+handled differently. Let us first look at surrounded negations, and 
+start with the following definition. 
+
+Definition 4 (Forbidden Set).  Consider a positive character (cid:1855) in 
+a pattern string (cid:1868). Let the set of all negative characters after (cid:1855), but 
+before any other positive character in (cid:1868) (if there is one) be (cid:1840). If (cid:1855) 
+is  the  last  positive  character  in (cid:1868),  then  let  the  set  of  all  negative 
+characters after (cid:1855) be (cid:1840). The forbidden set of (cid:1855), denoted by (cid:1832)(cid:1845)(cid:4666)(cid:1855)(cid:4667), 
+is the set of all characters that are forbidden by (cid:1840). 
+Example  4.    Consider  the  pattern (cid:1868)=(cid:885)(cid:882)(cid:885)(cid:3364)(cid:882)(cid:885)(cid:3364)  from  Example  1. 
+For the first positive character, 3, we have (cid:1832)(cid:1845)(cid:4666)(cid:885)(cid:4667)=(cid:1486), as there is 
+turn,  this  second  positive  character,  0,  has (cid:1832)(cid:1845)(cid:4666)(cid:882)(cid:4667)={(cid:885)},  since 
+there is one negative character, (cid:885)(cid:3364), before the next positive charac-
+ter, 0. Finally, this last positive character has (cid:1832)(cid:1845)(cid:4666)(cid:882)(cid:4667)={(cid:885)}. 
+
+Like  the  AF  algorithm,  our  algorithms  that  handle  negations  can 
+be  based  on  either  EXACT-MATCH  or  APPROX-MATCH;  we 
+only  describe  our  changes  to  EXACT-MATCH,  as  APPROX-
+
+no  negative  characters  before  the  next  positive  character,  0.  In 
+
+ 
+
+283
+
+2: 
+3: 
+4: 
+
+5: 
+6: 
+7: 
+8: 
+9: 
+
+Theorem  4.  The  algorithm  MATCH-WITH-NEGATION  gives  the 
+correct result for a pattern that has surrounded negations. 
+
+character.  In  lines  7-12,  we  consider  three  mutually  exclusive 
+
+Proof.  For surrounded negations, all negative characters appear in 
+the  forbidden  sets  and  MATCH-WITH-NEGATION  performs 
+
+matches over (cid:1868)(cid:2878), while checking the forbidden set of each positive 
+events:  (1) (cid:1850)[(cid:1861)]  matches  the  current  positive  character (cid:1868)(cid:2878)[(cid:1862)] 
+(probability (cid:1868)(cid:2869) ),  (2) (cid:1850)[(cid:1861)]≠(cid:1868)(cid:2878)[(cid:1862)] ,  but (cid:1850)[(cid:1861)]  matches  one  of  the 
+forbidden  characters  (probability (cid:1868)(cid:2871)),  and  (3)  neither  (1)  nor  (2) 
+(probability (cid:1868)(cid:2872)). Clearly (cid:1868)(cid:2869)+(cid:1868)(cid:2871)+(cid:1868)(cid:2872)=(cid:883).  
+As  discussed  earlier,  for  event  (2),  we  assign (cid:1856)[(cid:1862)+(cid:883)] to (cid:1856)[(cid:1862)] to 
+abort the current match of (cid:1868)[(cid:883)..(cid:1862)]. Note that a crucial invariant is 
+maintained  in  doing  this:  in  each  possible  world,  the (cid:1856)[∙] array 
+
+values are non-decreasing. The invariant is still true here since we 
+
+characters. 
+
+as the treatment in EXACT-MATCH. We note that the validity of 
+
+non-decreasing  in  each  possible  world.  This  is  because  in  event 
+
+over,  this  invariant  is  maintained  under  all  three  events.  Finally, 
+
+and  (ii)  we  only  check  the  condition  in  line  14  at  the  last 
+character of input sequence. 
+
+must  be  positive.  Our  algorithm  for  rear  negation  is  based  on 
+MATCH-WITH-NEGATION, as follows: 
+
+We next discuss rear and front negations. Recall from Definition 2 
+that,  unlike  surrounded  negations,  both  rear  and  front  negations 
+
+only  update (cid:1856)[(cid:1862)] to (cid:1856)[(cid:1862)+(cid:883)].  For  events  (1)  and  (3),  we  update 
+(cid:1856)[(cid:1862)] to ++(cid:1856)[(cid:1862)−(cid:883)] and to ++(cid:1856)[(cid:1862)], respectively, which is the same 
+this  action  hinges  on  the  invariant  that  the (cid:1856)[∙] array  values  are 
+(1),  we  actually  need  to  assign (cid:1856)[(cid:1862)] to min(cid:4666)++(cid:1856)[(cid:1862)−(cid:883)],  ++(cid:1856)[(cid:1862)](cid:4667), 
+which can be simplified to ++(cid:1856)[(cid:1862)−(cid:883)] due to the invariant. More-
+the algorithm reports a match if, at the last positive character of (cid:1868), 
+the probability of match is at least (cid:2028). This concludes the proof.  □ 
+require tracking the state of a whole window of size (cid:1875) in (cid:1850).  
+Rear  Negations.    From  Definition  2,  for  a  rear  negation, (cid:1868)[(cid:883)] 
+(1)  For  each (cid:1861)(cid:3410)(cid:883) in  sequence (cid:1850),  whenever  we  see  a  character 
+(cid:1850)[(cid:1861)] such that Pr(cid:4666)(cid:1850)[(cid:1861)]=(cid:1868)[(cid:883)](cid:4667)>(cid:882), we fork a new instance 
+ℳ  of  a  variant  of  MATCH-WITH-NEGATION.  We  use 
+(cid:1850)[(cid:1861)..(cid:1861)+(cid:1875)−(cid:883)] as ℳ’s input sequence; other input parame-
+ters  ((cid:1868), (cid:1875), (cid:2028))  are  the  same.  Thus, ℳ halts  after  reading (cid:1875) 
+(2)  ℳ ’s  modifications  to  MATCH-WITH-NEGATION  are  at 
+two  places:  (i)  in  line  7,  we  always  assign (cid:1868)(cid:2869)←(cid:882) for  the 
+loop (cid:1862)=(cid:883) and  all (cid:1850)[(cid:1861)] except  the  first  character  of  input; 
+In step (1) above, we start an instance ℳ at any potential start of a 
+match window. In step (2), inside ℳ’s window, we do not factor 
+in  any new  matches  from (cid:1868)[(cid:883)] by  setting (cid:1868)(cid:2869)←(cid:882); any  new match 
+will fork its own instance of ℳ in step (1). Finally, we only check 
+for  a  match  at  the  end  of  the  window  in ℳ,  as  required  by  the 
+the beginning of (cid:1868) be (cid:1832)(cid:1840). From Definition 2, the last character of 
+p must be a positive character, i.e., (cid:1868)(cid:2878)[(cid:1864)(cid:2878)]. The algorithm is based 
+on a variant of MATCH-WITH-NEGATION, which we call ℳ(cid:2280). 
+We start with running ℳ(cid:2868), an instance of ℳ(cid:2280), on input (cid:1850). ℳ(cid:2868)’s 
+behavior  (i.e., ℳ(cid:2280))  is  identical  to  MATCH-WITH-NEGATION 
+(1)  At the first time ℳ(cid:2868) reads an (cid:1850)[(cid:1861)] that has a chance of being 
+(cid:1842)(cid:1870)(cid:4666)(cid:1850)[(cid:1861)]=(cid:1855)(cid:4667)
+in (cid:1832)(cid:1840) (i.e., ∑
+>(cid:882)),  it  recursively  forks  a 
+(cid:3030)∈(cid:3007)(cid:3015)
+new instance ℳ(cid:2869) of ℳ(cid:2280), with an input sequence that starts 
+from (cid:1850)[(cid:1861)+(cid:883)]  onward  (while ℳ(cid:2868)  still  continues).  Let 
+(cid:1842)(cid:1870)(cid:4666)(cid:1850)[(cid:1861)]=(cid:1855)(cid:4667)
+(cid:1869)←(cid:883)−∑
+.  Subsequently,  when ℳ(cid:2868) 
+(cid:3030)∈(cid:3007)(cid:3015)
+(cid:1842)(cid:1870)(cid:4666)(cid:1850)[(cid:1861)]=(cid:1855)(cid:4667)
+reads  another (cid:1850)[(cid:1861)] s.t. ∑
+>(cid:882), it  only  up-
+(cid:3030)∈(cid:3007)(cid:3015)
+(cid:1842)(cid:1870)(cid:4666)(cid:1850)[(cid:1861)]=(cid:1855)(cid:4667)
+dates (cid:1869)←(cid:1869)∙[(cid:883)−∑
+]. 
+(cid:3030)∈(cid:3007)(cid:3015)
+(2)  After  forking ℳ(cid:2869),  the  behavior  of ℳ(cid:2868) changes  in  two  plac-
+es: (i) in line 7, we assign (cid:1868)(cid:2869)←(cid:1869)∙Pr(cid:4666)(cid:1850)[(cid:1861)]=(cid:1868)(cid:2878)[(cid:883)](cid:4667) for the 
+loop (cid:1862)=(cid:883), and (ii) it halts after reading (cid:1875)−(cid:883) more charac-
+ters from (cid:1850). 
+(3)  We  add  two  more  conditions  in  line  14  for ℳ(cid:2868) :  (i) 
+Pr(cid:4666)(cid:1850)[(cid:1861)]=(cid:1868)(cid:2878)[(cid:1864)(cid:2878)](cid:4667)>(cid:882);  and  (ii) ℳ(cid:2868)  has  parsed  at  least (cid:1875) 
+characters in (cid:1850). 
+of ℳ(cid:2280) (i.e., start a new matching window) when we see a char-
+acter disallowed at the beginning of (cid:1868). In step (2), any old instance 
+
+of matching (whose matching window has started) continues until 
+it exits the window. During this, it matches the first positive char-
+
+Front  Negations.  Let the set of characters that are disallowed at 
+
+In step (1) above, similar to rear negations, we fork a new instance 
+
+except the following: 
+
+definition.  
+
+ 
+
+284
+
+“3” (where the match window ends). 
+
+step  (3),  a  match  requires  that  the  last  character  of  the  window 
+
+given in Section 1 (Figure 1), this query detects intervals between 
+two 3’s that have at least two other characters, one of which is 0. 
+
+with seven characters as shown at the top of the figure, where we 
+use  the  same  notation  as  in  Example  2  (e.g.,  the  third  character 
+0/1 denotes a distribution in which “0” and “1” each has proba-
+
+acter  only  in  the  possible  worlds  where  any  character  in (cid:1832)(cid:1840) has 
+not  appeared,  hence  multiplying (cid:1868)(cid:2869) by (cid:1869) in  step  (2).  The  newly 
+forked  instances  of ℳ(cid:2280) take  over  any  new  matches.  Finally,  in 
+matches (cid:1868)(cid:2878)[(cid:1864)(cid:2878)], and that we have a window of size (cid:1875).  
+Example  5.    Figure  5  shows  an  example.  The  sequence (cid:1850) starts 
+bility  0.5).  The  pattern (cid:1868) is (cid:885)(cid:3364)(cid:882)(cid:885),  indicating  a  front  negation  with 
+(cid:1832)(cid:1840)={(cid:885)}.  Additionally,  we  have (cid:1875)=(cid:885).  Similar  to  the  example 
+Thus, the algorithm should only report one match in (cid:1850) at the last 
+Figure 5(a) shows the instance (ℳ(cid:2869)) of ℳ(cid:2280) started after parsing 
+the  first  “3”  in (cid:1850),  based  on  step  (1)  of  the  front  negation  algo-
+rithm.  In  turn, ℳ(cid:2869)  forks  another  instance  of ℳ(cid:2280)  started  after 
+parsing  “2/3”,  shown  in  Figure  5(b).  The  very  first  instance ℳ(cid:2868) 
+5(a), when another instance of ℳ(cid:2280) is forked upon reading “2/3” 
+in (cid:1850),  following  step  (1)  of  the  algorithm,  we  have (cid:1869)←(cid:883)/(cid:884).  Sub-
+sequently,  when  reading  “0”  in (cid:1850),  as  shown  in  the  4th  column  in 
+Figure  5(a),we  have (cid:1868)(cid:2869)=(cid:883)/(cid:884) for  the  loop (cid:1862)=(cid:883),  resulting  in  a 
+distribution {(cid:4672)(cid:883),(cid:2869)(cid:2870)(cid:4673),(cid:4672)(cid:885),(cid:2869)(cid:2872)(cid:4673)} in  the  1st  row  of  the  4th  column.  Note 
+Figure 5(b), where the match probability is: (cid:2869)(cid:2870)+(cid:2869)(cid:2870)=(cid:883). 
+
+that the last row of the 3rd column is not a match because the con-
+dition  (ii)  in  step  (3)  is  false  (i.e.,  this  instance  has  not  parsed 
+three  characters  yet).  Likewise,  condition  (i)  is  false  in  the  last 
+row  of  the  4th  column.  The  only  match  occurs  in  the  last  cell  of 
+
+does  not  produce  any  match  and  is  omitted for  clarity.  In Figure 
+
+X = 0  3  0/1  2/3  0  0/1  3
+p =                   w = 3            FN = {3}
+
+033
+
+X
+
+p
+
+0
+
+3
+
+q = 1/2
+
+0/1
+
+2/3
+
+0
+
+0/1
+
+(0, 1)
+
+(0, 1)
+
+(0, 1)
+
+(1, 1/2) (2, 1/2)
+
+(0, 1)
+(1, 1/2)
+(3, 1/4)
+
+(0, 1)
+(1, 1/4)
+(2, 3/8)
+
+(2, 1/4) (3, 1/4)
+
+(ii) false (i) false
+
+X
+
+p
+
+0
+
+3
+
+0
+
+0/1
+
+3
+
+(0, 1)
+
+(0, 1)
+
+(1, 1)
+
+(0, 1)
+(0, 1)
+(1, 1/2) (2, 1/2)
+(3, 1/2)
+(2, 1/2)
+(2, 1/2)
+(3, 1/2)
+
+Match!
+
+(a)
+
+(b)
+
+ 
+
+ 
+
+ 
+
+Figure 5. An example of handling front negations. (a) shows 
+ 
+
+the instance of (cid:2327)(cid:2328) started after seeing the first 3 in (cid:2180), and 
+(b) shows the instance of (cid:2327)(cid:2328) started after seeing the uncer-
+tain character 2/3 in (cid:2180). 
+negations  can  at  most  increase  the  complexity  by  a  factor  of (cid:1875) 
+have  to  keep  track  of  the  states  of  whole  windows  of  size (cid:1875) for 
+
+While the algorithm for surrounded negation does not increase the 
+complexity, it is not hard to see that the algorithm for front or rear 
+
+(i.e.,  the  maximum  number  of  concurrent  instances).  This  is  ex-
+pected, since front and rear negations are inherently harder, as we 
+
+each instance of potential matches.  
+
+7.  EXPERIMENTS 
+In this section, we empirically study the following problems: 
+
+5
+
+x 10
+
+7
+
+5
+
+x 10
+
+10
+
+d
+n
+o
+c
+e
+s
+ 
+r
+e
+p
+ 
+t
+u
+p
+h
+g
+u
+o
+r
+h
+T
+
+6.5
+
+6
+
+5.5
+
+5
+
+4.5
+
+4
+
+0
+
+d
+n
+o
+c
+e
+s
+ 
+r
+e
+p
+ 
+t
+u
+p
+h
+g
+u
+o
+r
+h
+T
+
+50
+
+100
+
+150
+
+200
+
+Window size
+
+8
+
+6
+
+4
+
+2
+
+0
+
+0
+
+5
+
+x 10
+
+6.5
+
+d
+n
+o
+c
+e
+s
+ 
+r
+e
+p
+ 
+t
+u
+p
+h
+g
+u
+o
+r
+h
+T
+
+6
+
+5.5
+
+5
+
+x 10
+
+ 
+
+Exact algorithm
+Approximation algorithm
+
+1.8
+
+1.6
+
+1.4
+
+1.2
+
+1
+
+d
+n
+o
+c
+e
+s
+ 
+r
+e
+p
+ 
+t
+u
+p
+h
+g
+u
+o
+r
+h
+T
+
+500
+
+1000
+
+1500
+
+2000
+
+Window size
+
+5
+
+0
+
+0.5
+
+Uncertainty ratio
+
+1
+
+0.8
+
+ 
+10
+
+20
+
+30
+b
+
+40
+
+50
+
+ 
+
+          (a)                                               (b) 
+
+Fig. 6 Throughput vs. w using (a) Headway (b) synthetic datasets    Fig. 7 Throughput vs. (cid:2242)            Fig. 8 Throughput vs. b 
+
+  What  are  throughputs  of  EXACT-MATCH  and  APPROX-
+MATCH under different parameter settings, using both real-
+world datasets and synthetic datasets? 
+
+  While  APPROX-MATCH  improves  the  performance  over 
+EXACT-MATCH, what are its false positive and false nega-
+
+tive error rates under different b parameter values? 
+
+How effective are the AF algorithm and the adaptive optimi-
+zation  algorithm  in  improving  performance,  for  both  exact 
+and approximate matching? 
+
+ 
+
+  What are the throughput performances of our algorithms that 
+handle  surrounded,  front,  and  rear  negations  respectively, 
+and  how  do  they  compare  with  the  case  of  no  negations  in 
+patterns? 
+
+7.1  Datasets and Setup 
+We  use  the  following  three  real  datasets  and  some  synthetic  da-
+tasets:  
+
+MIT-BIH Arrhythmia Database.  This real dataset is part of the 
+widely-used  PhysioBank  Archives  and  contains  48  half-hour  ex-
+cerpts of two-channel ambulatory ECG recordings, obtained from 
+47  subjects  studied  by  the  BIH  (Boston’s  Beth  Israel  Hospital) 
+Arrhythmia  Laboratory  and  MIT  [33].The  recordings  were  digit-
+ized at 360 samples per second per channel with 11-bit resolution 
+over  a  10  mV  range.  A  reading  is  discretized  into  ranges  0  to  3. 
+Because  the  readings  are  noisy  and  can  have  large  errors  (due  to 
+unreliable  sensors  and  wireless  communication),  a  probability  of 
+0.6 is assigned to a reported sample reading, and 0.2 to each of the 
+two  neighboring  ranges.  If  there  is  only  one  neighboring  range 
+(i.e.,  at  0  or  3),  a  probability  of  0.7  is  assigned  to  the  reported 
+range,  and  0.3  to  the  neighboring  range.  Using  distributions  can 
+reduce the chance of missing real matches.  
+
+Vehicle  Headway  and  Speed  Datasets.  We obtain two real da-
+tasets from the Kentucky Transportation Center (KTC) [32]. KTC 
+uses  several  sensors  (Nu-Metric’s  NC-200  traffic  analyzers)  in-
+stalled  in  the  center  of  multiple  lanes  of  two  highways.  The  two 
+specific datasets we use are the headway data and the speed data. 
+The headway dataset contains estimates of headway gaps between 
+every two vehicles that pass by the sensor, while the speed dataset 
+has  estimates  of  the  speed  of  each  vehicle  that  passes  by.  These 
+datasets are also uncertain streams by nature. One source of uncer-
+tainty, for example, is the detection of which lane a vehicle is trav-
+eling in; the headway information is based on the vehicle traveling 
+in  the  same  lane  in  front.  For  speed  data,  we  discretize  a  speed 
+reading  into  0  (below  10  mph),  1  (between  10  and  30  mph),  2 
+
+ 
+
+285
+
+(between 30 and 50 mph), or 3 (above 50 mph). The discrete dis-
+tributions are added in a similar fashion as the MIT-BIH dataset.  
+
+Synthetic  Datasets.    We  also  programmatically  generate  some 
+synthetic datasets so that we have better control on various param-
+eters, such as uncertainty ratios (i.e., fraction of characters that are 
+uncertain),  interesting  pattern  lengths,  window  sizes,  and  gaps 
+between occurrences of a pattern. We generate an (infinite) uncer-
+tain stream with characters randomly chosen from an alphabet. A 
+pattern  string  p  (of  a  selected  length)  is  first  chosen;  then  p  is 
+“embedded” in the generated stream, such that each occurrence of 
+p has a window size between |p| and w. Unless otherwise specified 
+in the experiments, we use the following default parameter values: 
+
+alphabet  size |Σ|=(cid:883)(cid:887) ,  uncertainty  ratio (cid:2016)=(cid:882).(cid:887) ,  gap  between 
+two  occurrences  of  a  pattern (cid:2011)=(cid:883)(cid:882)(cid:882)(cid:882).  An  uncertain  character 
+0.5 and the two neighboring characters (in Σ) of probabilities 0.25 
+
+has  a  discrete  distribution  with  a  central  character  of  probability 
+
+We  implement  all  algorithms  described  in  the  paper.  All  experi-
+ments  are  performed  on  a  machine  with  an  Intel  Core  2  Duo 
+1.66Ghz processor and a 1GB memory. 
+
+each.  
+
+7.2  Exact and Approximate Matching 
+We first experiment on our exact subsequence matching, the EX-
+ACT-MATCH algorithm. An interesting parameter is the window 
+size w.  
+
+Using the Headway dataset, we issue a query like “alert me when 
+there are at least 10 truck tailgaters (i.e., too little headway) with-
+in a window of 50 vehicles”. For this query, we use a pattern string 
+
+(cid:1868)=(cid:1846)(cid:2869)(cid:2868), where the alphabet Σ contains (cid:1846) – truck tailgater, (cid:1829) – car 
+tailgater,  and (cid:1840) –  all  others.  Thus,  we  look  for (cid:1846)’s  repeated (cid:883)(cid:882) 
+times anywhere within a window of size (cid:887)(cid:882). We vary the window 
+
+size  parameter  in  this  query  from  10  up  to  200.  The  throughputs 
+(per  second)  of  EXACT-MATCH  are  shown  in  Figure  6(a).  We 
+can  see  that  throughput  decreases  as  window  size  increases.  This 
+is consistent with our analysis of the cost of EXACT-MATCH.  
+
+We  then  use  synthetic  datasets  and  try  larger  window  sizes.  The 
+advantage  of  using  synthetic  datasets  for  this  purpose  is  that  we 
+can  embed  occurrences  of  p  in  windows  of  different  sizes  in  the 
+generated sequence stream (as described in Section 7.1). We use a 
+pattern  p  of  length  20  and  vary  window  sizes. Figure  6(b)  shows 
+the  throughputs  of  our  uncertain  stream  processing  system  using 
+the  EXACT-MATCH  algorithm.  Clearly,  the  throughput  is  in-
+versely  proportional  to  w  (a  hyperbola-shape  graph),  which  is  a 
+
+5
+
+x 10
+
+2.5
+
+d
+n
+o
+c
+e
+s
+ 
+r
+e
+p
+
+ 
+t
+
+u
+p
+h
+g
+u
+o
+r
+h
+T
+
+2
+
+1.5
+
+1
+
+Exact
+Approximate
+
+ 
+
+0.06
+
+t
+
+e
+a
+r
+ 
+r
+o
+r
+r
+
+E
+
+0.05
+
+0.04
+
+0.03
+
+0.02
+
+0.01
+
+False positive
+False negative
+
+-4
+
+x 10
+
+ 
+
+10
+
+t
+
+e
+a
+r
+ 
+r
+o
+r
+r
+
+E
+
+9
+
+8
+
+7
+
+6
+
+5
+
+4
+
+3
+
+False positive
+False negative
+
+ 
+
+4
+
+x 10
+
+14
+
+12
+
+10
+
+8
+
+6
+
+4
+
+2
+
+d
+n
+o
+c
+e
+s
+ 
+r
+e
+p
+
+ 
+t
+
+u
+p
+h
+g
+u
+o
+r
+h
+T
+
+Exact
+
+ 
+
+AF, exact
+Approx
+
+AF, approx
+
+0
+
+ 
+0
+
+2
+
+ 
+0
+
+0.5
+
+1
+
+0
+ 
+50
+
+0.5
+
+ 
+0
+
+b
+
+10
+
+20
+
+30
+
+40
+
+10
+
+20
+
+30
+
+200
+
+ 
+
+100
+
+150
+
+Pattern length
+
+Pattern length
+
+Uncertainty ratio
+
+stays  very  low  for  all  b  values,  while  the  false  negative  rate  de-
+
+Using the synthetic datasets, we next study the throughput changes 
+
+Figure 10 shows the false positive and false negative rates, where 
+
+similar trend as in the previous experiment (except that the w’s are 
+larger here). Nonetheless, even for w as large as 2000, the system 
+still  maintains  a  high  throughput  of  56K  characters  per  second. 
+Note  that  all  the  real-world  datasets  that  we  have  seen  have  a 
+throughput  requirement  below  this  rate.  For  example,  the  MIT-
+BIH ECG signal dataset is only about 1K characters per second. 
+
+Fig. 9 Throughput vs. pattern length Fig. 10 Error rates vs. b      Fig. 11 Error rates vs. (cid:2242)      Fig. 12 AF algorithms with various |p| 
+the window size (cid:1875) is (cid:885)(cid:882)(cid:882). We observe that the false positive rate 
+creases  sharply  as  we  increase  b.  In  particular,  when (cid:1854)=(cid:883)(cid:887),  the 
+false  negative  rate  already  drops  to (cid:882).(cid:882)(cid:882)(cid:884)(cid:887).  Note  that √(cid:1875)≈(cid:883)(cid:889). 
+is not a match within w at a position in (cid:1850), then there is also unlike-
+particular, (cid:1841)(cid:4666)√(cid:1875)(cid:4667)), we can achieve a great accuracy while signifi-
+uncertainty ratio parameter (cid:2016) on the false positive and false nega-
+(cid:1875)=(cid:883)(cid:882)(cid:882)(cid:882) and (cid:1854)=(cid:885)(cid:882).  Recall  that (cid:2016) is  used  when  generating  a 
+ratio (cid:2016). 
+
+of EXACT-MATCH as we vary the uncertainty ratio parameter (cid:2016) 
+we fix (cid:1875)=(cid:883)(cid:884)(cid:882). The result is shown in Figure 7. As (cid:2016) varies from 
+
+0.1 all the way to 1.0, the throughput changes are relatively insig-
+nificant – within 20%. This shows that our algorithm maintains a 
+high  throughput  rate  even  for  large  uncertainty  ratios  in  the  se-
+quence stream.  
+
+ly any match within a slightly larger window size at that position. 
+Thus,  APPROX-MATCH  rarely  has  any  false  positives.  This  ex-
+periment verifies Theorem 2 – with a relatively small b value (in 
+
+sequence stream. The result is shown in Figure 11, which indicates 
+no  obvious  effects  on  error  rates  when  varying  the  uncertainty 
+
+cantly improving the performance. We obtain similar results with 
+other real datasets and synthetic datasets, which we omit here.  
+
+The reason for the constantly low false positive rate is that if there 
+
+that is  used  to  generate the  sequence  streams.  In  this  experiment, 
+
+Additionally,  using  synthetic  datasets,  we  study  the  effect  of  the 
+
+tive  ratios  of  the  APPROX-MATCH  algorithm,  while  fixing 
+
+Now we use the MIT-BIH dataset to perform subsequence match-
+ing,  issuing  queries  similar  to  the  one  described  in  Section  1  to 
+
+and APPROX-MATCH with various  b values, which are the size 
+limits  of  RANDOM-ATTACHMENT.  The  result  is  shown  in 
+Figure  8.  First,  we  can  see  that  APPROX-MATCH  achieves  a 
+significant  speedup  over  EXACT-MATCH.  Second,  the  through-
+put decreases as b increases, since more work is needed when each 
+
+monitor  a  too-short  R-R  interval.  Using (cid:1875)=(cid:884)(cid:886)(cid:882), |(cid:1868)|=(cid:884)(cid:882) (i.e., 
+(cid:1868)=(cid:885)(cid:882)(cid:882)…(cid:882)(cid:885) with  eighteen  0’s),  we  run  both  EXACT-MATCH 
+(cid:2289)(cid:2270) object  is  bigger.  However,  the  tradeoff  here  is  that  we  get 
+Using  the  same  dataset,  we  now  fix (cid:1875)=(cid:884)(cid:886)(cid:882) and (cid:1854)=(cid:884)(cid:882),  but 
+vary |(cid:1868)|.  That  is,  by  varying  the  number  of  0’s  in (cid:1868)=(cid:885)(cid:882)(cid:882)…(cid:882)(cid:885), 
+throughput  decreases  as |(cid:1868)| increases.  Note  that  our  solution  for 
+
+we  essentially  detect  the  same  anomaly  (namely,  too-short  RR 
+intervals),  but  we  test  the  throughputs  under  various  pattern 
+lengths.  We  show  the  result  in  Figure  9,  which  indicates  that  the 
+
+lower error rates when b increases, as shown in some of the exper-
+iments that follow.  
+
+the  performance  degradation  problem  due  to  long  patterns  is 
+through the AF algorithm, demonstrated in Section 7.3.  
+
+7.3  Adaptive Filtering Algorithm 
+In this set of experiments, we evaluate the AF algorithm. In Sec-
+tion  7.2,  we  observe  that  performance  degrades  as  the  pattern 
+length increases. The design of our AF algorithm specifically tar-
+gets such long patterns.  
+
+We first use the Headway dataset, where we issue similar queries 
+
+as described in Section 7.2. We fix (cid:1875)=(cid:884)(cid:882)(cid:882), vary |(cid:1868)|, and run the 
+STREAM-ADAPTIVE-GD  algorithm  with  input (cid:1876)(cid:2868)=|(cid:1868)|/(cid:884) , 
+
+which  in  turn  runs  AF  for  either  exact  or  approximate  matching. 
+The  result  is  shown  in  Figure  12.  We  can  see  that  for  both  exact 
+matching  and  approximate  matching,  the  adaptive  filtering  algo-
+rithm  significantly  improves  the  throughputs,  especially  for  long 
+patterns.  
+
+We next experiment with the Speed dataset to study the error rates 
+of APPROX-MATCH. Our monitoring query is to detect the start 
+of  a  traffic  jam,  which  possibly  indicates  an  accident.  A  speed 
+reading is discretized into 0 (below 10 mph), 1 (between 10 and 30 
+mph), 2 (between 30 and 50 mph), or 3 (above 50 mph), and has a 
+distribution  (described  in  Section  7.1).  We  search  for  the  subse-
+
+quence (cid:1868)=(cid:885)(cid:884)(cid:883)(cid:882) within  a  certain  window  size.  Any  such  proba-
+
+bilistic match could indicate the start moments of a traffic jam. In 
+this  experiment,  we  study  the  accuracy  of  APPROX-MATCH 
+under various b parameter values by comparing with the results of 
+EXACT-MATCH.  
+
+ 
+
+286
+
+We  next  use  synthetic  datasets,  so  that  we  can  vary  the  gaps  be-
+tween  two  occurrences  of  the  pattern  in  the  stream.  We  vary  the 
+
+gap from 500 all the way up to 10,000, while fixing (cid:1875)=(cid:884)(cid:882)(cid:882) and 
+|(cid:1868)|=(cid:883)(cid:887)(cid:882). The result of running STREAM-ADAPTIVE-GD with 
+input (cid:1876)(cid:2868)=|(cid:1868)|/(cid:884) is shown in Figure 13. We can see that when the 
+
+pattern  occurs  less  frequently  in  the  stream  (i.e.,  gap  increases), 
+the savings of AF increase. This is because most part of the stream 
+can be filtered out with a prefix of the pattern.  
+
+Also using synthetic datasets, we observe the throughputs with and 
+without the STREAM-ADAPTIVE-GD algorithm (which invokes 
+
+ 
+
+ 
+
+0
+
+ 
+0
+
+ 
+
+0
+100
+
+200
+
+300
+
+400
+
+500
+
+0
+
+ 
+
+Exact
+
+AF, exact
+Approx
+
+AF, approx
+
+ 
+
+4
+
+x 10
+
+10
+
+d
+n
+o
+c
+e
+s
+ 
+r
+e
+p
+
+ 
+t
+
+u
+p
+h
+g
+u
+o
+r
+h
+T
+
+8
+
+6
+
+4
+
+2
+
+4
+
+x 10
+
+ 
+
+8
+
+6
+
+4
+
+2
+
+d
+n
+o
+c
+e
+s
+ 
+r
+e
+p
+
+ 
+t
+
+u
+p
+h
+g
+u
+o
+r
+h
+T
+
+ 
+
+Exact
+
+AF, exact
+Approx
+
+AF, approx
+
+none
+
+surrounded
+front
+
+rear
+
+5
+x 10
+
+5
+
+4
+
+3
+
+2
+
+1
+
+d
+n
+o
+c
+e
+s
+ 
+r
+e
+p
+
+ 
+t
+
+u
+p
+h
+g
+u
+o
+r
+h
+T
+
+none
+
+surrounded
+front
+
+rear
+
+5
+x 10
+
+ 
+
+5
+
+4
+
+3
+
+2
+
+1
+
+d
+n
+o
+c
+e
+s
+ 
+r
+e
+p
+
+ 
+t
+
+u
+p
+h
+g
+u
+o
+r
+h
+T
+
+0
+
+ 
+
+5000
+
+10000
+
+  
+
+exact
+
+approx
+
+Method
+
+Pattern gap
+
+Window size
+
+Exact                 Approx
+
+w=200 w=1000 w=200 w=1000
+
+ment is in Figure 14. For the APPROX-MATCH algorithm (with 
+
+                                                                                                                        using the ECG dataset 
+
+Fig. 13 AF with various pattern gaps Fig. 14  AF throughput vs. (cid:2205)   Fig. 15 Various negations       Fig. 16  Negations vs. (cid:2205) 
+AF)  when  varying  the  window  size (cid:1875).  The  result  of  this  experi-
+and  without  AF),  we choose (cid:1854)=(cid:3459)√(cid:1875)(cid:3463),  based  on  the  correspond-
+ing (cid:1875) value. Recall from Theorem 2 and our experiments on error 
+rates  in  Section  7.2  that  such (cid:1854) values  incur  very  low  error  rates 
+
+Figure 16. Each group has the same set of four bars as in the pre-
+vious  experiment,  but  we  have  four  groups.  The  first  two  groups 
+
+the  cases  of (cid:1875)=(cid:884)(cid:882)(cid:882) and (cid:1875)=(cid:883)(cid:882)(cid:882)(cid:882).  The  results  are  shown  in 
+are for the exact match cases (cid:1875)=(cid:884)(cid:882)(cid:882) and (cid:1875)=(cid:883)(cid:882)(cid:882)(cid:882), respective-
+mate  versions.  For  approximate  matching,  we  use (cid:1854)=(cid:883)(cid:887)  for 
+(cid:1875)=(cid:884)(cid:882)(cid:882) and (cid:1854)=(cid:885)(cid:887) for (cid:1875)=(cid:883)(cid:882)(cid:882)(cid:882),  which  have  extremely  low 
+rear  negations  has  an  additional  factor  of (cid:1875) compared  to  the  no-
+
+error rates as we verify. We can see that the window size parame-
+ter has a more pronounced impact on the throughputs of front and 
+rear negations. This is because the cost of matching with front or 
+
+negation  and  surrounded  negation  cases.  These  results  verify  our 
+analysis of the algorithms. 
+
+(which  is  also  verified  in  this  dataset).  Figure  14  shows  that,  as 
+expected,  the  throughputs  of  all  four  algorithms  decrease  as  win-
+dow sizes increase. 
+
+ly,  while  the  second  two  groups  are  similar,  but  for  the  approxi-
+
+indicates that an RR interval (between two peaks) is too long. Note 
+that there is more than one way to achieve this query.  
+
+window size of 360. It requires that we see a peak (3), followed by 
+at least two low values (0) without any peak in between, and there 
+
+7.4  Negations 
+In the final set of experiments, we consider negations. We first use 
+the  MIT-BIH  ECG  dataset.  This  application  provides  an  interest-
+ing way for us to evaluate all three forms of negation. For a query 
+that  looks  for  RR  intervals  that  are  too  long,  we  can  use  a  rear 
+
+negation  and  search  for  the  subsequence (cid:1868)=(cid:885)(cid:882)(cid:885)(cid:3364)(cid:882)(cid:885)(cid:3364) with  a  large 
+is not another peak within a window of 360. Thus, a matching of (cid:1868) 
+sequence (cid:1868)=(cid:885)(cid:3364)(cid:882)(cid:885)(cid:3364)(cid:882)(cid:885) with  a  window  size  of  360.  This  query  also 
+too  short,  by  having (cid:1868)=(cid:885)(cid:882)(cid:885)(cid:3364)(cid:882)(cid:885)(cid:3364)(cid:882)(cid:885) with  a  short  window  size  of 
+(cid:1868)=(cid:885)(cid:882)(cid:882)(cid:882)(cid:882)(cid:882)(cid:885)  (no  negation)  with (cid:1875)=(cid:884)(cid:886)(cid:882)  to  find  a  short  RR 
+
+detects  an  occurrence  of  RR  interval  being  too  long.  In  addition, 
+we  may  use  a  surrounded  negation  to  detect  RR  intervals  being 
+
+240.  Of  course,  as  was  the  case  in  Section  7.2,  we  can  also  use 
+
+Similarly, we can also use a front negation and search for the sub-
+
+We  show  the  results  in  Figure  15,  where  the  first  group  of  four 
+bars is the throughputs of exact matching and the second group is 
+for  approximate  matching.  The  four  bars  (in  left  to  right  order) 
+within each group are for no negation, surrounded negation, front 
+negation,  and  rear  negation,  respectively,  using  the  aforemen-
+tioned  queries.  We  can  see  that,  for  both  exact  and  approximate 
+matching,  surrounded  negation  has  a  very  small  overhead  com-
+pared to no negation, while front and rear negations have a much 
+larger  overhead.  This  is  because  front  and  rear  negations  are  in-
+herently  harder,  as  discussed  in  Section  6.  Nonetheless,  their 
+throughputs  (~60K  characters  per  second  for  exact  matching  and 
+~150K per second for approximate matching) are sufficient for all 
+the real-time applications that we encounter.  
+
+In  the  last  experiment,  we  use  the  synthetic  datasets  to  evaluate 
+
+negations.  We  fix |(cid:1868)|=(cid:884)(cid:882),  and  compare  the  throughputs  of  the 
+
+same set of methods as above (i.e., exact and approximate versions 
+of no negation, surrounded negation, front and rear negations) for 
+
+interval. 
+
+ 
+
+287
+
+8.  CONCLUSIONS AND FUTURE WORK 
+In  this  paper,  we  study  an  important  problem  relevant  in  many 
+applications in which we need to continuously monitor windowed 
+subsequences from probabilistic sequences in real time. We define 
+the  query  semantics,  and  propose  a  suite  of  algorithms  for  the 
+PWSM  problem.  This  includes  an  exact  algorithm,  a  randomized 
+approximation algorithm with provable accuracy, a filtering algo-
+rithm  with  adaptive  optimization,  and  finally  algorithms  for  han-
+dling negations in patterns. Comprehensive experiments have been 
+performed  on  real  and  synthetic  datasets  to  evaluate  these  algo-
+rithms. 
+
+As future work, we plan to investigate more complex data models 
+such  as  time-based  windows,  unordered  arrivals,  regular  expres-
+sion patterns, and correlated sequences. 
+
+9.  ACKNOWLEDGMENTS 
+This work was supported in part by the NSF, under the grants IIS-
+1017452  and  IIS-1149417.  We  are  grateful  to  the  Kentucky 
+Transportation Center for providing the datasets, and to the anon-
+ymous referees for their helpful comments. 
+
+10.  REFERENCES 
+[1]  L. Boasson, P. Cegielski, I. Guessarian, Y. Matiyasevich, 
+
+Window-accumulated subsequence matching problem is line-
+ar. In PODS, 1999. 
+
+[2]  D. Carney, U. Cetintemel, M. Cherniack, C. Convey, S. Lee, 
+G. Seidman, M. Stonebraker, N. Tatbul, S. Zdonik. Monitor-
+ing streams— a new class of data management applications. 
+In VLDB, 2002. 
+
+[3]  S. Chandrasekaran, O. Cooper, A. Deshpande, M. Franklin, J. 
+
+[16] Lin, J., Keogh, E., Lonardi, S., Chiu, B. A Symbolic Repre-
+
+Hellerstein, W. Hong, S. Krishnamurthy, S. Madden, V. Ra-
+man, F. Reiss, M. Shah. TelegraphCQ: Continuous dataflow 
+processing for an uncertain world. In CIDR, 2003. 
+
+[4]  A. Demers, J. Gehrke, B. Panda, M. Riedewald1, V. Sharma, 
+
+W. White. Cayuga: A General Purpose Event Monitoring 
+System. In CIDR, 2007. 
+
+[5]  Y. Diao, B. Li, A. Liu, L. Peng, C. Sutton, T. Tran, M. Zink. 
+Capturing data uncertainty in high volume stream processing. 
+In CIDR, 2009. 
+
+[6]  R. Durrett. Probability: theory and examples (2nd edition), 
+
+1996. 
+
+[7]  B. Ewing et al. Base-calling of automated sequencer traces 
+using phred I accuracy assessment. In Genome Research, 8, 
+1998. 
+
+[8]  T. Ge and Z. Li. Approximate Substring Matching over Un-
+
+certain Strings. In VLDB, 2011. 
+
+[9]  N. H. Gehani, H. V. Jagadish, O. Shmueli. Composite event 
+specification in active databases: Model and implementation. 
+In VLDB, 1992. 
+
+[10] L. Gravano, P. G. Ipeirotis, H. V. Jagadish, N. Koudas, S. 
+
+Muthukrishnan, D. Srivastava. Approximate string joins in a 
+database (almost) for free. In VLDB, 2001. 
+
+[11] P. Hall. The distribution of means for samples of size n 
+
+drawn from a population in which the variate takes values be-
+tween 0 and 1, all such values being equally probable. In Bi-
+ometrika, 19 (3/4), 1927. 
+
+[12] M. Kircher, J. Kelso. High-throughput DNA sequencing – 
+concepts and limitations. In BioEssays, 32:524-536, 2010. 
+
+[13] G. Kucherov, M. Rusinovitch. Matching a set of strings with 
+variable length don’t cares. In Theoretical Computer Science, 
+1997. 
+
+[14] J. Larson, E. Bradlow, P. Fader. An Exploratory Look at 
+
+Supermarket Shopping Paths. In Inter. Journal of Research in 
+Marketing, 2005. 
+
+[15] X. Lian, L. Chen. Similarity join processing on uncertain data 
+
+streams. In IEEE Transactions on Knowledge and Data En-
+gineering, 2010. 
+
+sentation of Time Series, with Implications for Streaming Al-
+gorithms. DMKD, 2003. 
+
+[17] U. Manber, R. Baeza-Yates. An algorithm for string matching 
+
+with a sequence of don’t cares. In Information Processing 
+Letters, 1991. 
+
+[18] H. Mannila. Methods and problems in data mining. In ICDT, 
+
+1997. 
+
+[19] H. Mannila, H. Toivonen, A. Verkamo. Discovering frequent 
+
+episodes in sequences. In SIGKDD, 1995. 
+
+[20] A. Mattu, W. Brady. ECGs for the Emergency Physician. 
+
+BMJ Books, 2003. 
+
+[21] T. Mitchell. Machine Learning. McGraw Hill, 1997. 
+
+[22] NC-IUB. Nomenclature for incompletely specified bases in 
+
+nucleic acid sequences. In Biochemistry Journal, 1985. 
+
+[23] C. Re, J. Letchner, Magdalena Balazinska, Dan Suciu: Event 
+
+queries on correlated probabilistic streams. In SIGMOD, 
+2008. 
+
+[24] H. Sakoe and S. Chiba. Dynamic programming algorithm 
+
+optimization for spoken word recognition. In TASSP, 26(1) 
+pp. 43- 49, 1978. 
+
+[25] S. Sarangi, K. Murthy. DUST: a generalized notion of simi-
+
+larity between uncertain time series. In SIGKDD, 2010. 
+
+[26] P. Seshadri, M. Livny, and R. Ramakrishnan. Sequence query 
+
+processing. In SIGMOD, 1994. 
+
+[27] S. Tata, J. M. Patel, J. Friedman, A. Swaroop. Declarative 
+
+Querying for Biological Sequences. In ICDE, 2006. 
+
+[28] A. Thiagarajan, L. Ravindranath, K. LaCurts, S. Madden, H. 
+Balakrishnan, S. Toledo, J. Eriksson. VTrack: accurate, ener-
+gy-aware road traffic delay estimation using mobile phones. 
+In SenSys, 2009. 
+
+[29] E. Wu, Y. Diao, S. Rizvi. High-performance complex event 
+
+processing over streams. In SIGMOD, 2006. 
+
+[30] H. Wu, B. Salzberg, G. Sharp, S. Jiang, H. Shirato, D. Kaeli. 
+
+Subsequence Matching on Structured Time Series Data. In 
+SIGMOD, 2005. 
+
+[31] http://eleceng.dit.ie/tburke/biomed/assignment1.html. 
+
+[32] http://www.ktc.uky.edu/. 
+
+[33] http://www.physionet.org/physiobank/database/mitdb/.
+
+ 
+
+ 
+
+288
+
+

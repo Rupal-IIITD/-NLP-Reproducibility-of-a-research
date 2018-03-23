@@ -1,0 +1,754 @@
+Run-time Energy Consumption Estimation Based on Workload in Server
+
+Systems
+
+Adam Lewis, Soumik Ghosh and N.-F. Tzeng
+
+Center for Advanced Computer Studies
+
+University of Louisiana, Lafayette, Louisiana 70504
+{awlewis,sxg5317,tzeng}@cacs.louisiana.edu
+
+Abstract
+
+This paper proposes to develop a system-wide energy consumption
+model for servers by making use of hardware performance coun-
+ters and experimental measurements. We develop a real-time en-
+ergy prediction model that relates server energy consumption to its
+overall thermal envelope. While previous studies have attempted
+system-wide modeling of server power consumption through sub-
+system models, our approach is different in that it uses a small
+set of tightly correlated parameters to create a model relating sys-
+tem energy input to subsystem energy consumption. We develop
+a linear regression model that relates processor power, bus activ-
+ity, and system ambient temperatures into real-time predictions of
+the power consumption of long jobs and as result controlling their
+thermal impact. Using the HyperTransport bus model as a case
+study and through electrical measurements on example server sub-
+systems, we develop a statistical model for estimating run-time
+power consumption. Our model is accurate within an error of four
+percent(4%) as veriﬁed using a set of common processor bench-
+marks.
+
+1 Introduction
+
+The upwardly spiraling operating costs of the infrastruc-
+ture for enterprise-scale computing demand efﬁcient power
+management in server environments. This is difﬁcult to
+achieve in practice as a data center usually over-provisions
+its power capacity to address worst case scenarios. This
+often results in either waste of considerable power budget
+or severe under-utilization of capacity. Thus, it is critical
+to quantitatively understand the relationship between power
+consumption and thermal load at the system level so as to
+optimize the use of deployed power capacity in the data cen-
+ter.
+
+This paper introduces a statistical model that provides
+run-time system-wide prediction of energy consumption on
+server blades. The model takes into account key thermal
+and system parameters such as ambient temperatures, die
+temperatures, and hardware performance counters as met-
+rics for system energy consumption within a given power
+and thermal envelope.
+
+A hardware performance counter (PeC) based relation-
+ship between server blade power consumption and the con-
+sequent thermal envelope is necessary to dynamically con-
+trol the thermal footprint of large workloads. We con-
+struct a model for run-time system power estimation that
+
+dynamically correlates system-bus trafﬁc with task activ-
+ities, memory-access metrics and board-level power mea-
+surements. This work demonstrates that appropriate provi-
+sion of additional PeCs beyond what are provided by a typi-
+cal processor is required to obtain more accurate prediction
+of system-wide energy consumption.
+
+Using the HyperTransport [1] bus model as a case study
+and through electrical measurements on an example server
+architecture, we develop our model to estimate run-time
+power consumption. Scheduler-based mechanisms are be-
+ing developed to take advantage of this estimation model
+when dispatching jobs to conﬁne server power consumption
+within a given power budget and thermal envelope while
+minimizing impact upon server performance. Their results
+will be reported separately at a later time.
+
+2 Related Work
+
+Power management techniques developed for mobile and
+desktop computers have been applied with some success
+to managing the power consumption of microprocessors
+used in server hardware. The current generation of Intel
+and AMD processors use different techniques for processor-
+level power management including (1) per core clock gat-
+ing, (2) multiple clock domains, (3) multiple voltage do-
+mains for cores, caches, and memory, (4) dynamic voltage
+and frequency scaling per core and processor, and (5) hard-
+ware support for virtualization techniques. In general, these
+techniques take advantage of the fact that application perfor-
+mance can be adjusted to utilize idle time on the processor
+for energy savings [2]
+
+Extensive study has focused on limiting the power con-
+sumption of storage devices and main memory as these de-
+vices are the greatest energy consumers in the system af-
+ter the processor. However, these approaches optimize only
+one part of the system. This is problematic because the sys-
+tem components interact with each other and focusing on
+just one piece of the energy consumption model may not
+be optimal from the complete system standpoint. An effec-
+tive power model must take into account the impact of these
+interactions.
+
+Processor power consumption is often modeled by the
+correlation of power consumption to phases of application
+execution using system-level metrics. The approaches used
+to deﬁne this mapping fall into two categories: determin-
+ing the application phase from either the control ﬂow of the
+
+application or performance counter signatures of the exe-
+cuted instructions or operating system metrics [2][3][4][5].
+Attempts have been made to reconcile these approaches by
+mapping programs phases to events [6]. The most common
+technique used to associate PeCs and/or operating systems
+metrics to energy consumption use linear regression models
+to map the collected metrics to the energy consumed during
+the execution of a program [2][5][7].
+
+The power model must also take thermal issues into ac-
+count. Management of thermal issues is complicated by the
+existence of multiple cores per processor. Recent advances
+in processor design permit thermal management to occur on
+a per core and per processor basis. An analysis of the impact
+of multi-core processors can be found in [8].
+
+3 The Model
+
+Our model considers a single server blade as a closed black-
+box system. The black-box system model lets us converge
+upon an upper bound of the thermal, energy, and power en-
+velopes of the system. We develop our model by measuring
+the energy input into the system as a function of the work
+done by the system in executing its computational tasks and
+residual thermal energy given off by the system in doing that
+work. It is important to note that we are trying to establish
+an energy relationship between the workload and the overall
+thermodynamics of the system.
+
+We begin by considering the power supplied into the
+server at the output of the power supply unit. Having a
+measure of this input power gives us a handle over the to-
+tal current distribution across various voltage domains and
+into the various sub-systems of the server. Current sensors
+with readable counters at the outputs of the power supply
+as performance counters would immensely aid in dynami-
+cally tracking DC power drawn into the system that varies
+according to the system load.
+
+The DC power is delivered in the domains of +/-12 V,
++/-5V, and +/- 3.3V [9]. Most power supplies limit the total
+power delivered through the 5V and 3.3V lines to about 20%
+of the rated power supply (PR). Now assuming each of the
+voltage lines vk(t) draws current ik(t), then each line draws
+an instantaneous power of pk(t) = vk(t) · ik(t). If a voltage
+domain has M DC lines as output, the board has N voltage
+domains and the total power delivered into the system in
+time interval t2 to t1 is:
+
+Edc = Z t2
+
+t1
+
+N
+
+M j
+
+Xj=0
+
+Xk=0
+
+vk(t) · ik(t)dt
+
+(1)
+
+with the constraint on the 3.3V and 5V lines that maximum
+power consumed is less that 0.2 × PR. Thus, in our 450W
+rated system, the power delivered by the 3.3V and 5V lines
+is capped at 90W.
+
+This energy delivered to the system Edc = Esystem can
+be expressed as a sum of energy component contributed
+by the different sub-systems in the server blade. We de-
+ﬁne ﬁve energy consumption components within a system:
+
+(1) Eproc: Energy consumed in the processor due to all
+computations, (2) Emem: Energy consumed in the DDR
+SDRAM chips, (3) Eem: Energy consumed by the elec-
+tromechanical components in the server blade, (4) Eboard:
+Energy consumed by peripherals that support the operation
+of the board., and (5) Ehdd: Energy consumed by the hard
+disk drive during the server’s operation. Note that Eem in-
+cludes the fans and optical drives but Ehdd is separate as one
+can dynamically compute the HDD’s power consumption.
+Eboard includes all devices in the multiple voltage domains
+across the board, including chipset chips, voltage regula-
+tion, bus control chips, connectors, interface devices, and
+etc. Mostly these are covered in the 3.3V and 5V domains.
+
+3.1 Processor Energy Consumption
+
+Our processor model aims to treat
+the processor as a
+black box, whose energy consumption is a function of its
+work load, and the work done manifests as the core die-
+temperature and system ambient temperature (measured at
+a system level by ipmitool through sensors in the path
+of the outgoing airﬂow from the processor). A practical is-
+sue with trying to estimate processor power using a large
+number of PeCs is that there are only a limited number of
+PeCs that tools like cpustat can track simultaneously.
+In order to track the energy-thermal load relationship for
+a job, we had to develop a model with the least number of
+PeCs that would accurately reﬂect the energy consumption-
+thermal load relationship.
+
+Given the AMD Operton processor architecture con-
+nected in a dual core conﬁguration shown in Figure 1, we
+consider trafﬁc on the HyperTransport buses as representa-
+tive of the processor work load and reﬂecting the amount
+of data being processed by a processor or any of its cores.
+The HT2 bus is non-coherent and connects one of the two
+processors to the Southbridge (whereas the Northbridge is
+inside the Opteron processor). Thus, trafﬁc on the HT2 bus
+reﬂects hard-disk and network trafﬁc. The model therefore
+scales when considering the effect of network trafﬁc and
+heavy disk I/O based jobs. HT1 is a coherent bus between
+the two SMP processors and PeCs on that bus give an ac-
+curate reﬂection on the processing load of cores executing
+jobs. Per-core die temperature readings and, consequently,
+ambient temperature per processor are thus greatly affected
+by the number of transactions over the HT buses. We also
+include L2 cache misses as one of our variables (to be ex-
+plained in Section 3.2).
+
+Thus the total processor power consumption to reﬂect the
+
+thermal change due to workload can be expressed as:
+
+P
+
+proc = H · X
+
+= [β0 · · · β10]T
+
+· [V ar0 · · · V ar10]T
+
+(2)
+
+(3)
+
+where X vector contains the following variables: ambient
+temperatures and die temperatures for processors 0 and 1,
+HT1 and HT2 transactions, and L2 cache misses per core.
+The popularity of HyperTransport in server and high perfor-
+mance computing platforms based on AMD, IBM, nVidia,
+
+DDR2-DRAM
+
+DDR2-DRAM
+
+Core 1
+
+Core 2
+
+Core 2
+
+Core 1
+
+I-cache D-cache
+
+I-cache
+
+D-cache
+
+D-cache
+
+I-cache
+
+D-cache
+
+I-cache
+
+L2 Cache
+
+L2 cache
+
+L2 cache
+
+L2 Cache
+
+system request interface
+
+Crossbar Switch
+
+Integrated
+
+Memory
+
+Controller
+
+Host bridge
+
+HyperTransport
+
+Coherent
+HyperTransport
+(cHT)
+
+USB
+
+HDD
+
+DVD
+
+system request interface
+
+Crossbar Switch
+
+Host bridge
+
+HyperTransport
+
+Integrated
+
+Memory
+
+Controller
+
+HyperTransport Bus
+
+SouthBridge
+
+VGA 
+
+Ethernet
+
+Graphics
+
+Board - Level Power consumers
+
+Figure 1: Dual-core AMD Opteron based server architec-
+ture.
+
+Altera, and Cray processors makes the model applicable to
+a wide variety of platforms.
+
+3.2 DRAM Energy
+
+Energy consumed by the DRAM banks can be computed
+by a combination of measuring the counts of the high-
+est level cache miss in the processor combined with the
+DRAM Read/Write power along with the DRAM back-
+ground power(activation power). As illustrated in [10],
+DRAM background power and activation power can be ob-
+tained from the DRAM datasheets. For a single DRAM in
+our case, a total of 493mW would be consumed. However,
+given the number of L2 cache misses per second when a job
+is running on a certain core (over 22M / sec at the peak of
+bzip2 SPEC2006 benchmark), a signiﬁcant amount of heat
+is generated from the DRAM chips. The thermal airﬂow
+proximity of the DRAM banks to their respective proces-
+sors makes it possible for us to combine the energy con-
+sumption and the consequent thermal output of the memory
+banks with the processor ambient temperature. This value
+is reported by IPMI and we combine it into our regression
+model.
+
+3.3 Hard Disk Energy
+
+The energy consumed by the hard disk while operating, can
+be approximated to give an upper bound on the energy con-
+sumption of the hard disk using a combination of perfor-
+mance counters and drive ratings. In our server, Hitachi’s
+7200 RPM, 250GB SATA hard disk [11] is used. We can
+achieve a crude but simple model based on the typical power
+consumption data of the hard disk and performance coun-
+ters.
+
+The utility iostat can be used to measure the num-
+ber of read and writes per second to the disk as well as the
+kilobytes read from and written to the disk. Based on this
+
+performance counter, we can compute an approximate disk
+power consumption Ehdd value as :
+
+Ehdd = Pspin−up × tsu + PreadX Nr × tr
++ PwriteX Nw × tw +X Pidle × tidle
+
+(4)
+
+where Pspin−up is the power required to spin-up the disk
+from 0 to full rotation (≈ 5.25W max.). tsu is the time
+required to achieve spin up (typically about 10s). Pidle is
+typically 5W. Pread is the power consumed per kilobyte of
+data read from the disk. Nr is the number of kilobytes of
+data read in time-slice tr from the disk. Pread and Pwrite
+can be computed to be approximately 13.3µW /Kbyte and
+6.67µW /Kbyte.
+
+3.4 Electromechanical Energy
+
+The quantity Eem in our model takes into account the en-
+ergy consumed by the cooling fans in the server as well
+as the optical drives.
+In our case, no performance coun-
+ters are available for the optical drive energy measurements
+and they are obtained from measurements but could easily
+be obtained using current sensors at the DC output of the
+power supply. Power drawn by the fans for cooling can be
+given by the following equation [12]:
+
+Pf an = Pbase ·(cid:18) RP Mf an
+
+RP Mbase(cid:19)3
+
+(5)
+
+Pbase in this case deﬁnes the base of the unloaded system.
+In our system that is the power consumption of the system
+when running only the base operating system and no other
+jobs. That value is obtained experimentally by measuring
+the current drawn on the +12V and +5V lines, using a cur-
+rent probe and an oscilloscope.
+IPMI sensors [13] easily
+collect fan RPM data, and hence it is possible to quantify
+the electrical power consumption in the system. Thus,
+
+Eem = X Pf an × tipmi−slice +X Poptical × t
+
+3.5 Board Components
+
+(6)
+
+The quantity Eboard captures the energy required by the
+support chipsets and usually fall in the 3.3V and 5V power
+domains.
+In our case we obtain this value using current
+probe based measurements. However, as in earlier cases,
+current sensors for the power lines going into the board can
+provide instantaneous energy draw from the power supply.
+The processor, disk, fan, and optical-drive power lines are
+excluded here. For our server, at most 28 additional current
+sensors might be required for the entire blade [9]. Thus:
+
+Eboard = (cid:16)X Vpow−line × Ipow−line(cid:17) × ttimeslice
+
+3.6 Combined Model
+
+(7)
+
+The total energy consumed by the system for a given com-
+putational workload is modeled as a function of these met-
+rics as:
+
+Esystem = α0(Eproc + Emem) + α1Eem
+
++ α2Eboard + α3Ehdd
+
+(8)
+
+where α0,α1,α2, and α3 are unknown constants that are de-
+termined through linear regression analysis and remain con-
+stant for any given server architecture.
+
+4 Application and Evaluation of Model
+
+The power model was calibrated to the SUT by execut-
+ing eight benchmarks from the SPEC CPU2006 benchmark
+suite: bzip2, cactusadm, gromac, lbm, leslie3d, mcf, om-
+netpp, and perlbench [14]. The power consumed is mea-
+sured with a WattsUP [15] power meter connected between
+the AC Main and System Under Test (SUT). The internal
+memory of the power meter is cleared at the start of the run
+and the measures collected during the run are downloaded
+after the run completes from the meter’s internal memory
+into a spreadsheet.
+
+Current ﬂow on the different voltage domains in the
+server is measured using an Agilent MSO6014A oscillo-
+scope with one Agilent 1146A current probes per system
+power domain (12v, 5v, and 3.3v). This data is collected
+from the oscilloscope at the end of the execution of a bench-
+mark and stored in a spreadsheet on the test host.
+
+Five classes of metrics are sampled at 5 second intervals
+during the experiment: (1) CPU temperature for all proces-
+sors in the system, (2) Ambient temperature in the computer
+case measured in one more locations using the sensors pro-
+vided by server manufacturer, (3) the number of completed
+transactions processed through the system bus, (4) the num-
+ber of misses that occur in the L2 cache associated with each
+CPU core in the system, and (5) the amount of data trans-
+ferred to/from disk.
+
+System data is collected from the system baseboard con-
+troller using the IPMI interface and the Solaris iostat
+utility. Processor performance counters are collected on a
+system-wide basis using the Solaris cpustat utility.
+
+Table 1: Overall Regression Model
+
+Coeff. Variable
+
+22.80147
+
+0.73758 Ambient Temp0
+0.00580 Ambient Temp1
+0.00002 CPU0 Die Temp
+0.10895 CPU1 Die Temp
+0.00383 HT1 Bus X-Actions
+0.00001 HT2 Bus X-Actions
+7.36579 L1/L2 Cache Miss for Core0
+1.18173 L1/L2 Cache Miss for Core1
+1.18173 L1/L2 Cache Miss for Core2
+1.38849 L1/L2 Cache Miss for Core3
+0.00001 Disk bytes read
+0.16657 Disk bytes written
+
+β0
+β1
+β2
+β3
+β4
+β5
+β6
+β7
+β8
+β9
+β10
+β11
+β12
+
+The collected data was consolidated using the arithmetic
+mean (average) and geometric means of the data sets. Trial
+models were constructed using each method and a statis-
+tical analysis of variance (ANOVA) was performed to de-
+termine which model generated the best ﬁt to the collected
+
+Table 2: ANOVA for Consoldated Model
+
+Source
+Regr
+Resid
+Total
+R-sq
+
+SS
+
+df
+12
+400
+412
+0.97 Adj. R-sq
+
+2947.92
+104.59
+3052.50
+
+F
+
+939.56
+
+P
+0.00
+
+MS
+245.66
+0.26
+
+0.97
+
+data.The model was veriﬁed by examining the predicted re-
+sults for each benchmark against the data collected in the
+calibration test (Fig. 2). A comparison between the pre-
+dicted CPU power consumption and the ambient tempera-
+tures is shown in Fig. 3. The mean error per benchmark
+ranged from [1.35, 2.30] Watts with median values in the
+range of [0.83, 2.40] watts and standard deviation between
+[0.80, 1.5] watts.
+
+4.1 Discussion
+
+The consolidated model is attempting to predict for all
+benchmarks. Given the large volume of data generated thor-
+ough the different logging mechanisms, it is nearly impos-
+sible to discard bad data. Using the geometric mean as dis-
+cussed in the previous section helps to smooth out some of
+the errors introduced in the cases. However, the diversity of
+the benchmarks used means that some discrepancies arise
+within variables where we expect to see tight correlations,
+This, the model predicts well in some cases and not in oth-
+ers. The worst error is no more than the four present re-
+ported above.
+
+Also, the asymmetry of the β-coefﬁcients for tightly cor-
+related variables (HT1Scaled and HT2Scaled, for example)
+leads us to believe non-linear relationships may exist among
+these variables. Therefore, future work needs to consider
+the impact of use of non-linear regression models together
+with hardware performance counters.
+
+Another observation from the model pertains to the place-
+ment of the temperature sensors in the server. Ambi-
+ent Temp0 reﬂects more of the hot air ﬂow due to the server
+design. This illustrates that for different server designs the
+factors controlling the thermal envelope will be accurately
+reﬂected in the model. Thus, we would expect to see a more
+symmetric set of coefﬁcients for Ambient Temp0 and Am-
+bient Temp1 had the placement of the sensors been more
+balanced in the server.
+
+In terms of measuring performance counters, we have
+used the Solaris 10 cpustat, iostat, and ipmitool
+utilities. Of these, iostat and ipmitool are available
+across all UNIX-based operating systems commonly used
+in data centers. cpustat is a Solaris speciﬁc utility but is
+already being ported to Linux. In future work, it is planned
+to use tools like dtrace and oprofile for more con-
+trollable and tunable performance parameters which have
+major impacts on system-wide and processor wide power
+consumption.
+
+The computation methodology used in this paper
+For exam-
+coun-
+
+can be extended to other architectures.
+ple, we would measure Xeon performance
+
+Figure 2: Actual vs. Predicted Power for SPEC CPU2006.
+
+Figure 3: Predicted Processor Power vs. CPU Temperature.
+
+like BUS TRANS ANY, BUS TRANS MEM,
+
+ters
+and
+BUS TRANS BURST. Similar model development and
+coefﬁcient extraction arguments would hold for dual and
+quad core Xeons in different processor conﬁgurations.
+Currently without data from the Intel processors it is hard
+to say whether the model is more accurate on a certain
+platform as compared to the other.
+
+For a practical usage scenario the statistical coefﬁcients
+need to be computed only once using the SPEC benchmarks
+for a given server architecture. They can be used as embed-
+ded constants available either through the system ﬁrmware
+or the operating system kernel.
+
+The model developed in this paper is valid for any AMD
+Opteron dual-core/dual-processor system using the Hyper-
+Transport system bus. However, it is scalable to any quad-
+core dual processors Opteron system using HyperTransport.
+One would expect to see a slight difference or variation in
+the predicted power due to the greater or diminished af-
+fect of the die temperatures on the other parameters and
+the model would have to be adjusted accordingly. For a
+dual-core quad-processor system, the additional HT0 term
+would be introduced into the CPU power consumption term
+and the β coefﬁcients would have to be recalculated and the
+CPU power equation will have more terms. For a quad-core
+quad processor system, similar recalculations would be re-
+quired.
+
+5 Conclusion
+
+In this paper, we have introduced a comprehensive model
+which uses statistical methods to predict system-wide en-
+ergy consumption on server blades. The model measures
+energy input to the system as a function of the work done
+for completing tasks being gauged and the residual thermal
+energy given off by the system as a result. Trafﬁc on the
+system bus, misses in the L2 cache, CPU temperatures, and
+ambient temperatures are combined together using linear re-
+
+gression techniques to create a predictive model which can
+be employed to manage the processor thermal envelope.
+
+References
+[1] “HyperTransportTMI/O Link Speciﬁcation,” HyperTransport
+Technology Consortium, Spec. HTC20051222-00460024
+Rev 3.00d, June 2008.
+
+[2] G. Contreras and M. Martonosi, “Power Prediction for In-
+tel XScale R(cid:13)Processors Using Performance Monitoring Unit
+Events,” in Proc. of 2005 Int’l Symp. on Low Power Elec-
+tronics and Design, 2005, pp. 221–226.
+
+[3] F. Bellosa, A. Weissel, M. Waitz, and S. Kellner, “Event-
+driven Energy Accounting for Dynamic Thermal Manage-
+ment,” Proc. of the Workshop on Compilers and Operating
+Systems for Low Power, 2003.
+
+[4] C. Isci and M. Martonosi, “Identifying Program Power Phase
+Behavior Using Power Vectors,” in Proc. of 2003 IEEE Int’l
+Workshop on Workload Characterization, October 2003, pp.
+108–118.
+
+[5] ——, “Runtime Power Monitoring In High-end proces-
+sors: Methodology and Empirical Data,” in Proc. of 36th
+IEEE/ACM Int’l Symp. on Microarchitecture, 3-5 Dec. 2003,
+pp. 93–104.
+
+[6] ——, “Phase Characterization for Power:
+
+Evaluating
+Control-ﬂow-based and Event-counter-based Techniques,” in
+Proc. of 12th Int’l Symp. on High-Performance Computer Ar-
+chitecture, 11-15 Feb. 2006, pp. 121–132.
+
+[7] W. Bircher and L. John, “Complete System Power Esti-
+mation: A Trickle-Down Approach Based on Performance
+Events,” in Proc. of 2007 IEEE Int’l Symp. on Perf. Analysis
+of Systems and Software, April 2007, pp. 158–168.
+
+[8] J. Donald and M. Martonosi, “Techniques for Multicore
+Thermal Management: Classiﬁcation and New Exploration,”
+in Proc. of 33rd Int’l Symp. on Computer Architecture.
+Washington, DC, USA: IEEE Computer Society, 2006, pp.
+78–88.
+
+[9] “EPS12v Power Supply Design Guide, V2.92,” Server Sys-
+
+tem Infrastructure Consortium, Spec. 2.92, 2004.
+
+[10] “Calculating Memory System Power for DDR3,” Micron,
+
+Inc, Tech. Note TN41 01DDR3 Rev.B, August 2007.
+
+[11] “Hitachi Deskstar T7K500 Hard Disk Drive Speciﬁcation,”
+
+Hitachi, Inc., Spec. 1.2, December 2006.
+
+[12] F. Bieier, Fan Handbook: Selection, Application, and De-
+
+sign. New York, NY, USA: McGraw Hill, 1997.
+
+[13] “Intelligent Platform Management Interface Speciﬁcation,
+
+Second Generation,” Intel, Spec., February 2004.
+
+[14] J. L. Henning, “SPEC CPU2006 Benchmark Descriptions,”
+SIGARCH Comp. Archit. News, vol. 34, no. 4, pp. 1–17,
+2006.
+
+[15] Electronic Educational Devices,
+
+Inc., “WattsUp Power
+Meter,” December 2006. [Online]. Available: http://www.
+doubleed.com
+
+

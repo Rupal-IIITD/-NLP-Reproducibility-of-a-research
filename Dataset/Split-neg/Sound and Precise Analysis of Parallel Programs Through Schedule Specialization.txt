@@ -1,0 +1,3065 @@
+Sound and Precise Analysis of Parallel
+
+Programs through Schedule Specialization
+
+Jingyue Wu
+
+Yang Tang
+
+Gang Hu
+
+Heming Cui
+
+Junfeng Yang
+
+Columbia University
+
+{jingyue,ty,ganghu,heming,junfeng}@cs.columbia.edu
+
+Abstract
+
+Parallel programs are known to be difﬁcult to analyze. A key reason
+is that they typically have an enormous number of execution inter-
+leavings, or schedules. Static analysis over all schedules requires
+over-approximations, resulting in poor precision; dynamic analysis
+rarely covers more than a tiny fraction of all schedules. We pro-
+pose an approach called schedule specialization to analyze a par-
+allel program over only a small set of schedules for precision, and
+then enforce these schedules at runtime for soundness of the static
+analysis results. We build a schedule specialization framework for
+C/C++ multithreaded programs that use Pthreads. Our framework
+avoids the need to modify every analysis to be schedule-aware by
+specializing a program into a simpler program based on a schedule,
+so that the resultant program can be analyzed with stock analy-
+ses for improved precision. Moreover, our framework provides a
+precise schedule-aware def-use analysis on memory locations, en-
+abling us to build three highly precise analyses: an alias analyzer, a
+data-race detector, and a path slicer. Evaluation on 17 programs, in-
+cluding 2 real-world programs and 15 popular benchmarks, shows
+that analyses using our framework reduced may-aliases by 61.9%,
+false race reports by 69%, and path slices by 48.7%; and detected
+7 unknown bugs in well-checked programs.
+
+Categories and Subject Descriptors D.2.4 [Software Engineer-
+ing]: Software/Program Veriﬁcation; D.4.5 [Operating Systems]:
+Threads
+
+General Terms Algorithms, Design, Reliability, Veriﬁcation
+
+Keywords Specialization, parallel programs, multithreading,
+control-ﬂow analysis, data-ﬂow analysis, constraint solving
+
+1.
+
+Introduction
+
+The computational power provided by multicore hardware and
+demanded by the massive number of cloud services has made
+parallel programs increasingly pervasive and critical. Yet, these
+programs are known to be difﬁcult to get right; they are often
+plagued with concurrency errors [25], some of which have caused
+critical failures [23, 30, 37].
+
+A key reason for these bugs is that parallel programs are dif-
+ﬁcult to analyze using automated tools. These programs typically
+have an enormous—asymptotically exponential in the total execu-
+tion lengths—number of execution interleavings, or schedules, pre-
+sumably to react to various timing factors for performance. Static
+analysis over all these schedules requires over-approximations, re-
+sulting in poor precision and many false positives. Dynamic analy-
+
+Permission to make digital or hard copies of all or part of this work for personal or
+classroom use is granted without fee provided that copies are not made or distributed
+for proﬁt or commercial advantage and that copies bear this notice and the full citation
+on the ﬁrst page. To copy otherwise, to republish, to post on servers or to redistribute
+to lists, requires prior speciﬁc permission and/or a fee.
+
+PLDI’12,
+Copyright c(cid:13) 2012 ACM 978-1-4503-1205-9/12/06. . . $10.00
+
+June 11–16, 2012, Beijing, China.
+
+sis can precisely analyze the schedules that occur, but it rarely cov-
+ers more than a tiny fraction of all possible schedules, and the next
+execution may well run into an unchecked schedule with errors.
+
+Our ﬁrst contribution is a new approach we call schedule spe-
+cialization that combines the soundness of static analysis and the
+precision of dynamic analysis. Our insight is that not all of the ex-
+ponentially many schedules are necessary for good performance. A
+small set often sufﬁces, as illustrated by recent work on efﬁcient
+deterministic multithreading [16, 17, 24, 28]. Based on this insight,
+our approach statically analyzes a parallel program over a small set
+of schedules, then dynamically enforces these schedules. By focus-
+ing on only a small set of schedules, we vastly improve the preci-
+sion of static analysis; by enforcing the analyzed schedules dynam-
+ically, we guarantee soundness of the analysis results. Our approach
+is loosely analogous to previous approaches that combine static
+analysis and dynamic checking for memory safety (e.g., [26]), but
+ours aims at parallel programs and schedules.
+
+Schedule specialization may be implemented in many ways for
+many parallel programming models such as message passing and
+multithreading; this paper presents one such implementation for
+C/C++ programs using Pthreads [34]. We represent a schedule as a
+total order of synchronizations such as lock operations,1 which can
+be efﬁciently enforced [16, 28, 32]. To ensure that schedules are
+feasible, we collect them from real executions. To enforce sched-
+ules, we leverage our PEREGRINE [17] deterministic multithread-
+ing system which can enforce a small set of schedules on a wide
+range of inputs. For instance, it can use about a hundred schedules
+to cover over 90% of requests in a real HTTP trace for Apache [7].
+By reusing schedules, we not only make program behaviors re-
+peatable across inputs, but also amortize the static analysis cost in
+schedule specialization.2
+
+A key challenge we face in implementing schedule specializa-
+tion is how to statically analyze a program w.r.t. a schedule. A na¨ıve
+method is to make every analysis involved aware of the schedule,
+but this method would be quite labor-intensive and error-prone. It
+may also be fragile: if a crucial analysis, such as alias analysis, is
+unaware of the schedule, it may easily pollute other analyses.
+
+Solving this challenge leads to our second contribution, a pro-
+gram analysis framework with a set of sound and precise algorithms
+to specialize a program according to a schedule. The resultant pro-
+gram has simpler control and data ﬂow than the original program,
+and can be analyzed with stock analyses, such as constant fold-
+ing and dead code elimination, for improved precision. In addition,
+our framework provides a precise def-use analysis that computes
+schedule-aware, must-def-use results on memory locations, which
+can be the foundation of many other powerful analyses (§7).
+
+To specialize a program toward a schedule, our framework
+works in two steps. It ﬁrst specializes the control ﬂow by rewrit-
+ing the program to map each synchronization in the schedule to a
+
+1 Users can customize the schedule granularity by selecting which synchro-
+nizations go into the schedules (§3).
+2 A set of previously collected schedules may not cover all inputs. If sound-
+ness is required on inputs not covered, we may use dynamic analysis (§3).
+
+unique statement. It then specializes the data ﬂow according to the
+schedule through a series of analyses and rewrites. For instance, if
+the program loops N (a program variable) times to spawn worker
+threads and the schedule dictates three worker threads, our frame-
+work specializes N, as well as the other variables where the value
+of N ﬂows to, to be three. The simpliﬁed control and data ﬂow can
+then greatly improve analysis precision.
+
+Our framework has broad applications. For instance, we can
+build precise static veriﬁers (e.g., to verify error-freedom) because
+our veriﬁers need only verify a program w.r.t. the schedules en-
+forced. Stock compiler optimizations automatically become more
+effective on a specialized program because it has simpler control
+and data ﬂow. Our framework can also beneﬁt “read-only” analyses
+which do not require enforcing schedules at runtime. For instance,
+we can build precise error detectors that check a program against
+a set of common schedules to detect errors more likely to occur,
+while drastically reducing false positive rates. We can perform pre-
+cise, automated post-mortem analysis of a failure by analyzing only
+the schedule recorded in a system log to trim down possible causes.
+To demonstrate the usefulness of schedule specialization, we
+have built three powerful applications with high precision, which
+form our third contribution of this paper. We create a schedule-
+aware alias analyzer that can distinguish array elements, leveraging
+the def-use analysis provided by our framework. Moreover, we
+create a precise static race detector to detect only the data races that
+may occur when a given schedule is enforced, thus yielding few
+false positives. Lastly, we create a schedule-aware path slicer [21]
+to remove irrelevant statements from an execution trace. This slicer
+can be applied, for instance, to pinpoint the root cause of a failure
+or generate ﬁlters of bad inputs [15].
+
+We have implemented our framework within the LLVM com-
+piler [1] and evaluated it on 17 multithreaded programs, includ-
+ing 2 real programs such as a popular parallel compression util-
+ity PBZip2 [3] and 15 widely used parallel benchmarks from
+SPLASH2 [4] and PARSEC [2]. Our results show that schedule
+specialization greatly improves precision: on average, it reduced
+may aliases by 61.9%, false race reports by 69%, and path slices by
+48.7%. The improved precision also helped detect 7 unknown bugs
+in well-checked [19, 25, 29, 38, 39] programs.
+
+This paper is organized as follows. We ﬁrst present relevant
+background on PEREGRINE (§2) and an overview our framework
+(§3), then present the key algorithms using an example (§4) and
+detailed descriptions (§5). We then discuss implementation issues
+(§6), describe the analyses (§7) we build on top of our framework,
+and show the evaluation results (§8). We ﬁnally discuss related
+work (§9) and conclude (§10).
+
+2. Background: The PEREGRINE System
+
+Our framework leverages PEREGRINE [17] to collect and enforce
+schedules. This section brieﬂy describes the relevant mechanisms
+in PEREGRINE; for details of PEREGRINE, please refer to [16, 17].
+
+Collecting schedules. To ensure that schedules are feasible, we
+collect them from real executions. To do so, we ﬁrst replace all
+synchronizations in a program with calls to our synchronization
+wrappers. At runtime, when a synchronization wrapper is invoked,
+it appends an entry to a central log ﬁle, then calls the underlying
+synchronization. The synchronization wrappers are properly syn-
+chronized so that only one wrapper may run at any time, ensuring
+that all synchronizations are totally ordered. After the execution
+ﬁnishes, the log contains a schedule. To collect a set of schedules,
+we repeatedly run a program against representative workloads, and
+record the schedule in each execution. Although one could use
+clever heuristics to select schedules, such as iterating through many
+schedules to pick the fastest one, we currently do not do so.
+
+Enforcing schedules. Given a schedule, we ﬁrst compute the pre-
+conditions required for reusing the schedule on later inputs (ex-
+plained in the next few paragraphs). Then, if an input meeting
+these preconditions arrives, we enforce the schedule. Speciﬁcally,
+we make all threads call synchronization wrappers following the
+total order speciﬁed in the schedule, and these wrappers are again
+properly synchronized so that no two are concurrent. Prior re-
+sults [16, 17, 24, 28] including ours [16, 17] show that enforcing
+a synchronization order is efﬁcient because most code is not syn-
+chronization and can still run in parallel. For instance, this overhead
+in PEREGRINE ranges from 68.7% faster to 46.6% slower on a di-
+verse set of 18 programs, including the Apache [7].
+
+To compute preconditions for a schedule, we ﬁrst record a de-
+tailed execution trace when recording a schedule. We then perform
+a modiﬁed version [17] of path slicing [21] on the trace to remove
+statement instances that do not affect the feasibility of the schedule,
+i.e., the reachability of all synchronizations in the schedule. Our
+version of path slicing correctly tracks dependencies (e.g., shared
+data accesses) across threads. Once we compute a path slice for
+each thread, we symbolically execute each slice, tracking the con-
+straints on input data, such as command line arguments and data
+read from a ﬁle or socket. We then use the conjunction of the con-
+straints from each thread as the preconditions of the schedule.
+
+These preconditions have three properties. First, they do not
+guarantee program termination because we want to sidestep the dif-
+ﬁcult problem of statically establishing termination. This property
+is inherited from path slicing [21]. Second, since computing weak-
+est preconditions is undecidable, the preconditions PEREGRINE
+computes stay on the sound side: if an input satisﬁes these precon-
+ditions, it can be processed by the corresponding schedule (modulo
+termination). However, these preconditions may preclude inputs
+that can indeed be processed by the schedule. Third, these precon-
+ditions avoid data races, which may cause an execution to diverge,
+preventing PEREGRINE from enforcing a given schedule. When
+computing preconditions, PEREGRINE detects potential races that
+did not occur in a recorded trace, but may occur if we reuse the
+schedule on different inputs. It computes preconditions sufﬁcient
+to avoid these races. PEREGRINE makes the races that occurred in
+the recorded trace deterministic using dynamic instrumentation.
+
+Our PEREGRINE results show that a small number of schedules
+can cover a wide range of workloads for half of the 18 evaluated
+programs. We observe that the synchronizations in these programs
+depend mostly on “meta” properties such as the number of pro-
+cessor cores, and tend to be loosely coupled with the inputs. For
+these programs, the coverage of a schedule can be extremely high.
+For instance, consider PBZip2 which divides an input ﬁle evenly
+among multiple threads to compress. Two schedules are sufﬁcient
+to compress any ﬁle for PBZip2 as long as the number of worker
+threads remains the same. (PBZip2 needs one schedule if the ﬁle
+size can be evenly divided and another otherwise.) Another data
+point: about a hundred schedules are sufﬁcient to cover over 90% of
+requests in a real HTTP trace for Apache [7]. This stability [16] not
+only makes program behaviors repeatable across inputs, but also re-
+duces the runtime overhead of our framework (§3).
+
+3. Framework Overview
+
+This section presents an overview of our schedule specialization
+framework by presenting its key deﬁnitions and properties.
+
+We assign each statement in a program P a unique static label
+lj . An execution trace, or a trace, of P , denoted by T , is a poten-
+tially inﬁnite sequence of dynamic statement instances i0, i1, . . .
+where each ij is a tuple ht, li, indicating that ij is an instance of
+statement l executed by thread t; and if ij was completed before
+the start of in, then j < n (concurrently executed statements can
+be ordered either way). Given i = ht, li, we use i.label to access l.
+
+A schedule, denoted by S, is a sequence of synchronizations
+s0, s1, . . . , sN where each sj is a dynamic statement instance
+ht, li and l is a synchronization statement. While we anticipate
+our approach will work well with many parallel programming
+models, our current framework targets C/C++ programs that use
+Pthreads. It includes three types of synchronizations in the sched-
+ules: (1) Pthread synchronizations such as pthread create and
+pthread mutex lock operations; (2) entries and exits of thread
+functions (functions passed to pthread create) and main be-
+cause these events are natural synchronization points; and (3) addi-
+tional function calls to resolve ambiguity when a synchronization
+may be invoked in different calling contexts (explained in §5.1).
+We call the ﬁrst two classes true synchronizations and the last class
+derived synchronizations. Unless otherwise speciﬁed, we use syn-
+chronizations to refer to both true and derived synchronizations.
+
+To ensure that schedules are feasible, we collect them from ter-
+minating execution traces. A schedule includes only totally ordered
+synchronizations because our runtime ensures that synchroniza-
+tions are never concurrent (§2). It need not contain all synchroniza-
+tions from a trace, enabling ﬂexible tradeoffs between precision and
+analysis time (see the end of this section).
+
+Different traces may map to the same schedule because traces
+are more ﬁne-grained than schedules. We use run(P ) to denote
+the set of all traces of program P , including non-terminating ones.
+These traces cover all possible inputs to P . We use runS(P ) to
+denote the subset of traces in run(P ) with schedule S enforced.
+Traces in runS(P ) cover only inputs meeting the preconditions of
+S. Even though S is collected from a terminating trace, another
+trace with S enforced may still be non-terminating because the
+preconditions PEREGRINE computes do not guarantee termination
+(§2). Thus, runS(P ) may include non-terminating traces with a
+preﬁx of S enforced.
+
+Without schedule specialization, a static analysis has to con-
+sider conceptually all traces in run(P ) for soundness. With sched-
+ule specialization, a static analysis need consider only traces in
+runS(P ) for each enforced schedule S, potentially computing
+much more precise results. One method to use this potential is to
+modify every analysis to be aware of the schedule and consider a
+set of executions closer to runS(P ), but this method has the draw-
+backs discussed in §1.
+
+To avoid modifying every analysis to be aware of schedules,
+our framework rewrites P into a specialized program PS for each
+schedule S so that run(PS) is close to runS(P ). PS can then
+be analyzed with many stock analyses for improved precision. To
+analyze P over a set of schedules, we can generate a specialized
+program for each schedule, then merge the analysis results. In ad-
+dition, our framework provides a constraint-based def-use analysis
+on PS that computes precise must-def-use chains on memory lo-
+cations allowed only by the schedule S. By querying this def-use
+analysis, stock or slightly modiﬁed advanced analyses such as alias
+analysis can then compute schedule-aware results.
+
+Precision. Ideally for full precision, our framework should make
+run(PS) = runS(P ), so that static analysis of PS considers only
+traces in runS(P ). In our current framework, run(PS) may still
+include traces not in runS(P ) because, without enforcing S with
+PEREGRINE, an execution of PS may use a different schedule.
+Nonetheless, since run(PS) is much smaller than run(P ), stock
+analyses on PS should still yield more precise results than on P .
+Our def-use analysis excludes def-use chains forbidden by the total
+order in S. That is, it considers traces in runS(PS), which our
+specialization algorithms (§5) guarantee to be runS(P ). The def-
+use results provided by our framework are thus much more precise
+than what a stock def-use analysis can compute on PS.
+
+Soundness. Our framework guarantees that static analysis results
+on PS hold for all traces in runS(P ), i.e., whenever schedule S
+is enforced on program P , because (1) the results from a static
+analysis on PS should hold for all traces in run(PS); and (2)
+our specialization algorithms guarantee run(PS) ⊇ runS(P ).
+In addition, our framework guarantees that the def-use results it
+provides hold for runS(PS), which is runS(P ).
+
+Assumptions and non-assumptions. In our current framework,
+the soundness of static analysis results is conditioned on that one
+of the analyzed schedules is enforced. A ﬁnite set of schedules col-
+lected by PEREGRINE, however, may not cover all inputs. If an
+input cannot be processed by any of the schedules (or it can but our
+framework cannot determine this fact), the static analysis results
+may no longer hold for the execution on this input. If users want
+to retain soundness on such inputs, they may use dynamic analysis.
+For instance, if the analysis goal is to verify race freedom, they may
+use dynamic data race detection on such inputs. If dynamic analy-
+sis is used, the overall runtime overhead of our framework may
+depend on the actual workload, or how frequently it can enforce
+an analyzed schedule. Fortunately, our PEREGRINE results show
+that, for many programs, a small set of schedules can cover a wide
+range of the workloads (§2). For these programs and workloads,
+our framework rarely needs to use dynamic analysis.
+
+Moreover, even if we cannot use a small set of schedules to
+cover a wide range of workloads, schedule specialization is still
+useful for many applications. These applications include all read-
+only applications such as error detection and post-mortem analysis
+which do not require soundness on the inputs not covered by ana-
+lyzed schedules. They also include optimizations because we can
+simply run the original program on the inputs not covered.
+
+At the algorithmic level, we do not assume data-race-free pro-
+grams because we intend to keep our framework general and ap-
+plicable to not just optimizations, but other applications, such as
+veriﬁcation and error detection. In particular, data races cannot pre-
+vent us from enforcing a schedule (§2). Nonetheless, if optimiza-
+tion is the only goal, we can easily modify our algorithms to exploit
+this assumption for better results. At the implementation level, our
+current framework leverages the LLVM compiler, which may in-
+deed assume race freedom. This assumption may be removed by
+re-implementing the LLVM components we leverage.
+
+Our framework does not require that a schedule collected from
+a trace includes all synchronizations in the trace. Instead, users can
+customize the schedule granularity, or which synchronizations go
+into the schedules, by blacklisting certain synchronization state-
+ments. This design enables users to make ﬂexible three-way trade-
+offs between precision, analysis time, and schedule reuse-rate. In
+general, ﬁne-grained schedules have lower reuse-rates and lead to
+larger specialized programs and longer analysis time, but make the
+analysis results more precise. One exception is that users should
+typically blacklist synchronizations hidden behind an abstraction
+boundary, such as a memory allocator interface, because these syn-
+chronizations rarely improve precision but worsen analysis time
+and reuse-rate. For instance, we blacklisted the lock operations in
+the custom memory allocator in cholesky (§6). An interesting re-
+search question is how to optimally make this three-way tradeoff,
+which we leave for future work.
+
+4. An Example and Algorithm Overview
+This section illustrates how our framework operates using an exam-
+ple based on two programs in our evaluation benchmarks: aget, a
+parallel wget-like utility; and fft, a parallel scientiﬁc benchmark.
+Figure 1 shows the example program. As can be seen from the
+code, each thread accesses a disjoint partition of results. Suppose
+we want to build a precise alias analysis to compute this fact, so that
+we can for example avoid wrongly ﬂagging accesses to results
+
+}
+for (i = 0; i < p; ++i)
+
+ranges[i].ﬁrst = n * i / p;
+ranges[i].last = n * (i + 1) / p;
+
+int i;
+int p = atoi(argv[1]), n = atoi(argv[2]);
+for (i = 0; i < p; ++i) {
+
+1 : int results[MAX];
+2 : struct {int ﬁrst; int last;} ranges[MAX];
+3 : int global id = 0;
+4 : int main(int argc, char *argv[ ]) {
+5 :
+6 :
+7 :
+8 :
+9 :
+10:
+11:
+12:
+13:
+14:
+15:
+16: }
+17: void *worker(void *arg) {
+18:
+19:
+20:
+21:
+22:
+23:
+24: }
+
+for (i = 0; i < p; ++i)
+
+pthread join(child[i], 0);
+
+results[i] = compute(i);
+
+return 0;
+
+pthread create(&child[i], 0, worker, 0);
+
+return 0;
+
+pthread mutex lock(&global id lock);
+int my id = global id++;
+pthread mutex unlock(&global id lock);
+for (int i = ranges[my id].ﬁrst; i < ranges[my id].last; ++i)
+
+Figure 1: An example showing how schedule specialization works. Variable
+n and p are two inputs that specify the size of the global array results
+and the number of worker threads, respectively. The code ﬁrst partitions
+results evenly by the number of worker threads p and saves the range
+of each thread to ranges (lines 7–10); it then starts p worker threads to
+process the partitions (lines 11–12). Each worker enters a critical section to
+set its instance of my id and increment global id (lines 18–20), and then
+computes and saves the results to its partition (lines 21–22).
+
+Thread 0
+
+Thread 1
+
+Thread 2
+
+program entry
+
+pthread_create
+
+pthread_create
+
+pthread_join
+
+pthread_join
+
+program exit
+
+thread entry
+
+pthread_lock
+
+pthread_unlock
+
+thread exit
+
+thread entry
+
+pthread_lock
+
+pthread_unlock
+
+thread exit
+
+Figure 2: A possible schedule of the example in Figure 1 when p is 2.
+
+as races for a static race detector. Unfortunately, doing so requires
+solving a variety of difﬁcult problems. For instance, since p, the
+number of threads, is determined at runtime, static analysis often
+has to approximate these dynamic threads as one or two abstract
+thread instances. It may thus collapse distinct accesses to results
+from different threads as one access, computing imprecise alias
+results. Even if an analysis can (1) distinguish the accesses to
+results by different threads and (2) infer bounds on integers
+such as array indices using range analysis [33], it may still fail
+to compute that these accesses are disjoint. The reason is that
+the array partition each worker accesses depends on its instance
+of my id, which further depends on the schedule (or the order in
+which worker threads enter the critical section at lines 18–20). In
+short, if a static analysis has to consider all possible schedules of
+this program, it would be very difﬁcult to compute precise results.
+Fortunately, these difﬁcult problems are greatly simpliﬁed by
+schedule specialization. Suppose whenever p is 2, we always en-
+force the schedule shown in Figure 2. Since the number of threads
+is ﬁxed, distinguishing them becomes easy. In addition, since the
+
+ranges[i].ﬁrst = n * i / p;
+ranges[i].last = n * (i + 1) / p;
+
+int i;
+int p = atoi(argv[1]), n = atoi(argv[2]);
+for (i = 0; i < p; ++i) {
+
+}
+i = 0; assume(i < p);
+pthread create(&child[i], 0, worker CLONE1, 0);
+++i; assume(i < p);
+pthread create(&child[i], 0, worker CLONE2, 0);
+++i; assume(i >= p);
+i = 0; assume(i < p);
+pthread join(child[i], 0);
+++i; assume(i < p);
+pthread join(child[i], 0);
+++i; assume(i >= p);
+return 0;
+
+1 : . . . // same global declarations as in Figure 1
+2 : int main(int argc, char *argv[ ]) {
+3 :
+4 :
+5 :
+6 :
+7 :
+8 :
+9 :
+10:
+11:
+12:
+13:
+14:
+15:
+16:
+17:
+18:
+19:
+20: }
+21: void *worker CLONE1(void *arg) {
+22:
+23:
+24:
+25:
+26:
+27:
+28: }
+29: void *worker CLONE2(void *arg) {
+30:
+31:
+32:
+33:
+34:
+35:
+36: }
+
+results[i] = compute(i);
+
+results[i] = compute(i);
+
+return 0;
+
+return 0;
+
+pthread mutex lock(&global id lock);
+int my id = global id++;
+pthread mutex unlock(&global id lock);
+for (int i = ranges[my id].ﬁrst; i < ranges[my id].last; ++i)
+
+pthread mutex lock(&global id lock);
+int my id = global id++;
+pthread mutex unlock(&global id lock);
+for (int i = ranges[my id].ﬁrst; i < ranges[my id].last; ++i)
+
+Figure 3: The resultant program after control-ﬂow specialization. The loops
+at lines 11–12 and lines 13–14 in Figure 1 are unrolled because they
+contain synchronizations in the schedule, while the other loops are not.
+Thread function worker is cloned twice, making it easy for an analysis
+to distinguish the two worker threads. The algorithm adds special assume
+calls to pass constraints on variables to the data-ﬂow specialization step.
+
+order in which threads enter the critical section at lines 18–20 is
+ﬁxed, each worker thread always gets a ﬁxed my id and thus ac-
+cesses a ﬁxed partition of results.
+
+To practically take advantage of these observations, our frame-
+work specializes a program toward a schedule. It does so in two
+steps. In the ﬁrst step, it specializes the control ﬂow of the pro-
+gram by “straightening” the program so that each synchronization
+in the schedule maps to a unique statement, and the synchroniza-
+tions within each thread are control-equivalent. Speciﬁcally, it ﬁrst
+constructs a super control ﬂow graph (CFG) of the program, which
+includes function call and return edges. It then iterates through each
+pair of consecutive synchronizations (s1, s2) in a thread, and clones
+the statements between s1 and s2 in the CFG. Figure 3 shows
+the result after specializing control ﬂow. Loops containing syn-
+chronizations such as pthread create are unrolled, and thread
+functions are cloned, making it easy for an analysis to distinguish
+threads. Note that such cloning and unrolling are selectively done
+only to functions that may do synchronizations, so they would not
+explode the size of a specialized program.
+
+In the second step, our framework specializes the data ﬂow
+through a series of analyses. For instance, it constructs an advanced
+def-use graph for variables and memory locations according to the
+schedule, and replaces variables with constant values when it can.
+
+. . . // same global declarations as in Figure 1
+int main(int argc, char *argv[ ]) {
+
+int p = atoi(argv[1]), n = atoi(argv[2]);
+ranges[0].ﬁrst = 0;
+ranges[0].last = n / 2;
+ranges[1].ﬁrst = n / 2;
+ranges[1].last = n;
+pthread create(&child[0], 0, worker CLONE1, 0);
+pthread create(&child[1], 0, worker CLONE2, 0);
+pthread join(child[0], 0);
+pthread join(child[1], 0);
+return 0;
+
+}
+void *worker CLONE1(void *arg) {
+
+pthread mutex lock(&global id lock);
+global id = 1;
+pthread mutex unlock(&global id lock);
+for (int i = 0; i < ranges[0].last; ++i)
+
+results[i] = compute(i);
+
+return 0;
+
+}
+void *worker CLONE2(void *arg) {
+
+pthread mutex lock(&global id lock);
+global id = 2;
+pthread mutex unlock(&global id lock);
+for (int i = ranges[1].ﬁrst; i < ranges[1].last; ++i)
+
+results[i] = compute(i);
+
+return 0;
+
+}
+
+Figure 4: The resultant program after data-ﬂow specialization. Variable p
+and my id are replaced with constants, the loop at lines 5–8 in Figure 3 is
+unrolled, and some dead code is removed.
+
+It does these analyses by collecting constraints from the program
+and querying a constraint solver. For instance, from lines 9, 11,
+and 13 in Figure 3, it infers that p must be 2, so it replaces p with
+2. Similarly, it computes a precise def-use chain for the accesses
+to global id, and infers that each my id instance has a constant
+value. Once variables are replaced with constants, we can apply
+techniques such as constant folding, dead code elimination, and
+loop unrolling to further specialize the program. Moreover, these
+stock techniques and our analyses can run iteratively, until the
+program cannot be specialized any more. Figure 4 shows the result
+of specializing data ﬂow.
+
+Beneﬁts of schedule specialization. The specialized program in
+Figure 4 has much simpler control and data ﬂow than the original
+program in Figure 1, enabling stock analyses to compute more pre-
+cise results. For instance, range analysis can now compute thread-
+sensitive results because the worker function is cloned; it can also
+compute precise bounds for the loop index i in the worker clones
+because the indice to ranges are now constant, not my id which
+can have a large range if no schedule is enforced.
+
+Our framework guarantees that static analysis results on Fig-
+ure 4 hold for the set of all traces with the schedule in Figure 2
+enforced. This set is fairly large because this schedule can be en-
+forced as long as the number of threads p is 2, regardless of the
+data size n or the contents of other input data. A small set of such
+schedules, including one for each number of threads, can practi-
+cally cover all inputs because (1) most parallel programs we evalu-
+ate achieve peak performance when the number of worker threads
+is identical or close to the number of processor cores and (2) the
+number of cores a machine has is typically small (e.g., smaller than
+100). This example illustrates the best case of our approach: by an-
+alyzing only a small set of schedules, we enjoy both precision and
+soundness for practically all inputs.
+
+caller
+
+s1
+
+callee
+
+s2
+
+call
+
+call
+
+s2
+
+ret
+
+s1
+
+e3
+s3
+
+(a) Intra-procedural ambiguity
+
+(b) Inter-procedural ambiguity
+
+Figure 5: Two types of ambiguity. The black nodes are synchronizations.
+The hatched nodes are the statements between s1 and s2 computed by
+the reachability analysis. The gray “call” node is a derived synchronization
+marked to resolve inter-procedural ambiguity.
+
+5. Algorithms
+
+This section describes our algorithms to specialize the control ﬂow
+(§5.1) and data ﬂow (§5.2) of a program toward a schedule.
+
+5.1 Specializing Control Flow
+To ease the description of our algorithms, we deﬁne a segment, de-
+noted by G, as the maximal portion of the CFG between two syn-
+chronization statements l1 and l2 that is free of other synchroniza-
+tion statements. A segment between l1 and l2 includes any state-
+ment s.t. (1) l1 can reach this statement in the CFG without reach-
+ing any other synchronization statements and (2) this statement can
+reach l2 without reaching any other synchronization statements. We
+denote the set of statements in G by G.L, and the set of control-
+ﬂow edges in G by G.E.
+
+To specialize the control ﬂow, we clone the segment between
+every two consecutive synchronizations within a thread, and then
+join all cloned segments together to form the specialized program.
+One difﬁculty to ﬁnd all statements between two consecutive syn-
+chronizations is ambiguity: there may be multiple ways from one
+synchronization to another. For instance, Figure 5a shows an am-
+biguous case caused by multiple paths in the CFG. The loop body
+shown has two paths, only one of which contains synchronization
+s2. This loop has to be transformed so that s1 and s2 become
+control-equivalent. Our algorithm to specialize control ﬂow auto-
+matically handles this case, described later in this subsection.
+
+Figure 5b shows another ambiguous case caused by multiple
+paths in the call graph. From s1 to s2, we can go through either
+call. To resolve call-stack ambiguity, we instrument calls to func-
+tions that may transitively do synchronizations, and include these
+derived synchronizations in the schedule as well. The result is that
+we can compute exactly one call stack for each synchronization in
+a schedule. Our evaluation shows that the number of derived syn-
+chronizations is small, and they incur negligible overhead (§8.2).
+
+Algorithm 1 shows how we specialize the control ﬂow of
+a program. We ﬁrst explain the helper function SpecializeCon-
+trolFlowThread, which takes the original program P , a schedule
+S, and a thread t, and outputs a subprogram P ′
+t specialized ac-
+cording to t’s synchronizations in S. For every two consecutive
+synchronizations of t, this function does a forward and a backward
+depth-ﬁrst search to ﬁnd the segment between the two synchroniza-
+tions. It then clones the segment, copying and renaming functions
+as necessary, and appends the segment clone to P ′
+t .
+
+Function DFS traverses the CFG from statement l1 to l2 and
+saves the visited portion of the CFG to output parameter Gout. It
+backtracks whenever it meets a synchronization. During the traver-
+sal, it maintains the current call stack in cs so that it can compute
+where to return (lret). When it reaches l2, it saves the call stack to
+output parameter csout, which SpecializeControlFlowThread will
+pass to BackwardDFS (in the same iteration) and DFS (in the next
+iteration). If there are multiple paths from l1 to l2, DFS may reach
+
+Algorithm 1: Control-Flow Specialization
+
+: the original program P and a schedule S
+
+Input
+Output: the specialized program
+SpecializeControlFlow(P , S)
+
+foreach thread t do
+
+P ′
+
+t ← SpecializeControlFlowThread(P , S, t)
+
+foreach P ′
+
+t do
+
+foreach statement l in P ′
+
+t do
+
+if l is a pthread create then
+
+ct ← child thread created by l
+set thread function of l to P ′
+ct
+
+return ∪tP ′
+t
+
+SpecializeControlFlowThread(P , S, t)
+
+// the specialized subprogram for thread t
+// the call stack of the current synchronization
+
+P ′
+t ← ∅
+cs ← ∅
+St ← the sub-schedule of S for thread t
+for (si, si+1) in St do
+
+G ← ({si.label}, ∅)
+// segment between si & si+1
+// G and the second cs below are output parameters.
+DFS(cs, si.label, si+1.label, cs, G)
+BackwardDFS(cs, si+1.label, si.label, G)
+P ′
+
+t ∪ Clone(G)
+
+t ← P ′
+
+return P ′
+t
+
+DFS(cs, l1, l2, csout, Gout)
+
+// l1 and l2 may be the same
+
+if l1 is a derived synchronization then
+
+l ← entry of l1’s callee function
+TryDFS(cs + l1, l1, l, l2, csout, Gout)
+
+else if l1 is a return statement then
+
+lret ← the top of cs
+l ← lret’s intra-procedural successor
+TryDFS(cs - lret, l1, l, l2, csout, Gout)
+
+else
+
+foreach intra-procedural successor l of l1 do
+
+TryDFS(cs, l1, l, l2, csout, Gout)
+
+TryDFS(cs, l1, l, l2, csout, Gout)
+Gout.E ← Gout.E ∪ {(l1, l)}
+if l = l2 then
+
+csout ← cs
+
+if l /∈ Gout.L then
+
+Gout.L ← Gout.L ∪ {l}
+if l is not a synchronization then
+
+DFS(cs, l, l2, csout, Gout)
+
+l2 multiple times in one traversal, but each time the call stack must
+always be identical because call-stack ambiguity is resolved.
+
+The results of DFS may include statements and CFG edges
+that cannot reach si+1.label. BackwardDFS prunes these state-
+ments and edges by traversing G, not the full CFG, backward from
+si+1.label to si.label. It is similar to DFS except it is backward
+and need not output a call stack, so we omit it from Algorithm 1.
+
+We now explain the main function of this algorithm, Spe-
+cializeControlFlow. It ﬁrst invokes SpecializeControlFlowThread
+to compute a specialized program based on the synchroniza-
+tions of each thread. It then replaces the thread function in each
+pthread create callsite with the cloned thread function. It ﬁnally
+merges all the specialized programs together.
+
+Discussion. We note three subtleties of Algorithm 1. First, it auto-
+matically handles the ambiguity in Figure 5a. Suppose the schedule
+is s1s2s3. We do not know the loop bound because one path in the
+loop body calls s2 and the other does not. However, our algorithm
+can still specialize the CFG into Figure 6. This feature is critical
+
+s1
+
+s2
+
+e3s3
+
+s1
+
+l
+
+s2
+
+e3s3
+
+Figure 6: The specialized CFG of
+Figure 5a with schedule s1s2s3.
+
+Figure 7: Example illustrating
+the need to traverse CFG edges.
+
+in some cases. For example, if s2 is pthread create, this feature
+clones the thread functions, providing thread-sensitivity.
+
+Second, DFS traverses into the body of a function only when the
+call to this function is a derived synchronization, i.e., this function
+may transitively do synchronization. Thus, the Gout it computes
+includes only CFG portions from such functions, and is not a full
+segment. The effect is that only these CFG portions are cloned,
+possibly multiple times, and each clone is unique to a segment in
+the resultant program; other functions are copied verbatim to the
+resultant program. By doing so, we capture the information from
+the schedule without exploding the size of a specialized program.
+
+Lastly, to compute a segment, we cannot simply compute only
+the statements in the segment and copy all edges from the original
+CFG. To illustrate, consider Figure 7. Suppose the schedule is
+s1s2s3. The segment between s1 and s2 should include statements
+s1, s2, and l, but exclude the CFG edge from s2 to l.
+
+5.2 Specializing Data Flow
+Given a control-ﬂow-specialized program, we specialize its data
+ﬂow using a series of constraint-based analyses leveraging the
+STP [5] integer constraint solver. We collect constraints on two
+types of program constructs: the LLVM virtual registers and mem-
+ory locations. LLVM virtual registers are already in static-single-
+assignment (SSA) form, so collecting constraints on them is rel-
+atively straightforward. Table 1 lists how we collect constraints
+for some LLVM instructions; the remaining instructions are similar
+and omitted for space. We handle loops by exploiting LLVM’s loop
+structure: most of the loops in our evaluated programs are canoni-
+calized by LLVM so that we can easily collect range constraints on
+the loop indices.
+
+Our algorithm to collect constraints on memory locations mim-
+ics classic def-use analysis. It collects two forms of constraints on
+memory locations: (1) the value loaded by an LLVM load instruc-
+tion is the same as the value stored by a store instruction and (2) the
+value loaded by a load is the same as the value loaded by another
+load. That is, we treat an LLVM load instruction as a “use” and an
+LLVM load or store instruction as a “def.” Treating loads as defs
+shortens the def-use chains and reduces analysis time.
+
+Collecting precise def-use constraints on memory locations is
+challenging for multithreaded programs. Fortunately, schedule spe-
+cialization enables two key reﬁnements over classic def-use analy-
+sis so that our algorithm can collect more precise constraints. First,
+we compute def-use chains spanning across threads because mul-
+tiple threads may indeed access the same shared memory location.
+Without schedule specialization, it would be hopeless to track pre-
+cise inter-thread def-use chains because the defs and uses may pair
+up in numerous ways depending on the schedules.
+
+Second, we compute must-def-use, instead of may-def-use, re-
+sults. Our insight is that by ﬁxing the schedule, we often ﬁx the
+def-use chains of key shared data, such as the global id in Fig-
+ure 1. It is thus most cost-effective to focus on these must-def-use
+chains because (1) they essentially capture the information (and
+hence the precision; see results in §8.1) from the schedule and (2)
+
+Instruction type
+binary
+integer comparison
+
+LLVM instruction
+a = b op c
+a = icmp pred, b, c
+
+STP constraint
+a = b op c
+a = (b pred c)
+
+pointer arithmetic
+
+a = gep b, i1, . . ., ik
+
+select instruction
+
+a = select b, v1, v2
+
+Φ instruction
+call and return
+
+a = Φ(v1, . . ., vk)
+a = func(b1, . . . , bk)
+func(f1, . . . , fk) {return r;}
+
+a = b + i1× sizeof(*b) + the offset
+of ik-th ﬁeld of ik−1-th ﬁeld of . . .
+of i2-th ﬁeld of b
+b = 0 → a = v1
+b = 1 → a = v2
+a = v1 or . . . or a = vk
+b1 = f1, . . . , bk = fk
+a = r
+
+Note
+“op” is a binary operator
+“pred” is an integer comparison predicate
+such as < and 6=
+“gep” calculates the location of a speciﬁc
+ﬁeld in an array/structure
+
+If b = 0, a = v1; otherwise a = v2
+
+a may have any incoming value
+Capture the equalities between the actual
+and formal parameters/return values
+
+Table 1: Collecting constraints from LLVM instructions on virtual registers.
+
+there are typically much fewer must-def-use constraints than may-
+def-use constraints, so the constraint-solving cost is low.
+
+To practically implement these reﬁnements, we compute def-
+use chains only on the instructions unique to each segment. In ad-
+dition, we look for defs of a use only from its inter-thread dom-
+inators which always execute before the use once the schedule is
+enforced. These dominators are dominators on the CFG augmented
+with edges representing the total order of synchronizations in a
+schedule. We explain our algorithm as well as these reﬁnements
+in the next few paragraphs.
+
+Algorithm 2 shows the pseudo code to collect def-use con-
+straints for memory locations. It operates on a control-ﬂow special-
+ized program with each synchronization in the schedule mapped to
+a unique instruction. It references several symbols deﬁned on the
+instructions and segments (§5.1) in this program:
+
+• value(l): the value loaded if l is a load instruction, or the value
+
+stored if l is a store;
+
+• loc(l): the memory location accessed by instruction l;
+• segment(l): the unique (explained in the next paragraph) seg-
+
+ment containing instruction l, or N one;
+
+• thread(G): the thread containing segment G;
+• begin(G): the synchronization at the beginning of segment G;
+• end(G): the synchronization at the end of segment G;
+• reach(l1, l2): the set of instructions on all simple paths from l1
+
+to l2 in the CFG. A simple path has no repeated instructions.
+Each segment has some unique instructions cloned by Algo-
+rithm 1; segment(l) returns the containing segment for these in-
+structions, or N one otherwise. We deﬁne a partial order over these
+instructions as follows: l1 happens-before l2, or l1 ≺ l2, if (1) both
+l1 and l2 are synchronizations, and l1 comes earlier than l2 in the
+schedule; (2) segment(l1) = segment(l2), and l1 comes ear-
+lier in the segment; or (3) ∃l3, s.t. l1 ≺ l3 and l3 ≺ l2. We say
+G1 ≺ G2 if end(G1) ≺ begin(G2). Two instructions (segments)
+are concurrent if there is no happens-before between them.
+
+At the top level, Algorithm 2 is similar to classic def-use anal-
+ysis. CaptureConstraints takes a use u, calls PotentialDefs to get
+a set of potential defs, and, for each live def not killed, adds an
+equality constraint between the value used and the live def.
+
+PotentialDefs illustrates how we implement the reﬁnements
+enabled by schedule specialization. It processes a use u only if
+segment(u) is not N one, i.e., u is unique to a segment. It searches
+for defs only in the instructions unique to each segment. To account
+for shared data access, it searches each thread td for a def of u. If td
+is the thread containing u, we search backwards from u for the lat-
+est dominator in CFG that accesses the same location. Otherwise,
+we search backwards from the latest synchronization s in td that
+happens-before u, and locate the latest dominator of s in CFG that
+accesses the same location. This dominator of s is essentially an
+inter-thread dominator of u. The result of PotentialDefs contains at
+most one def from each thread. In addition, it contains at most one
+store and possibly many loads (because we treat loads as defs).
+
+Algorithm 2: Capture Constraints on Memory Locations
+
+CaptureConstraints(u)
+
+foreach d ∈ PotentialDefs(u) do
+
+if not MayBeKilled(d, u) then
+
+AddConstraint(“value(u) = value(d)”)
+
+PotentialDefs(u)
+
+def s ← ∅
+Gu ← segment(u)
+p ← loc(u)
+if Gu 6= N one then
+
+foreach thread td do
+
+if thread(Gu) = td then
+
+def s ← def s ∪ LatestDef(u, p)
+
+else
+
+Gd ← latest segment of td s.t. Gd ≺ Gu
+def s ← def s ∪ LatestDef(end(Gd), p)
+
+return def s
+
+LatestDef(l, p)
+
+// returns the latest intra-thread deﬁnition
+
+d ← l
+repeat
+
+d ← ImmediateDominator(d);
+
+until d = N one or MustAlias(p, loc(d))
+if d 6= N one then return {d}
+else return ∅
+
+MayBeKilled(d, u)
+
+Gd ← segment(d)
+Gu ← segment(u)
+if Gd = Gu then
+
+return MayStore(reach(d, u), u)
+
+foreach segment G s.t. begin(G) ≺ end(Gu) and
+begin(Gd) ≺ end(G) and G 6= Gd and G 6= Gu do
+
+if MayStore(G, u) then return true
+
+return MayStore(reach(d, end(Gd)), u) or
+MayStore(reach(begin(Gu), u), u)
+
+MayStore(L, u)
+
+foreach store l ∈ L do
+
+if MayAlias(loc(l), loc(u)) then return true
+
+return false
+
+Function MayBeKilled checks whether def d is killed by any in-
+struction that may store to loc(u) and execute after d and before u.
+It considers all instructions, not just the unique ones, for soundness.
+If d and u are in the same segment, MayBeKilled simply checks the
+instructions between d and u in the CFG. Otherwise, it checks in-
+structions in any segment that may (1) begin no later than the end of
+u’s segment Gu and (2) end no earlier than the begin of d’s segment
+Gd. Note that these segments include not only the ones concurrent
+to Gu or Gd, but also any segment G s.t. Gd ≺ G ≺ Gu.
+
+The above algorithm to collect constraints on memory locations
+needs alias analysis to determine whether two pointers must or
+may alias. We answer these queries again using STP. The question
+“whether v1 and v2 may alias” is rephrased as “whether v1 = v2
+is satisﬁable,” and “whether v1 and v2 must alias” is rephrased as
+“whether v1 = v2 is provable.” Since constraint solving may take
+time, we also ported bddbddb [36], a faster but less precise alias
+analysis to our framework, by writing an LLVM front end to collect
+program facts into the format bddbddb expects. We always query
+bddbddb ﬁrst before STP.
+
+Once constraints are captured, we perform a series of analyses
+based on these constraints. One analysis infers which LLVM virtual
+register has constant values (recall that these registers are in SSA
+form). It ﬁrst queries STP for an assignment of value vj to each
+variable aj . For each aj , it then adds aj = vj to the current
+constraints, and checks whether STP can prove the new constraints.
+If so, it replaces aj with vj , such as replacing variable p in Figure 1
+with constant 2. Once variables are replaced with constants, we
+perform stock LLVM analyses, such as constant folding, dead code
+elimination, and loop unrolling, which automatically gain precision
+due to schedule specialization. These analyses may further simplify
+a program, so we iteratively run data-ﬂow specialization and these
+stock analyses until the specialized program converges.
+
+6.
+
+Implementation
+
+We implement our framework within LLVM [1]. The specialization
+algorithms described in the previous section are implemented as
+an LLVM pass that specializes the LLVM bitcode representation
+of an original program into a new bitcode program. These passes
+are of 11,754 lines of C/C++ code, with 2,586 lines for control-
+ﬂow specialization and 9,168 lines for data-ﬂow specialization. The
+remaining of this section discusses several implementation issues.
+
+6.1 Constructing Call Graph
+For clarity, Algorithm 1 assumes a simple call graph where each
+function call has a unique callee and unique return address. How-
+ever, the programs we analyze do use function pointers and excep-
+tions, invalidating this assumption. To resolve a call to a function
+pointer, we query our alias analysis and call TryDFS on each possi-
+ble callee. To handle exceptions, we pair up the LLVM instruction
+that unwinds the stack (UnwindInst) with the call instruction that
+sets an exception handler (InvokeInst).
+
+6.2 Optimizing Constraint Solving
+Data-ﬂow specialization (§5.2) frequently queries STP, and these
+queries can be quite expensive. We thus create four optimizations to
+speed up constraint solving. First, when identifying which variables
+are constants, we avoid querying STP for each variable. Speciﬁ-
+cally, when we query STP to prove that a variable is constant, we
+remember the value assignment STP returns even if STP cannot
+prove the query. If a variable has two different values in these as-
+signments, then this variable cannot be constant, so we do not need
+to query STP whether this variable is constant. This optimization
+alone speeds up our framework by over 10 times.
+
+Second, we cache extensively. Recall that data-ﬂow specializa-
+tion runs Algorithm 2 and other analyses iteratively. Within each
+iteration, we cache all alias results to avoid redundantly querying
+STP. Across iterations, we cache “must” and “must-not” alias re-
+sults and the def-use results because each iteration only adds more
+constraints and does not invalidate these precise results.
+
+Third, we use a union-ﬁnd algorithm to speed up equality con-
+straints solving. The def-use constraints we collect are all equality
+constraints. When the number of STP variables involved in these
+constraints increases, the STP queries tend to run slower. To reduce
+the number of STP variables, we put program variables that must
+
+be equal in one equivalent class represented by a union-ﬁnd data
+structure, and assign only one STP variable to each class.
+
+Lastly, we parallelize constraint solving. The STP queries is-
+sued by our framework are mostly independent. Speciﬁcally, each
+run of Algorithm 2 on a use is completely independent of another.
+In addition, checking whether one variable is constant is often in-
+dependent of checking another. We have built a parallel version of
+STP that speeds up our framework by roughly 3x when running on
+a quad-core machine.
+
+6.3 Manual Annotations
+Our framework supports three types of annotations to increase pre-
+cision and reduce analysis time. First, users can provide a black-
+list of synchronization statements to customize which synchroniza-
+tions go into the schedules (§3). Second, users can write regular
+assertions to enable our framework to collect more precise con-
+straints. For instance, they can write “assert(lower bound <=
+index && index <= upper bound)” to inform our framework
+the range constraints on index. Third, users can provide function
+summaries to reduce analysis time. Some functions in the evalu-
+ated programs are quite complex and contain many load and store
+instructions, causing our framework to collect a large set of con-
+straints. However, these functions often have simple shared mem-
+ory access patterns which users can easily summarize to speed up
+constraint solving. These summaries can be quite coarse-grained,
+such as “function foo writes an unconstrained value to variable x.”
+Users write summaries by writing fake functions, which our frame-
+work analyzes instead of the original functions. By supporting an-
+notations in forms of assertions and fake functions, we avoid the
+need to support an annotation language.
+
+Of the 17 programs evaluated, we annotated only 4 pro-
+in the custom
+grams. We blacklisted the lock operations
+memory allocator in cholesky. We annotated two loops in
+raytrace with assertions because they are not
+in LLVM-
+canonical form. (Currently our framework handles only canon-
+ical
+loops.) We summarized ﬁve functions: image segment
+and image extract helper in ferret, TraverseBVH -
+with StandardMesh and TraverseBVH with DirectMesh in
+raytrace, and LogLikelihood in bodytrack. These summaries
+range from 8 to 18 lines.
+
+7. Applications
+
+To demonstrate the precision of our framework, we build three
+powerful analyses. The ﬁrst is a precise schedule-aware alias an-
+alyzer, built on top of our def-use analysis (§5.2). We chose to
+build an alias analyzer because alias analysis is crucial to many pro-
+gram analyses and optimizations. Our analyzer provides a standard
+MayAlias(p, q) query interface, making it effortless to switch ex-
+isting analyses to our our alias analyzer. Under the hood, MayAlias
+ﬁrst queries a coarse-grained, existing alias analysis; if this coarse-
+grained analysis returns true, MayAlias then queries our def-use
+analysis for precise answers. The existing alias analysis we used is
+the C version3 of bddbddb ported to LLVM.
+
+The second tool is a precise static race detector that detects races
+that may occur only when a schedule is enforced. The detection
+logic appears identical to classic race detectors: two memory ac-
+cesses are a race if (1) they may alias, (2) at least one of the ac-
+cesses is a store, and (3) they are concurrent. There are two key
+differences. First, ours uses schedule-aware alias analysis. Second,
+ours detects concurrent accesses w.r.t. a total synchronization order
+(§5.2), more stringent than the execution order constraints dictated
+by the synchronizations. These two differences enable our detector
+to emit no or extremely few false positives (§8.1). Multiple races
+
+3 The alias analysis we use makes several assumptions about the C programs
+it analyzes for soundness; these assumptions are described in [9].
+
+ﬂagged on a specialized program may map to the same race in the
+original program because control-ﬂow specialization clones state-
+ments. Our race detector emits only one report in this case.
+
+The third tool is a thread-sensitive path slicer. Intuitively, given
+a program path, path slicing removes from the path the statements
+irrelevant to reach a given target statement [21]. The algorithm
+for doing so tracks control- and data-dependencies between state-
+ments, and removes statements that the target does not control-
+or data-depend upon. As previous work describes, path slicing
+can be applied to many problems, such as post-mortem analy-
+sis [21], counter-example generation [21], and malicious-input ﬁl-
+tering [15]. Our path slicer improves upon existing path slicing
+work [21] by tracking dependencies across threads. Dependencies
+may arise across threads due to data or control ﬂow. For example,
+if thread t0 stores to pointer p, and t1 then loads from q which may
+alias p, then the load in t1 data-depends on the store in t0. Simi-
+larly, if different branches of a branch statement in t0 may cause
+t1 to load different values from a shared variable, then the load in
+t1 control-depends on the branch statement in t0. Our path slicer
+correctly tracks these dependencies by leveraging our precise alias
+analyzer. Another feature of our path slicer is that it can slice to-
+ward multiple targets.
+
+8. Evaluation
+
+We evaluated our schedule specialization framework on a diverse
+set of 17 programs, including PBZip2 1.1.5, a parallel compression
+utility; aget 0.4.1, a parallel wget-like utility; parallel implemen-
+tations of 15 computation-intensive algorithms, 8 in SPLASH2 and
+7 in PARSEC. We excluded 4 programs from SPLASH2 and 6 from
+PARSEC because we cannot compile them down to LLVM bitcode
+code, they use OpenMP [13] instead of Pthreads [34], data-ﬂow
+specialization runs out of time on them, the compiled code does
+not run correctly in 64-bit environment, or our current prototype
+cannot handle them due to an implementation bug. All of the pro-
+grams were widely used in previous studies [19, 25, 29, 38, 39].
+
+We generated schedules for the programs evaluated using the
+following workloads: for SPLASH2 programs, we used the default
+arguments except that we ran them with four threads. These pro-
+grams ﬁnish within 100 ms. For PBZip2, we compressed a 10 MB
+randomly generated text ﬁle. For aget, we downloaded a ﬁle of
+1 MB from the internet. Unless otherwise speciﬁed, we ran all
+programs using four threads. This machine is a 2.8GHz Intel 12-
+core machine with 64 GB memory running 64-bit Linux 2.6.38. We
+compiled all programs using Clang and LLVM 2.9 with the default
+optimization level (often -O2 or -O3) of each program.
+
+In the remainder of this section, we ﬁrst focus on two evaluation
+questions: (1) how much more precise the analyses become with
+schedule specialization (§8.1); and (2) what the overhead of our
+framework is (§8.2). We then present the bugs we detected with the
+precision provided by schedule specialization (§8.3).
+
+8.1 Precision
+We measured how our framework can improve the precision on the
+three analyses we built, the alias analyzer, the race detector, and
+the path slicer (§7). Our methodology is to apply these analyses on
+an original program, the control-ﬂow specialized program, and the
+data-ﬂow specialized program, and then compare the results.
+
+Alias analysis precision. We quantiﬁed alias analysis precision by
+measuring alias percentage, the percentage of alias queries that
+return “may”, instead of “must” and “must-not”, responses because
+the latter two responses are precise. We selected the two pointers
+in each query from different threads to stress-test our alias analyzer
+because these pointers may appear to point to the same global array
+or the “same” thread-private heap or stack location, but are actually
+not aliases because most programs we evaluated access distinct
+
+)
+
+%
+
+(
+ 
+
+e
+g
+a
+
+t
+
+n
+e
+c
+r
+e
+p
+
+ 
+s
+a
+
+i
+l
+
+A
+
+ 30
+
+ 25
+
+ 20
+
+ 15
+
+ 10
+
+ 5
+
+ 0
+
+a
+
+P
+
+original
+after control-flow specialization
+after data-flow specialization
+
+8
+2
+.
+0
+
+0
+0
+.
+0
+
+1
+0
+.
+0
+
+5
+3
+.
+0
+
+0
+0
+.
+0
+
+g
+
+B
+
+e
+t
+
+Z
+
+i
+p
+
+2
+
+fft
+
+l
+u
+
+c
+
+h
+
+r
+
+a
+
+-
+
+c
+
+o
+
+d
+
+o
+l
+e
+
+ix
+
+n
+
+ti
+
+g
+
+s
+
+k
+
+y
+
+b
+
+w
+
+w
+
+o
+
+a
+
+r
+
+n
+
+a
+t
+e
+
+a
+t
+e
+
+e
+
+s
+
+r
+
+-
+
+r
+
+-
+
+s
+
+n
+
+b
+l
+a
+
+c
+
+e
+
+s
+
+s
+
+c
+
+b
+
+w
+
+a
+
+o
+
+tr
+
+a
+
+c
+
+a
+
+k
+
+p
+
+n
+
+s
+
+ti
+
+c
+
+o
+
+e
+
+n
+
+d
+
+a
+
+n
+
+y
+
+m
+
+e
+
+f
+e
+
+r
+
+a
+
+r
+
+r
+
+e
+t
+
+tr
+
+a
+
+y
+
+tr
+
+a
+
+a
+l
+
+cl
+
+u
+
+c
+
+k
+
+c
+
+e
+
+p
+
+s
+
+h
+
+n
+
+a
+
+q
+
+u
+
+ti
+
+a
+l
+
+a
+
+r
+
+e
+
+s
+
+o
+l
+e
+
+s
+
+s
+t
+e
+
+r
+
+d
+
+Figure 8: Precision of the schedule-aware alias analysis. Y axis represents
+the percentage of alias queries that return “may” responses. Lower bars
+mean more precise results. Each cluster in the ﬁgure corresponds to the
+results from one program. The three columns in a cluster represent the alias
+percentage when applying our analysis on the original program, the control-
+ﬂow specialized program, and the data-ﬂow specialized program.
+
+1
+
+1
+
+memory locations in different threads. The total number of such
+queries can be large for programs that do many memory accesses,
+so we sampled some percentage of the queries to bound the total
+query time. The sampling ratio for aget, PBZip2 and fft is 1
+50 ; for
+5000 ; and for barnes, water-nsquared, and
+water-spatial,
+ocean,
+
+50000 . For all other programs, we processed all queries.
+
+Figure 8 shows the alias precision results. For 12 pro-
+grams (aget, PBZip2, fft, lu-contig, radix, blackscholes,
+swaptions, streamcluster, canneal, bodytrack, ferret,
+and raytrace), control-ﬂow and data-ﬂow specialization com-
+bined greatly improved precision. For instance, they reduced the
+alias percentage down to below 0.1% for aget. For 7 (PBZip2,
+fft, swaptions, streamcluster, canneal, bodytrack, and
+raytrace) of these 12 programs, control-ﬂow specialization im-
+proved the alias analysis precision signiﬁcantly. For instance, it re-
+duced the alias percentage of PBZip2 from 28.04% to 8.30%, a
+70.4% reduction. The reason is that these programs allocate a fair
+amount of thread-private heap or stack data. Since the control-ﬂow
+specialization clones thread functions and thus automatically pro-
+vides thread sensitivity, our alias analyzer distinguishes accesses
+from different threads, achieving high precision. Although control-
+ﬂow specialization alone did not signiﬁcantly improve precision
+for the other 6 programs (aget, PBZip2, lu-contig, radix,
+blackscholes, and ferret) of the 12 programs, it created op-
+portunities for data-ﬂow specialization to improve precision. For
+the remaining 5 programs (cholesky, barnes, water-spatial,
+water-nsquared, and ocean), the reduction was not signiﬁcant.
+This small reduction could be caused by the imprecision in our an-
+alyzer (e.g., it is not path-sensitive), or real bugs in the original
+programs (§8.3). The mean reduction over all programs is 61.9%.
+
+Race detection precision. We report the precision of our race
+detector here, and describe the detected bugs in §8.3. To evaluate
+its precision, we compared the number of false positives it emitted
+to a baseline race detector we built. This baseline detector uses the
+same deﬁnition of concurrent accesses (§7), except that it queries
+our bddbddb port instead of our alias analysis because our precise
+alias results can only be computed assuming a given schedule will
+be enforced. Since the total number of concurrent memory access
+pairs may be large, we used sampling for some benchmarks. The
+sampling ratio was 1
+50 for PBZip2, fft, barnes, water-spatial,
+and ocean; and 1
+5000 for water-nsquared. For all other programs,
+we checked all concurrent access pairs.
+
+)
+
+%
+
+(
+ 
+
+o
+
+i
+t
+
+a
+r
+ 
+
+g
+n
+c
+
+i
+
+i
+l
+
+s
+ 
+
+h
+
+t
+
+a
+P
+
+ 100
+
+ 80
+
+ 60
+
+ 40
+
+ 20
+
+ 0
+
+a
+
+P
+
+original
+after control-flow specialization
+after data-flow specialization
+
+1
+0
+.
+0
+
+0
+1
+.
+0
+
+2
+0
+.
+0
+
+1
+0
+.
+0
+
+8
+3
+.
+0
+
+7
+3
+.
+0
+
+4
+0
+.
+0
+
+4
+1
+.
+0
+
+4
+1
+.
+0
+
+4
+1
+.
+0
+
+7
+1
+.
+0
+
+5
+1
+.
+0
+
+1
+1
+.
+0
+
+g
+
+B
+
+e
+t
+
+Z
+
+i
+p
+
+2
+
+fft
+
+l
+u
+
+c
+
+h
+
+r
+
+a
+
+-
+
+c
+
+o
+
+o
+l
+e
+
+d
+
+ix
+
+n
+
+ti
+
+g
+
+s
+
+k
+
+y
+
+b
+
+w
+
+w
+
+o
+
+a
+
+r
+
+n
+
+a
+t
+e
+
+a
+t
+e
+
+c
+
+e
+
+e
+
+s
+
+r
+
+-
+
+r
+
+-
+
+s
+
+n
+
+a
+
+n
+
+f
+e
+
+r
+
+a
+
+r
+
+r
+
+y
+
+tr
+
+a
+
+b
+l
+a
+
+s
+
+s
+
+b
+
+w
+
+o
+
+tr
+
+c
+
+a
+
+k
+
+s
+
+p
+
+ti
+
+c
+
+o
+
+e
+
+d
+
+a
+
+y
+
+m
+
+e
+t
+
+tr
+
+a
+
+cl
+
+u
+
+c
+
+k
+
+p
+
+s
+
+h
+
+n
+
+a
+
+u
+
+q
+
+ti
+
+a
+l
+
+a
+
+r
+
+e
+
+s
+
+o
+l
+e
+
+s
+
+s
+t
+e
+
+r
+
+c
+
+e
+
+Figure 9: Path slicing ratio on the original program, after control-ﬂow
+specialization, and after data-ﬂow specialization.
+
+d
+
+Program
+
+aget
+
+PBZip2
+
+fft
+
+lu-contig
+cholesky
+
+radix
+
+barnes ∗
+
+water-spatial ∗
+water-nsquared ∗
+
+ocean ∗
+
+blackscholes
+
+swaptions
+
+streamcluster
+
+canneal
+
+bodytrack
+
+ferret
+
+raytrace
+
+FPours
+0
+0
+0
+18
+7
+14
+369
+1799
+333
+292
+0
+0
+0
+0
+0
+0
+0
+
+FPbaseline Races
+1
+32
+0
+0
+0
+0
+n/a
+n/a
+n/a
+n/a
+0
+0
+0
+0
+0
+0
+0
+
+72
+125
+96
+18
+31
+53
+370
+2447
+354
+331
+3
+165
+4
+21
+4
+6
+215
+
+Table 2: Precision of the race detector. FPours and FPbaseline show the
+number of false positives for our detector and the baseline, respectively.
+Races show the true races detected. The four starred programs have a larger
+number of reports, so we conservatively treated all reports as false positives.
+
+We counted the number of false positives for our detector, de-
+noted by FPours, by inspecting its reports. Since the number of re-
+ports for barnes, water-spatial, water-nsquared, and ocean
+is large, we inspected a random selection of 20 reports, and found
+that they were all false positives. We thus conservatively treated
+all reports from these programs as false positives. We counted
+the number of false positives for the baseline detector, denoted by
+FPbaseline, by computing Rbaseline − Rours + FPours where R
+is the number of reports. This formula works because our detector
+is more precise than the baseline detector, and a report ﬂagged only
+by the baseline detector must be a false positive.
+
+Table 2 shows the false positive comparison results for all 17
+programs. For 10 of them, the precision of framework enabled
+our detector to reduce the number of false positives to 0. The
+reduction for cholesky and radix is also large. For lu-contig,
+barnes, water-nsquared, water-spatial, and ocean, our race
+detector reported slightly fewer races than the baseline; some of
+these results are expected based on our alias precision results. The
+mean reduction over all programs is 69.0%.
+
+Table 2 also shows the number of true but benign races detected.
+(We present the harmful races in §8.3.) Our detector found 1 race
+on variable bwritten in aget and 32 races on variable AllDone,
+NumBlocks, and OutputBuffer in PBZip2. Without the precision
+of our framework, users may have to inspect hundreds of reports
+before ﬁnding the true races.
+
+Program
+
+aget
+
+PBZip2
+
+fft
+
+lu-contig
+cholesky
+
+radix
+barnes
+
+water-spatial
+water-nsquared
+
+ocean
+
+blackscholes
+
+swaptions
+
+streamcluster
+
+canneal
+
+bodytrack
+
+ferret
+
+raytrace
+
+Use CF (s) DF (s)
+LOC Sched Cons
+720
+1.4 1551.7
+2667
+219
+973.1
+3.1
+480
+1382
+158
+113.8
+1.5
+277
+1122
+98
+1.4
+229
+65.0
+824
+48
+2.3 1967.9
+1302
+1550
+42
+330
+1.5
+42.5
+1016
+112
+5.4 1968.1
+1605 19280
+5555
+313.4
+2.8
+1037 14572
+5008
+4.1
+4768 48023 14530
+468.8
+6.8 1795.0
+5709 66253 18580
+38.3
+1.2
+130
+105
+1.3
+9.7
+834.6
+1.5
+216
+96.9
+5.4
+311
+20.9
+1.7
+240
+1.0
+118
+35.3
+417
+1.4 5397.8
+
+866
+9869
+877
+904
+3962
+919
+2234
+1958
+1620
+2958
+1264
+1094
+1765
+2794
+7696
+10765
+13226
+
+51
+15
+90
+31
+381
+153
+
+482
+215
+840
+535
+998
+439
+87 13468
+
+Table 3: Specialization time. LOC shows the lines of code in each program.
+The LOC of PBZip2 includes the bzip2 compression library. We show the
+time spent in specializing control ﬂow (CF) and data ﬂow (DF). Since
+specialization time are affected by the schedule, constraints, and queries, we
+also show the schedule length (Sched), the number of constraints (Cons),
+and the number of uses in the def-use analysis (Use).
+
+true synchronizations
+derived synchronizations
+
+ 120
+
+ 100
+
+ 80
+
+ 60
+
+ 40
+
+ 20
+
+ 0
+
+a
+
+P
+
+)
+
+%
+
+(
+ 
+s
+n
+o
+
+i
+t
+
+i
+
+a
+z
+n
+o
+r
+h
+c
+n
+y
+s
+ 
+f
+
+o
+
+ 
+
+n
+w
+o
+d
+k
+a
+e
+r
+B
+
+g
+
+B
+
+e
+t
+
+Z
+
+i
+p
+
+2
+
+fft
+
+l
+u
+
+c
+
+h
+
+r
+
+a
+
+-
+
+c
+
+o
+
+d
+
+o
+l
+e
+
+ix
+
+n
+
+ti
+
+g
+
+s
+
+k
+
+y
+
+b
+
+w
+
+w
+
+o
+
+a
+
+r
+
+n
+
+a
+t
+e
+
+a
+t
+e
+
+e
+
+s
+
+r
+
+-
+
+r
+
+-
+
+s
+
+n
+
+b
+l
+a
+
+c
+
+e
+
+s
+
+s
+
+c
+
+b
+
+w
+
+a
+
+o
+
+tr
+
+a
+
+c
+
+a
+
+k
+
+p
+
+n
+
+s
+
+ti
+
+c
+
+o
+
+e
+
+n
+
+d
+
+a
+
+n
+
+y
+
+m
+
+e
+
+r
+
+r
+
+e
+t
+
+tr
+
+a
+
+y
+
+tr
+
+a
+
+f
+e
+
+r
+
+a
+
+a
+l
+
+cl
+
+u
+
+c
+
+k
+
+c
+
+e
+
+p
+
+s
+
+h
+
+n
+
+a
+
+q
+
+u
+
+ti
+
+a
+l
+
+a
+
+r
+
+e
+
+s
+
+o
+l
+e
+
+s
+
+s
+t
+e
+
+r
+
+Figure 10: True vs. derived synchronizations in schedules.
+
+d
+
+Path slicer precision. To quantify the precision of our path
+slicer, we measured slicing ratio, the percentage of statements
+that remain in an execution trace. Figure 9 compares the preci-
+sion of path slicing on the original programs and the specialized
+programs.4 Control-ﬂow specialization largely reduced the slic-
+ing ratio for PBZip2, aget, swaptions, water-spatial, and
+water-nsquared. For instance, it reduced the slicing ratio for
+PBZip2 from 43.84% to 4.40%, a 89.97% reduction. Data-ﬂow
+specialization further reduced the ratio for PBZip2, swaptions,
+blackscholes, streamcluster, fft, lu-contig and radix.
+For instance, it reduced the slicing ratio for fft from 64.25% to
+8.95%, a 86.08% reduction. The ratio reduction for cholesky,
+barnes, and ocean was relatively small because our alias anal-
+ysis sometimes reports may-alias for pointers accessed in different
+threads, causing more instructions than necessary to be included in
+the slices. The mean reduction over all programs is 48.7%.
+
+8.2 Overhead
+Table 3 shows the time specializing the control and data ﬂow for
+each program. Control-ﬂow specialization is much faster than data-
+ﬂow specialization because it does not require expensive constraint-
+based analysis. Data-ﬂow specialization typically ﬁnishes within
+minutes or hours. This time is correlated with the size of the
+schedule, the number of constraints collected, and the number of
+constraint-solving queries.
+
+We also measured the number of derived synchronizations, i.e.,
+the calls to functions may transitively do synchronizations to re-
+
+4 We obtained the slicing results from an earlier prototype of our framework.
+
+Program Position
+aget
+
+aget
+
+aget
+
+aget
+radix
+radix
+fft
+
+Download.c:
+87-95
+Download.c:
+98-99
+
+Download.c:
+99,101,113,115
+Download.c:111
+radix.C:148
+radix.C:159
+fft.C:162
+
+Bug
+rbuf may not have the byte sequence \r\n\r\n. aget needs an extra
+bound check.
+The bound check should be td->offset + dr - i > foffset, not
+dr - i > foffset. The size passed to pwrite should be foffset
+- td->offset, not foffset - i.
+aget should check the return value of pwrite.
+
+Effect
+race, program crash, or large data corruption
+
+race, or program crash
+
+race, program crash, or small data corruption
+
+aget should check the return value of recv.
+radix should check variable radix against its upper bound 4096.
+radix should check num keys against its upper bound 262144.
+fft should check log2 line size against its upper bound 4.
+
+race, program crash, or small data corruption
+race, program crash.
+race, or program crash
+program crash (before a race may occur)
+
+Table 4: Bugs found.
+
+solve call-stack ambiguity (§5.1). If this number is large, the over-
+head to record schedules and specialize programs may increase.
+Figure 10 shows that, for every program evaluated, the majority
+of the synchronizations in the schedule are still true synchroniza-
+tions. Therefore, including derived synchronizations in the sched-
+ules does not incur signiﬁcant overhead.
+
+8.3 Bugs Found
+The precision of our framework helped detect 7 previously un-
+known bugs in the evaluated programs. This result is particularly
+interesting considering that the evaluated programs have been well
+checked in previous work [19, 25, 29, 38, 39].
+
+These bugs were typically detected as follows. Our analyses
+ﬂagged two memory accesses from different threads as poten-
+tial aliases or races, even though they should not be. We initially
+thought these “false positives” were due to the imprecision of our
+analyses and inspected them. Speciﬁcally, we queried STP for a
+solution to make the two pointers accessed identical.
+
+Surprisingly, many of these “false positives” turned to be real
+bugs. A common cause is that an input variable is used as an array
+index without being checked against the upper or lower bounds of
+the array or the partition of the array assigned to a thread. Such
+off-bound accesses may indeed cause different threads to race, and
+our analyses thus ﬂagged them. We detected 7 such bugs in aget,
+radix, and fft, which are shown in Table 4. These bugs may cause
+races, program crashes, or, worse, ﬁle data corruption. We manually
+veriﬁed these effects by running the buggy benchmarks on the bug-
+inducing inputs generated by STP. (The results presented in the
+previous two subsections are from the patched programs because
+we do not want these bugs to pollute our evaluation.)
+
+9. Related Work
+
+Slicing. Slicing techniques can remove irrelevant statements or
+instructions. Program slicing [35] does so on programs, dynamic
+slicing [6, 40] on dynamic execution traces, and path slicing [21]
+on (potentially infeasible) paths. Precondition slicing [15] is similar
+to path slicing with improved precision by incorporating dynamic
+information into the analysis.
+
+Our technique to specialize a program toward a schedule dif-
+fers from these slicing techniques because it takes as input both
+a program and a schedule, and outputs a specialized program that
+can actually run. Moreover, our technique does not merely remove
+statements; instead, it may transform a program by cloning state-
+ments when specializing the control ﬂow of the program, replacing
+variables with constants when specializing the data ﬂow, etc.
+
+Deterministic multithreading. Several recent systems [8, 10–
+12, 16–18, 24, 28] eliminate nondeterminism due to thread inter-
+leaving; our TERN [16] and PEREGRINE [17] further reduce input
+nondeterminism. These DMT systems are not designed to facili-
+tate static analysis. For instance, all existing DMT systems except
+TERN and PEREGRINE compute schedules online without storing
+them explicitly, making it difﬁcult to analyze a program w.r.t. these
+
+implicit schedules. Moreover, although several DMT systems con-
+strain a program to always use the same schedule for the same in-
+put, they may force the program to use a different schedule when
+the input changes slightly. This instability [16] not only aggra-
+vates input nondeterminism, but also largely prevents amortizing
+the static analysis cost in schedule specialization.
+
+Nonetheless, our framework may use one of these systems to
+enforce schedules. Indeed, our framework leverages our PERE-
+GRINE system, which explicitly stores and reuses schedules. Al-
+though PEREGRINE used a technique similar to the specialization
+algorithms described in §5, our PEREGRINE paper [17] described
+the technique mainly from a user’s perspective, and presented no
+schedule specialization framework nor detailed algorithms.
+
+Program specialization. Program specialization can specialize a
+program according to various goals [14, 20, 22, 27, 31]. For in-
+stance, it can specialize according to common inputs [14, 27]. The
+specialized programs can then be better optimized. Unlike previous
+work, our framework specializes a program toward a set of sched-
+ules, thus allowing stock analyses and optimizations to run on the
+specialized programs. To the best of our knowledge, we are the ﬁrst
+to specialize a program toward schedules.
+
+10. Conclusion and Future Work
+We have presented schedule specialization, an approach to analyze
+a multithreaded program over a small set of schedules for preci-
+sion, and then enforce these schedules at runtime for soundness.
+We have built a framework that specializes a program into a sim-
+pler program based on a schedule, so that the resultant program can
+be analyzed with stock analyses. Our framework provides a precise
+schedule-aware def-use analysis, enabling many powerful applica-
+tions. Our results show that our framework can drastically improve
+the precision of alias analysis, path slicing, and race detection.
+
+In our future work, we plan to leverage the precision provided
+by our framework to build precise error detectors, post-mortem
+analyzers, veriﬁers, and optimizers for multithreaded programs. In
+addition, we believe a similar specialization approach can improve
+analysis precision for sequential programs, too. In general, static
+analysis over all possible executions may be imprecise. To improve
+precision, we may perform static analysis over only a small set of
+executions (e.g., the most common executions) and, if necessary,
+resort to dynamic analyses for the other executions. We believe
+this direction will face many interesting precision, soundness, and
+overhead tradeoffs, which we will investigate.
+
+Acknowledgement
+Alex Aiken, Stephen Edwards, Roxana Geambasu, Martha Kim,
+Eric Powders, and the anonymous reviewers provided many helpful
+comments, which have substantially improved the content and pre-
+sentation of this paper. We thank Huayang Guo for LATEX help. This
+work was supported in part by AFRL FA8650-11-C-7190, FA8650-
+10-C-7024 and FA8750-10-2-0253; and NSF CNS-1117805, CNS-
+1054906 (CAREER), CNS-1012633, and CNS-0905246.
+
+References
+
+[1] The LLVM compiler framework. http://llvm.org.
+[2] The Princeton application repository for shared-memory computers
+
+(PARSEC). http://parsec.cs.princeton.edu/.
+
+[3] Parallel BZIP2
+
+(PBZIP2).
+
+http://compression.ca/
+
+pbzip2/.
+
+[4] Stanford parallel applications for shared memory (SPLASH). http:
+
+//www-flash.stanford.edu/apps/SPLASH/.
+
+[5] STP Constraint Solver. https://sites.google.com/site/
+
+stpfastprover/.
+
+[6] H. Agrawal and J. R. Horgan. Dynamic program slicing. In Proceed-
+ings of the ACM SIGPLAN ’90 Conference on Programming Language
+Design and Implementation (PLDI ’90), pages 246–256, 1990.
+
+[7] Apache Web Server. http://www.apache.org.
+[8] A. Aviram, S.-C. Weng, S. Hu, and B. Ford. Efﬁcient system-enforced
+deterministic parallelism. In Proceedings of the Ninth Symposium on
+Operating Systems Design and Implementation (OSDI ’10), Oct. 2010.
+Improving
+software security with a C pointer analysis.
+In Proceedings of the
+27th International Conference on Software Engineering (ICSE ’05),
+pages 332–341, May 2005.
+
+[9] D. Avots, M. Dalton, V. B. Livshits, and M. S. Lam.
+
+[10] T. Bergan, O. Anderson, J. Devietti, L. Ceze, and D. Grossman. Core-
+Det: a compiler and runtime system for deterministic multithreaded
+execution. In Fifteenth International Conference on Architecture Sup-
+port for Programming Languages and Operating Systems (ASPLOS
+’10), pages 53–64, Mar. 2010.
+
+[11] T. Bergan, N. Hunt, L. Ceze, and S. D. Gribble. Deterministic process
+groups in dOS. In Proceedings of the Ninth Symposium on Operating
+Systems Design and Implementation (OSDI ’10), pages 1–16, Oct.
+2010.
+
+[12] E. Berger, T. Yang, T. Liu, D. Krishnan, and A. Novark. Grace:
+safe and efﬁcient concurrent programming. In Conference on Object-
+Oriented Programming Systems, Languages, and Applications (OOP-
+SLA ’09), pages 81–96, Oct. 2009.
+
+[13] O. A. R. Board. OpenMP application program interface version 3.0,
+
+May 2008.
+
+[14] C. Consel and O. Danvy. Tutorial notes on partial evaluation. In Pro-
+ceedings of the 20th Annual Symposium on Principles of Programming
+Languages (POPL ’93), pages 493–501, 1993.
+
+[15] M. Costa, M. Castro, L. Zhou, L. Zhang, and M. Peinado. Bouncer:
+securing software by blocking bad input. In Proceedings of the 21st
+ACM Symposium on Operating Systems Principles (SOSP ’07), pages
+117–130, Oct. 2007.
+
+[16] H. Cui, J. Wu, C.-C. Tsai, and J. Yang. Stable deterministic multi-
+threading through schedule memoization. In Proceedings of the Ninth
+Symposium on Operating Systems Design and Implementation (OSDI
+’10), Oct. 2010.
+
+[17] H. Cui, J. Wu, J. Gallagher, H. Guo, and J. Yang. Efﬁcient determinis-
+tic multithreading through schedule relaxation. In Proceedings of the
+23rd ACM Symposium on Operating Systems Principles (SOSP ’11),
+Oct. 2011.
+
+[18] J. Devietti, B. Lucia, L. Ceze, and M. Oskin. DMP: deterministic
+shared memory multiprocessing. In Fourteenth International Confer-
+ence on Architecture Support for Programming Languages and Oper-
+ating Systems (ASPLOS ’09), pages 85–96, Mar. 2009.
+
+[19] Q. Gao, W. Zhang, Z. Chen, M. Zheng, and F. Qin.
+
+2ndStrike:
+towards manifesting hidden concurrency typestate bugs. In Sixteenth
+International Conference on Architecture Support for Programming
+Languages and Operating Systems (ASPLOS ’11), pages 239–250,
+Mar. 2011.
+
+[20] R. Gl¨uck and J. Jørgensen. Efﬁcient multi-level generating exten-
+sions for program specialization.
+In Proceedings of the 7th Inter-
+national Symposium on Programming Languages: Implementations,
+Logics and Programs, pages 259–278, 1995.
+
+[21] R. Jhala and R. Majumdar. Path slicing. In Proceedings of the ACM
+SIGPLAN 2005 Conference on Programming Language Design and
+Implementation (PLDI ’05), pages 38–47, 2005.
+
+[22] J. Jørgensen. Generating a compiler for a lazy language by partial eval-
+uation. In Proceedings of the 19th Annual Symposium on Principles
+of Programming Languages (POPL ’92), pages 258–268, 1992.
+
+[23] N. G. Leveson and C. S. Turner. An investigation of the therac-25
+
+accidents. Computer, 26(7):18–41, 1993.
+
+[24] T. Liu, C. Curtsinger, and E. D. Berger. DTHREADS: efﬁcient deter-
+ministic multithreading. In Proceedings of the 23rd ACM Symposium
+on Operating Systems Principles (SOSP ’11), Oct. 2011.
+
+[25] S. Lu, S. Park, E. Seo, and Y. Zhou. Learning from mistakes: a com-
+prehensive study on real world concurrency bug characteristics.
+In
+Thirteenth International Conference on Architecture Support for Pro-
+gramming Languages and Operating Systems (ASPLOS ’08), pages
+329–339, Mar. 2008.
+
+[26] G. C. Necula, S. McPeak, and W. Weimer. CCured: type-safe
+retroﬁtting of legacy code. In Proceedings of the 29th Annual Sym-
+posium on Principles of Programming Languages (POPL ’02), pages
+128–139, 2002.
+
+[27] V. Nirkhe and W. Pugh. Partial evaluation of high-level imperative
+programming languages with applications in hard real-time systems.
+In Proceedings of the 19th Annual Symposium on Principles of Pro-
+gramming Languages (POPL ’92), pages 269–280, 1992.
+
+[28] M. Olszewski, J. Ansel, and S. Amarasinghe. Kendo: efﬁcient de-
+terministic multithreading in software.
+In Fourteenth International
+Conference on Architecture Support for Programming Languages and
+Operating Systems (ASPLOS ’09), pages 97–108, Mar. 2009.
+
+[29] S. Park, S. Lu, and Y. Zhou. CTrigger: exposing atomicity violation
+bugs from their hiding places. In Fourteenth International Conference
+on Architecture Support for Programming Languages and Operating
+Systems (ASPLOS ’09), pages 25–36, Mar. 2009.
+
+[30] K. Poulsen. Software bug contributed to blackout. http://www.
+
+securityfocus.com/news/8016, Feb. 2004.
+
+[31] T. Reps and T. Turnidge. Program specialization via program slicing.
+In Proceedings of the Dagstuhl Seminar on Partial Evaluation, volume
+1101, pages 409–429. Springer-Verlag, 1996.
+
+[32] M. Ronsse and K. De Bosschere. Recplay: a fully integrated practical
+record/replay system. ACM Trans. Comput. Syst., 17(2):133–152,
+1999.
+
+[33] R. Rugina and M. Rinard. Symbolic bounds analysis of pointers, array
+indices, and accessed memory regions.
+In Proceedings of the ACM
+SIGPLAN 2000 Conference on Programming Language Design and
+Implementation (PLDI ’00), pages 182–195, June 2000.
+
+[34] The Open Group and the IEEE. POSIX.1-2008. http://pubs.
+
+opengroup.org/onlinepubs/9699919799/, 2008.
+
+[35] M. D. Weiser. Program slices: formal, psychological, and practical
+investigations of an automatic program abstraction method. PhD
+thesis, 1979.
+
+[36] J. Whaley and M. S. Lam. Cloning-based context-sensitive pointer
+alias analysis using binary decision diagrams. In Proceedings of the
+ACM SIGPLAN 2004 Conference on Programming Language Design
+and Implementation (PLDI ’04), pages 131–144, June 2004.
+
+[37] J. Yang, A. Cui, J. Gallagher, S. Stolfo, and S. Sethumadhavan. Con-
+currency attacks. Technical Report CUCS-028-11, Columbia Univer-
+sity.
+
+[38] W. Zhang, C. Sun, and S. Lu. ConMem: detecting severe concurrency
+bugs through an effect-oriented approach. In Fifteenth International
+Conference on Architecture Support for Programming Languages and
+Operating Systems (ASPLOS ’10), pages 179–192, Mar. 2010.
+
+[39] W. Zhang, J. Lim, R. Olichandran, J. Scherpelz, G. Jin, S. Lu, and
+T. Reps. ConSeq: detecting concurrency bugs through sequential
+errors. In Sixteenth International Conference on Architecture Support
+for Programming Languages and Operating Systems (ASPLOS ’11),
+pages 251–264, Mar. 2011.
+
+[40] X. Zhang and R. Gupta. Cost effective dynamic program slicing. In
+Proceedings of the ACM SIGPLAN 2004 Conference on Programming
+Language Design and Implementation (PLDI ’04), pages 94–106,
+2004.
+
+

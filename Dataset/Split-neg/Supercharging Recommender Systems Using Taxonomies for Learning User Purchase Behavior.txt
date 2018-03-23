@@ -1,0 +1,2907 @@
+2
+1
+0
+2
+
+ 
+
+n
+u
+J
+ 
+
+0
+3
+
+ 
+ 
+]
+
+B
+D
+.
+s
+c
+[
+ 
+ 
+
+1
+v
+6
+3
+1
+0
+
+.
+
+7
+0
+2
+1
+:
+v
+i
+X
+r
+a
+
+Supercharging Recommender Systems using Taxonomies
+
+for Learning User Purchase Behavior
+
+Bhargav
+Kanagal*
+
+Amr
+
+Ahmed *
+
+Sandeep
+Pandey
+
+Vanja
+
+Josifovski
+
+Jeff Yuan
+
+Lluis
+
+Garcia(cid:173)
+Pueyo
+
+{kbhargav*, amrahmed*, spandey, vanjaj, yuanjef, lluis}@yahoo(cid:173)inc.com
+
+Yahoo! Research, USA
+
+*co(cid:173)ﬁrst authors
+
+ABSTRACT
+
+Recommender systems based on latent factor models have been ef-
+fectively used for understanding user interests and predicting fu-
+ture actions. Such models work by projecting the users and items
+into a smaller dimensional space, thereby clustering similar users
+and items together and subsequently compute similarity between
+unknown user-item pairs. When user-item interactions are sparse
+(sparsity problem) or when new items continuously appear (cold
+start problem), these models perform poorly. In this paper, we ex-
+ploit the combination of taxonomies and latent factor models to
+mitigate these issues and improve recommendation accuracy. We
+observe that taxonomies provide structure similar to that of a latent
+factor model: namely, it imposes human-labeled categories (clus-
+ters) over items. This leads to our proposed taxonomy-aware latent
+factor model (TF) which combines taxonomies and latent factors
+using additive models. We develop efﬁcient algorithms to train the
+TF models, which scales to large number of users/items and de-
+velop scalable inference/recommendation algorithms by exploiting
+the structure of the taxonomy. In addition, we extend the TF model
+to account for the temporal dynamics of user interests using high-
+order Markov chains. To deal with large-scale data, we develop a
+parallel multi-core implementation of our TF model. We empir-
+ically evaluate the TF model for the task of predicting user pur-
+chases using a real-world shopping dataset spanning more than a
+million users and products. Our experiments demonstrate the ben-
+eﬁts of using our TF models over existing approaches, in terms of
+both prediction accuracy and running time.
+
+1.
+
+INTRODUCTION
+
+Personalized recommendation systems are ubiquitous with ap-
+plications to computational advertising, content suggestions, search
+engines and e-commerce. These systems use the past behavior of
+users to recommend new items that are likely to be of interest to
+them. Signiﬁcant advancements have been made in recent years
+to improve the accuracy of such personalized recommendation sys-
+tems and to scale the algorithms to large amount of data. One of the
+
+Permission to make digital or hard copies of all or part of this work for
+personal or classroom use is granted without fee provided that copies are
+not made or distributed for proﬁt or commercial advantage and that copies
+bear this notice and the full citation on the ﬁrst page. To copy otherwise, to
+republish, to post on servers or to redistribute to lists, requires prior speciﬁc
+permission and/or a fee. Articles from this volume were invited to present
+their results at The 38th International Conference on Very Large Data Bases,
+August 27th (cid:173) 31st 2012, Istanbul, Turkey.
+Proceedings of the VLDB Endowment, Vol. 5, No. 10
+Copyright 2012 VLDB Endowment 2150(cid:173)8097/12/06... $ 10.00.
+
+most extensively used techniques in these recommendation systems
+is the latent factor model and its variants [4, 17, 18, 20] (see Koren
+et al. [19] for a survey). The idea behind latent factor models is to
+project the users and items into a smaller dimensional space (such
+lower dimensional projections are called factors), thereby cluster-
+ing similar users and items. Subsequently, the interest (similar-
+ity) of a user to an unrated item is computed and the most similar
+item(s) is recommended to the user. While latent factor models
+have been very successful with Netﬂix contest top performers [8,
+17] and tag recommendation [26] being some of the success stories,
+these models suffer with certain shortcomings. We illustrate some
+of these challenges using the example of product recommendation,
+which is the main focus of the paper. In this application, we need
+to predict future purchases that will be made by the users, by using
+the historical purchase logs.
+
+• First, it is difﬁcult to accurately learn the latent factors when
+the user-item interactions are sparse. For instance, in our
+application, a user has purchased on average, only 2.3 items
+out of more than a million possible items.
+
+• Second, new items are released continuously and the latent
+factor model cannot learn the factors for such items, given no
+data. This is commonly known as the cold start problem [4]
+in recommender systems.
+
+• Third, conventional models do not account for the tempo-
+ral dynamics in user behavior, e.g., a ﬂash memory is much
+more likely to be bought soon after a camera purchase. Fur-
+ther, naive temporal-based extensions that condition on pre-
+vious user purchases introduce additional sparsity (e.g., the
+number of users who buy ﬂash memory after camera is much
+fewer than the number of individual purchases for ﬂash mem-
+ory and camera).
+
+We resolve the aforementioned challenges by using a taxonomy
+over items which is available for many consumer products, e.g.,
+PriceGrabber shopping taxonomy [3], music taxonomy [16], movie
+taxonomy (genre, director and so on). A fragment of the Yahoo!
+shopping taxonomy (that we use in our paper) is shown in Figure 1.
+Since taxonomies are designed by humans, they capture knowledge
+about the domain at hand, independent of the training data [13]
+and hence provide scope for improving prediction. As such, tax-
+onomies can provide lineage for items in terms of categories and
+their ancestors in the taxonomy, thus they help to ameliorate the
+sparsity issues that are common with online shopping data. Also,
+taxonomies can help in dealing with the cold start problem because
+even though the set of individual products/items is highly dynamic,
+
+956
+
+the taxonomy is relatively stable. For instance, the ancestors of
+a newly arrived item can be initially used to guide recommenda-
+tions for the new item. In addition, taxonomies enable us to pro-
+vide a structured ranking. Traditional latent factor methods pro-
+vide a ranking over all the (possibly) unrelated products. Using the
+knowledge of taxonomy enables us to rank items within a given
+category and rank categories themselves, based on higher levels in
+the taxonomy. Further, using taxonomies allows us to target users
+by product categories, which is commonly required in advertising
+campaigns and reduce duplication of items of similar type.
+
+Taxonomy-aware dynamic latent factor model. In this paper, we
+propose our taxonomy-aware latent factor model (TF) which com-
+bines taxonomies and latent factors for the task of learning user pur-
+chase behavior. We note here that there has been recent literature
+along this general research direction and provide details comparing
+our approach with existing approaches in Section 8. In our model,
+we use the taxonomy categorization as a prior and augment this
+into the latent factor model to provide an additive framework for
+learning. As with latent factor models, we learn factors for users
+and items to measure the similarity/interest of a user to an item.
+In addition, we introduce factors for every interior node in the tax-
+onomy and enforce the taxonomy prior over these latent factors:
+i.e., we learn the factors such that the sibling items in the taxonomy
+have factors similar to their parent. This also allows items with very
+few user interactions to beneﬁt from their siblings, thereby leading
+to better factors. The additive framework also allows items with
+large number of user interactions to differ from their siblings, if the
+data exhibits such patterns.
+
+While the above-mentioned factors account for the long-term in-
+terests of users in items, they do not explicitly capture the short-
+term trends that are commonly seen in user online purchase behav-
+ior [7]. For instance, if a user bought a camera in one of the last
+few time steps, then the likelihood that she buys a ﬂash memory or
+a camera lens is high. We model such short-term trends using k-
+order Markov chains over the sequences in which items are bought
+one after another. In other words, we learn additional factors for
+items which capture how likely a given item is bought by a user
+after purchasing some other item. Note that the taxonomy plays a
+vital role while building such temporal models since it allows us
+to condition on the past purchases of the user without introducing
+additional sparsity. For example, the number of users who bought
+a “Canon Rebel EOS T1i 15 MP” camera and subsequently pur-
+chased a “Sandisk 8GB Extreme SDHC SDSDX3” ﬂash drive is
+much less than the number of users who bought (any) camera fol-
+lowed by (any) ﬂash drive.
+
+Model learning and recommendation. We learn the factors in the
+model using stochastic gradient descent (SGD), an iterative algo-
+rithm for optimization. While the naive algorithm for SGD works
+for a few hundreds/thousands of items, it does not scale to our
+shopping dataset (Section 7.1) (requires a large number of itera-
+tions). We introduced a novel training algorithm called sibling-
+based training that enforces user preferences at each level of the
+taxonomy. Once the model is trained, it is used to make recommen-
+dations for the users. Traditional inference methods iterate over all
+the items for a given user, compute an afﬁnity score for each item
+to the user, and subsequently compute the ranking over the items
+based on the score. Since we have over a million items, computing
+the ranking for all the users in this manner is prohibitively expen-
+sive. Instead, we propose a cascaded inference algorithm in which
+we rank in a top-down manner where, for a given user, we ﬁrst rank
+the nodes at the highest level of the taxonomy. Then we follow only
+the k high-scoring nodes and the subtrees under them and continue
+
+ELECTRONICS
+
+PHONES
+
+TVS
+
+PORTABLE
+
+MEDIA
+
+CAMERA
+
+SMART
+
+PHONES
+
+LCD
+
+PLASMA
+
+PORTABLE
+
+DEVICE
+
+CAMCORDER
+
+PHONE
+
+ACCESSORIES
+
+Figure 1: Fragment of the product taxonomy used in Yahoo! Shopping.
+(Product names omitted)
+
+the recursion. Cascaded inference provides us with a natural ac-
+curacy/efﬁciency trade-off where we can increase the accuracy by
+increasing k at the expense of efﬁciency. In addition, by cascading,
+we can provide a more meaningful structured ranking.
+
+Parallel implementation. We develop a parallel multi-core im-
+plementation of the training and inference algorithms. The factor
+matrices are global and are shared by the various threads. To up-
+date a given item factor, a thread needs to obtain a lock on the item
+factor before writing to it. One of the key challenges we faced
+with the taxonomy is that item factors are updated with different
+frequencies by the training algorithm. For instance, the item fac-
+tors corresponding to the upper levels of the taxonomy are updated
+more frequently than the items at the leaf of the taxonomy. In order
+to address this problem, we develop caching heuristics that enable
+us to improve the speedup.
+
+Contributions. The contributions of our work include:
+
+1. We propose a novel taxonomy-aware latent factor model (TF),
+that combines the taxonomies with latent factor models using
+an additive framework. We show how TF can help allievate
+several issues including sparsity and cold start.
+
+2. We introduced a novel algorithm for training taxonomy-guided
+
+models that we call sibling-based training and show experi-
+mentally that it results in signiﬁcant improvements.
+
+3. We present efﬁcient algorithms for training TF and executing
+inference over TF models by exploiting the structure of the
+taxonomy, called cascaded learning and inferencing.
+
+4. We extend the TF model to differentiate between the long-
+term and short term purchasing behavior and show it leads to
+better recommendations.
+
+5. We detail an efﬁcient parallel implementation and empiri-
+cally demonstrate the beneﬁts of our approach over a real-
+world large-scale dataset from online shopping sites.
+
+Outline. The rest of the paper is organized as follows. We provide
+background for the various concepts used in the paper in Section 2.
+We describe our taxonomy-aware latent factor model in Section 3.
+Next, we discuss techniques for learning TF (Section 4) and making
+recommendations from TF (Section 5). We provide details of our
+implementation in Section 6 and conclude with a comprehensive
+experimental study in Section 7. We brieﬂy mention some of the
+other related work in Section 8.
+
+2. PRELIMINARIES
+
+In this section, we provide background for the various concepts
+used in the paper. We begin with a brief introduction to latent factor
+
+957
+
+models, a commonly used technique in recommender systems and
+illustrate stochastic gradient descent, a widely used optimization
+algorithm.
+
+2.1 Latent Factor Models
+
+Latent factor models have been extensively used in recommender
+systems [19, 4]. The most successful techniques in the Netﬂix
+prize [8] were based on latent factor models. We illustrate latent
+factor models below. The input to a recommender system is a
+sparse (partially populated) user-item matrix Y (size m × n, m
+users and n items) where the entries correspond to an interaction
+between a user and an item – either in terms of a rating or a pur-
+chase. The goal of the recommender system is to predict, for each
+user u, a ranked list of items missing entries in the matrix. We
+assume that each user u can be represented by a latent factor vu
+which is a vector of size 1 × K (K is commonly referred to as the
+number of factors in the model, typically much smaller than m and
+n). Similarly, each item i can be represented by a latent factor vi
+(also, a vector of size 1 × K). User u’s afﬁnity/interest in item i is
+assumed to follow this model:
+
+ˆxui = hvu, vii
+
+Here, xui is the afﬁnity of user u to item i, hvu, vii represents
+the dot product of the corresponding user and item factors. Most
+latent factor models also include bias terms bu and bi that model
+the generosity of the user’s rating and the popularity of the item
+respectively; we ignore this for simplicity of exposition. The learn-
+ing problem here is to determine the best values for vu and vi (for
+all users u and all items i) based on the given rating matrix Y ,
+these parameters are usually denoted by Θ. While traditional ap-
+proaches to matrix factorization try to regress over the known en-
+tries of the matrix, a more successful approach is the recently pro-
+posed Bayesian personalized ranking (BPR) [24]. Here, the trick
+is to do regression directly over the ranks of the items, rather than
+the actual ratings since the ultimate goal of the system is to con-
+struct the ranked lists. Also, we only have implicit feedback from
+the users (i.e., we will have a rating between 1 to 5, but only know
+that the user made a purchase). In this case, regression over the
+actual numbers of purchases is not meaningful. In BPR, the goal
+is to discriminate between items bought by the user and items that
+were not bought. In other words, we need to learn a ranking func-
+tion Ru for each user u that ranks u’s interesting items higher than
+the non-interesting items. In other words, if item i appears in user
+u’s purchase list Bu and item j does not appear in Bu, then we
+must have Ru(i) > Ru(j). For this, we need to have: xui > xuj .
+Based on the above arguments, our likelihood function p(Ru|Θ) is
+given by:
+
+p(Ru|Θ) = Y
+
+u∈U
+
+Y
+
+i∈Bu
+
+Y
+
+j /∈Bu
+
+σ(xui − xuj)
+
+Following Rendle et al. [24], we have approximated the non-smooth,
+non-differentiable expression xui > xuj using the logistic sig-
+moid function σ(xui − xuj), where σ(z) =
+1+e−z . We use a
+Gaussian prior N (0, σ) over all the factors in Θ and compute the
+MAP ((maximum aposteriori) estimate of Θ. The posterior over Θ
+(which needs to be maximized) is given by:
+
+1
+
+p(Θ|Ru) = p(Θ)p(Ru|Θ)
+Y
+
+= p(Θ) Y
+
+u∈U
+
+i∈Bu
+
+σ(xui − xuj)
+
+Y
+
+j /∈Bu
+
+We need to maximize the above posterior function, (or its log-
+
+958
+
+posterior), shown below.
+
+log p(Θ|Ru) = X
+
+u
+
+X
+
+i∈Bu
+
+X
+
+j6∈Bu
+
+ln σ(xui − xuj) − λ||Θ||2
+
+The ﬁrst summation term corresponds to the log-likelihood, i.e.,
+log p(Ru|Θ) whereas the second term corresponds to the log of the
+Gaussian-prior, i.e., log p(Θ). Here, λ is a constant, proportional
+to 1
+
+σ2 . ||Θ||2 is given by the following expression:
+
+||Θ||2 = X
+
+u
+
+||vU
+
+u ||2 + X
+
+i
+
+||vI
+
+i||2
+
+The second term is commonly called as the regularization term,
+and is used to prevent overﬁtting by keeping the learned factors vu
+and vi sparse.
+
+2.2 Stochastic Gradient Descent (SGD)
+
+SGD is typically used to optimize objective functions that can
+be written as sums of (differentiable) functions, e.g., in the objec-
+tive function above, we have one function per training data point
+(u, i, j). The standard gradient descent method is an iterative algo-
+rithm: Suppose that we want to maximize a given objective func-
+tion. In each iteration, we compute the gradient of the function and
+update the arguments in the direction of the gradient. When the
+function is in the summation form, computing the overall gradient
+requires computing the derivative for each function in the summa-
+tion. Hence, computing the derivative can be quite expensive if we
+have a large training dataset. In SGD, we approximate the deriva-
+tive by computing it only at a single (randomly chosen) term in the
+summation and update the arguments in this direction. Despite this
+approximation, SGD has been shown to work very well in prac-
+tice [11, 9, 10], often outperforming other methods including the
+standard gradient descent. We illustrate SGD using the example
+of the latent factor model. In the above example, a given training
+data point (u, i, j) deﬁnes a term in the summation. The derivatives
+with respect to the vu, vi and vj variables are shown below. Denote
+cu,i,j to be equal to (1 − σ(xui − xuj)).
+
+∂L(U, V )
+
+∂vu
+
+∂L(U, V )
+
+∂vi
+
+∂L(U, V )
+
+∂vj
+
+= cu,i,j(vi − vj) − λvu
+
+= cu,i,j vu − λvi
+
+= −cu,i,j vu − λvj
+
+Now, we use the above derivatives to update the appropriate factors.
+Note that since we have a maximization problem, we need to move
+in the same direction as the derivative. The corresponding update
+equations are shown below:
+
+vu = vu(1 − ǫλ) − ǫcu,i,j(vi − vj)
+vi = vj(1 − ǫλ) − ǫcu,i,j vu
+vj = vj(1 − ǫλ) + ǫcu,i,j vu
+
+Here, ǫ is the learning rate which is set to a small value. The regu-
+larization term λ is usually chosen via cross-validation. An exhaus-
+tive search is performed over the choices of λ and the best model
+is picked accordingly. The overall algorithm proceeds as follows.
+A training data point (u, i, j) is sampled uniformly at random. The
+gradients are computed at this particular data point and the vari-
+ables are modiﬁed according to the update rules shown below. An
+epoch is roughly deﬁned as a complete pass over the data set (i.e.,
+over all the non-zero entries in the rating matrix).
+
+3. TAXONOMY(cid:173)AWARE LATENT FACTOR
+
+MODEL (TF)
+
+The techniques presented in Section 2 allow for learning a user’s
+personalized ranking over items. However, such a basic model suf-
+fers from a number of shortcomings as follows:
+
+• Sparsity: In large scale settings and as often is the case in
+web applications, the number of items are in the millions
+and it is often the case that each user rates only a few of them.
+This creates a sparsity problems and prevents the model from
+learning that for instance, buying an iPhone is a good indica-
+tor that the user would be interested in other electronic gad-
+gets.
+
+• Temporal awareness: User purchases are mainly driven by
+two factors: short-term interests and long-term interests. Stan-
+dard latent factor models can capture long-term interests, how-
+ever they fail to tease apart transient interests from long-term
+ones.
+
+In this section, we describe our proposed taxonomy-aware tem-
+poral latent factor model (TF) for recommendation and illustrate
+its advantages over previously proposed approaches. Our model
+resolves the aforementioned shortcomings of the standard latent
+factor models by incorporating a taxonomy prior over the item fac-
+tors and modeling time explicitly in the user-item afﬁnity model.
+We ﬁrst give some notations and then describe the afﬁnity model.
+Learning the parameters of the afﬁnity model and recommendation
+are addressed in Section 4 and 5, respectively.
+
+3.1 Notations
+
+We illustrate our TF model using a generative graphical model [15,
+
+23, 12] representation, shown in Figure 2. We deﬁne the random
+variables in the graphical model and then explain the time-speciﬁc
+afﬁnity model in the next subsection. We start off by providing the
+notations that we use, about the taxonomy.
+
+Taxonomy notations:
+We use item identiﬁers using integers i, j. Given an item i, then
+p(i) denotes its parent in the taxonomy. pm(j) denotes the mth
+node on the path from item j to the root (e.g., p0(j) = j, p1(j) =
+p(j)). Also, we use D to denote the depth of the taxonomy.
+
+Random variables:
+The random variables in the model are shown below. All the ran-
+dom variables except Bt correspond to the factors in the TF model.
+Each factor is a vector with dimension 1 × K, where K is the di-
+mensionality of the model.
+
+• vU
+
+u : denotes the latent factor of the user u. (vU
+u is analogous
+to the user factor ui for the latent factor model in Section 2).
+This factor captures the long-term interests of the user.
+
+• wI
+
+pm(j): We introduce latent variables for all the nodes in
+the item taxonomy. wI
+pm(j) denotes the latent variable of
+pm(j), i.e., the latent variable of the the mth ancestor of
+item j. wI
+pm(j) represents the offset of the node pm(j) from
+its parent latent factor, i.e., how much different this category
+is from its parent.
+
+• vI
+
+j : denotes the effective latent factor corresponding to item
+j. (This factor is analogous to the item factor in the latent
+factor model in Section 2).
+
+• vI→•
+
+j
+
+: denotes the next-item factor, which is used to capture
+Intuitively, if
+
+the short-term trends in the user purchases.
+
+a user purchases item j, then vI→•
+gives a location in the
+latent space where the next purchase is most likely to occur
+(this will be made more explicit below). We introduce latent
+variables wI→•
+pm(j) for all nodes in the taxonomy in the same
+manner as above.
+
+j
+
+• Bt: denotes the tth transaction of the ith user, i.e., the set of
+items that were bought in the tth time instant. The Bt node
+is shaded in Figure 2 since we know the value of this random
+variable.
+
+Since we desire the item latent factors to capture the effect of
+taxonomy, i.e., an item factor should be similar to its ancestors.
+In particular, we expect the factors of a node to depend on all its
+ancestors up to the root. We model this as follows:
+
+vI
+j =
+
+vI→•
+j =
+
+D
+
+X
+
+m=0
+
+D
+
+X
+
+m=0
+
+wI
+
+pm(j)
+
+wI→•
+
+pm(j)
+
+(1)
+
+Note that this way of deﬁning item factors allows the siblings items
+in the taxonomy to have similar factors as desired. Also, it allows
+an item to sufﬁciently differ from its siblings if that leads to better
+modeling of the data.
+
+3.2 Taxonomy(cid:173)aware Temporal Afﬁnity Model
+For each user and for each time step, we need to determine an
+afﬁnity array s over all the items j where st(j) represents the like-
+lihood that the user u buys item j at time t. The score for an item
+is a sum of two terms.
+
+1
+|Bu
+
+hvI→•
+
+ℓ
+
+, vI
+ji
+
+(2)
+
+u , vI
+
+st(j) = hvU
+
+t−1| X
+1. Long-term interest: The ﬁrst term hvU
+
+ji +
+
+ℓ∈Bu
+
+t−1
+
+u , vI
+
+ji is the inner prod-
+u and the item factor of the jth
+j which captures the global (long-term) similarity be-
+
+uct between the user factor vU
+item, vI
+tween the user u and the item j.
+
+2. Short-term interest: The second term in the score is given
+ji which captures the short-term
+
+hvI→•
+
+, vI
+
+by
+
+ℓ
+
+1
+|Bu
+
+t−1| X
+
+ℓ∈Bu
+
+t−1
+
+similarity, i.e., if the user bought an item ℓ (e.g., camera) in
+the previous time step, then the likelihood that the user buys
+an item j (e.g., ﬂash memory) in the current time step. In this
+way, our model captures the temporal dynamics of the user
+purchase behavior.
+
+Note that both terms are dependent on the user. The ﬁrst term
+depends on the user factor while the second term depends on the
+previous items that were purchased by the user. For each user, we
+construct the array of scores over all items and this gives us a per-
+sonalized ranking for what the user will purchase next.
+
+Higher order afﬁnity models In the afﬁnity model described in
+Equation 2, we use the user’s transaction at time t − 1 to predict
+Bu
+t . However, using a single time step may not be enough to cap-
+ture all the temporal dynamics. For instance, user may purchase a
+camera followed by a ﬂash drive followed by a lens. We also need
+to capture the dependence between the camera and the lens. In or-
+der to do this, we extend the model to use a higher order Markov
+chain, i.e., we consider N previous transactions to predict the cur-
+rent transaction. We use the following equation to compute the
+
+959
+
+σ
+
+σ
+
+wI
+
+p0(i) wI
+
+p1(i) wI
+
+p2(i) wI
+
+p3(i)
+
+wp0(i)
+
+wp1(i)
+
+wp2(i)
+
+wp3(i)
+
+ITEM 
+
+FACTOR
+
+vI
+
+i
+
+NEXT ITEM 
+
+FACTOR
+
+vi
+
+ I1,j
+
+B1
+
+ I2,j B2
+
+(a) A possible sequence of items bought by a user: camera and an SD card,
+     followed by a tripod, lens and a camera backpack
+
+∈ I
+i 
+
+ It,j
+
+Bt
+
+η
+
+σ
+
+wI
+
+p3(i)
+
+p3(i)
+
+wI
+
+p2(i)
+
+p2(i)
+
+wI
+
+p1(i)
+
+p1(i)
+
+wI
+
+p0(i)
+
+i
+
+p0(i) = i
+
+USER 
+
+FACTOR
+
+vU
+u
+
+u ∈ U
+
+vI
+
+i = wI
+
+p0(i) + wI
+
+p1(i) + wI
+
+p2(i) + wI
+
+p3(i)
+
+(b) TF: Our proposed taxonomy-aware latent factor model
+
+(c) Additional latent factors for taxonomy
+
+Figure 2: (a) An example of a sequence of items purchased by the user. Here, the user buys a camera followed by a set of camera accessories. (b) Our
+proposed taxonomy-aware latent factor model (TF). The user factor, item factor and next-item factor are as shown. The shaded random variables Bt are the
+items purchased by the user at various times. (c) Illustrating latent factors for the taxonomy. For each node in the taxonomy, we introduce a latent variable,
+i.e., we introduce the latent variable wI
+
+pm(i) for the mth ancestor of i. The actual item factor is the sum of these variables, as shown in the ﬁgure.
+
+scores:
+
+t (j) = hvU
+sN
+
+u , vI
+
+ji +
+
+N
+
+X
+
+n=1
+
+αn
+|Bt−n| X
+
+ℓ∈Bu
+
+t−n
+
+hvI→•
+
+ℓ
+
+, vI
+ji
+
+(3)
+
+As shown in the above equation, the ﬁrst term remains unchanged.
+In the second term, we extend the summation to N previous trans-
+actions of the user. The additional parameters αn control the extent
+to which the previous transactions contribute to the current trans-
+action. We use an exponential decay function αn = αe(−n/N ) for
+this purpose.
+
+4. LEARNING
+
+In Section 3 we presented our time-based user-item afﬁnity model.
+
+Now, our goal is to learn the parameters of this model to ﬁt the ob-
+served user transactions. In other words, at each time step, and for
+each user, the afﬁnity model should give higher scores to the items
+the user bought at time t than the afﬁnity scores given to item not
+bought by the user at time t. To achieve this goal we employ the
+same discriminative training objective function we introduced in
+Section 2. In Subsection 4.1 we ﬁrst detail the learning algorithm
+over the TF model, and then in Subsection 4.2 we give a novel
+training scheme to further leverage the power of the taxonomy.
+
+4.1 Discriminative Training
+
+i
+
+i
+
+i and wI→•
+
+i and the next-item factors vI→•
+
+u , item factors vI
+i
+
+Now, we describe the algorithm for learning the TF model. As
+described in Section 3, the parameters we need to learn are the user
+factors vU
+. To learn
+i and vI→•
+vI
+, we need to learn the latent factors of the taxonomy,
+i.e., wI
+respectively. We use cross-validation to ﬁx the
+other parameters such as K: the dimensionality of the factors, σ
+and N (number of previous transactions to consider) and αn (de-
+cay rate). Denote by Θ, the set of parameters {vU , wI , wI→•}. We
+exploit recent advances in learning factorization models and rely on
+the so-called discriminative Bayesian personalized ranking (BPR)
+which has been shown to signiﬁcantly outperform generative train-
+ing [24].
+
+In BPR, the goal is to discriminate between items the user bought
+and items s/he didn’t buy.
+In other words, we need to learn a
+ranking function Ru for each user over items such that if item i
+appears in user u’s transaction at time t and item j does not ap-
+pear in the transaction, then Ru(i) > Ru(j). For this, we need to
+have: sN
+t (j). Based on the above, our likelihood function
+p(Ru|Θ) is given by:
+
+t (i) > sN
+
+p(Ru|Θ) = Y
+
+u∈U
+
+Y
+
+Bt∈Bu
+
+Y
+
+i∈Bt
+
+Y
+
+j /∈Bt
+
+p(sN
+
+t (i) > sN
+
+t (j)|Θ)
+
+Here, Bu is all the transactions of the user u. As speciﬁed in
+Section 3, we use a Gaussian prior N (0, σ) over the entries in Θ.
+We compute the MAP ((maximum aposteriori) estimate of Θ. The
+posterior over Θ (which needs to be maximized) is given by:
+
+p(Θ|Ru) = p(Θ)p(Ru|Θ)
+Y
+
+= p(Θ) Y
+
+u∈U
+
+Bt∈Bu
+
+(4)
+
+Y
+
+i∈Bt
+
+Y
+
+j /∈B
+
+p(sN
+
+t (i) > sN
+
+t (j)|Θ)
+
+We need to maximize the above posterior (or its log-posterior),
+shown below. Following [24], we approximate the non-smooth,
+non-differentiable expression sN
+t (j) using the logistic
+sigmoid function σ(sN
+t (i) − sN
+1+e−z . Plug-
+ging this into Equation (4) and taking the logarithm, we get the
+following equation.
+
+t (i) > sN
+t (j)), where σ(z) = 1
+
+X
+
+u
+
+X
+
+Bt∈Bu
+
+X
+
+i∈Bt
+
+X
+
+j6∈Bt
+
+ln σ(sN
+
+t (i) − sN
+
+t (j)) − λ||Θ||2
+
+(5)
+
+where, λ is a constant, proportional to 1
+following expression:
+
+σ2 and ||Θ||2 is given by the
+
+||Θ||2 = X
+
+u
+
+||vU
+
+u ||2 + X
+
+i
+
+||vI
+
+pm(i)||2 + ||vI→•
+
+pm(i)||2
+
+X
+
+m
+
+We use stochastic gradient decent to optimize the above function.
+As described in Section 2, we need to select a sample, i.e., a single
+term in the summation in Equation 5. For this, we sample a user
+
+960
+
+u and a transaction Bu
+t . We pick an item i in the transaction and
+an item j not in the transaction. The four tuple (u, t, i, j) deﬁnes a
+single term in the summation, given by:
+L(u, t, i, j) = ln σ(sN
+= ln σhhvU
+αn
+|Bt−n| X
+
+t (i) − sN
+u , vI
+i − vI
+
+jii − λ||Θ||2
+
+t (j)) − λ||Θ||2
+
+i − vI
+
+hvI→•
+
+X
+
+ji +
+
+, vI
+
+N
+
+ℓ
+
+n=1
+
+ℓ∈Bu
+
+t−n
+
+Now, we need to compute the gradients of L(u, t, i, j) with re-
+spect to the parameters Θ = {vU , wI, wI→•}. Using the chain
+rule, we note:
+
+∂L(u, t, i, j)
+
+∂wI
+
+pm(i)
+
+=
+
+∂L(u, t, i, j)
+
+∂vI
+i
+
+∂vI
+i
+
+∂wI
+
+pm(i)
+
+=
+
+∂L(u, t, i, j)
+
+∂vI
+i
+
+The second equality follows from Equation 1 (
+
+∂vI
+i
+
+∂wI
+
+pm(i)
+
+= 1). Hence,
+
+we can focus on computing gradients with respect to vI and vI→•.
+The gradients of L(u, t, i, j) with respect to these parameters are
+shown below. Lets us denote cu,i,j,t = (cid:0)1 − σ(sN
+t (j))(cid:1),
+and using the well-known fact that ∂ln σ(z)
+= (1 − σ(z)), the
+gradients are given by the following equations. For simplicity, we
+denote L(u, t, i, j) using L.
+
+t (i) − sN
+
+∂z
+
+∂L
+∂vU
+u
+
+∂L
+∂vI
+i
+
+∂L
+∂vI
+j
+
+∂L
+
+∂vI→•
+
+ℓ
+
+= cu,i,j,t(cid:0)vI
+
+i − vI
+
+= cu,i,j,thvU
+
+u −
+
+u
+
+j(cid:1) − λvU
+αn
+
+N
+
+X
+
+n=1
+
+|Bu,t−n| X
+
+ℓ∈Bu,t−n
+
+ii
+ℓ − λvI
+vI→•
+
+= −
+
+∂L(u, t, i, j)
+
+∂vI
+i
+
+= cu,i,j,t(vI
+
+i − vI
+
+j) X
+
+n:ℓ∈Bu,t−n
+
+αn
+
+|Bu,t−n|
+
+− λvI
+l
+
+(6)
+
+Next, we list the update rules corresponding to the above gradi-
+ents. For each user factor, we increment it using the user derivative
+with a small learning rate of ǫ. For the item factors, we need to do
+D updates, i.e., one for each level in the taxonomy. Note that the
+gradient with respect to all internal taxonomy item factors is the
+same due to Equation 1.
+
+vU
+u = vU
+
+wI
+
+pm(i) = wI
+
+wI
+
+pm(j) = wI
+
+(cid:17)
+
+∂vU
+u
+
+u + ǫ(cid:16) ∂L
+(cid:17)
+pm(i) + ǫ(cid:16) ∂L
+∂vI
+i
+pm(j) + ǫ(cid:16) ∂L
+(cid:17)
+∂vI
+j
+pm(ℓ) + ǫ(cid:16) ∂L
+∂vI→•
+
+ℓ
+
+wI→•
+
+pm(ℓ) = wI→•
+
+(cid:17)
+
+(7)
+
+The basic learning algorithm is as follows. We use stochastic gra-
+dient descent to train the model. We select a sample which is rep-
+resented by the 4-tuple (u, t, i, j). Subsequently, we compute the
+gradients as shown in Equation 6 and subsequently update the fac-
+tors using the update rules shown in Equation 7.
+In our experi-
+mental analysis, we study the effects of progressively updating the
+taxonomy, level by level. As described in Section 6, we introduce
+a parameter taxonomyUpdateLevels to update only selected
+levels of the taxonomy.
+
+961
+
+R 
+
+S 
+
+T 
+
+M 
+
+N 
+
+O 
+
+P 
+
+Q 
+
+A 
+
+B 
+
+C 
+
+D 
+
+E 
+
+F 
+
+G 
+
+H 
+
+Figure 3: Illustrating sibling-based training. Items in green are bought by
+the users. Items in red are what the random-sampling algorithm might se-
+lect. Items in Blue are selected by the sibling-based training algorithm. See
+text for more details (best viewed in color)
+
+4.2 Sibling(cid:173)based Training
+
+To illustrate the idea of sibling training, we refer the reader to
+Figure 3. In this ﬁgure, we show a taxonomy of depth D = 3. We
+label items (i.e., the leaves of the tree or level 3 nodes) with sym-
+bols A, B, C, · · · , the subcategories (i.e., nodes at level 2) with
+M, N, · · · , and the categories (i.e., nodes at level 1) with S, T, · · · ,
+and ﬁnally the root with R. As we mentioned in Section 3, each
+of these nodes are given a factor that we call w with a subscript
+indicating the node. For example, the factor assigned to node S
+and A are denoted with wS and wA respectively. To compute
+the effective latent factor associated with a given node, we sum
+all the factors along the path from this node to the root, as previ-
+ously described. For example, the effective latent factor of node A,
+vA = wR + wS + wM + wA, and the effective latent factor of node
+N , vN = wR + wS + wN .
+
+Now suppose that the user bought item A. In order to do the
+training described in Section 4.1, we need to pick another item that
+the user did not buy and enforce that the user’s afﬁnity to item A
+is larger than the user afﬁnity to the other item. Let us suppose we
+randomly pick item F . Applying the gradient rule over this pair
+will involve all factors, W s, along the paths from the root to each
+of A (marked with green) and F (marked with red). Intuitively,
+the gradient update rules should enforce the fact that the given user
+prefers category S to category T , subcategory M to P , and A to
+F . Now consider that the user bought item B, therefore, we need
+to sample another item not bought by the user. Let us say we ran-
+domly sample H. Using the same logic as above, the gradient up-
+date rules should affect all factors W s, along the paths from the
+root to both B and H. The outcome of these updates would be to
+enforce that the user prefers category S to category T , subcategory
+M to Q, and B to H. However, there is a redundancy involved
+here. We already know from the ﬁrst update that the user is more
+interested in the subtree rooted at S than the subtree rooted at T ,
+moreover, while we know that the user is interested in the subtree
+rooted at S, we did not model the fact that user prefers the subtree
+rooted at M to the subtree rooted at N .
+
+To remedy this deﬁciency, we introduce a novel training crite-
+ria that we call sibling-based training. The idea here is that while
+random sampling enforces users preference coarsely over the tax-
+onomy, it fails to ﬁne-tune those preferences over the sibling nodes
+in the taxonomy. Thus, we proceed as follows to solve this prob-
+lem. Suppose, as before, that the user bought item A, then we need
+to enforce that the user prefers each node along the path form A to
+the root over its siblings. That is, the user prefers A to B, C, D;
+M to N, O; and S to T . To do that, we apply the BPR gradient
+
+1
+
+21
+
+22
+
+25
+
+28
+
+29
+
+31
+
+32
+
+36
+
+37
+
+39
+
+46
+
+47
+
+41
+
+44
+
+45
+
+48
+
+Figure 4: The ﬁgure pictorially illustrates our cascaded inference proce-
+dure. In the ﬁrst step, we rank the top-level of the taxonomy, shown in the
+rectangular box. We pick the top-3 items (here, they are items 21, 25 and
+28). Next, we consider the children of these items ONLY and continue the
+recursion. Finally, we return the top items (shown in red) at the leaf level.
+
+update rule to each internal node along that path. First we pick
+a sibling node of A, say D (marked with blue in Figure 3), and
+enforce that the user afﬁnity to A is larger than his/her afﬁnity to
+D. Similarly, we pick a sibling node of M , say N (marked with
+blue in Figure 3), and enforce that the user afﬁnity to M is larger
+than the user’s afﬁnity to M . And ﬁnally repeat the process at level
+1. At each of these steps, the gradient update rule will affect all
+the factors W s from the level under consideration up until the root.
+Thus, each observed purchase from the user will result in D train-
+ing examples. In our implementation, we mix random sampling
+with sibling-based training to reap the beneﬁts of each of them:
+coarse learning from the random sampling and ﬁne-tuning ability
+of the sibling-based training. As we will demonstrate in the exper-
+imental section, this sibling-based approach results in signiﬁcant
+improvement over random-based training.
+
+5. RECOMMENDATIONS
+
+In this section, we describe how to exploit the taxonomy for
+speeding up inference in latent-factor models. As speciﬁed in Sec-
+tion 1, we are interested to compute the top-k products for each
+user. As with traditional latent factor models, we need to ﬁrst com-
+pute the afﬁnity of a user to all the items in the dataset and subse-
+quently select the best k among them to recommend to the user. As
+we describe in Section 7.1, we have about 1.5 million products in
+our shopping dataset and computing the top-k items for each user
+requires millions of vector operations (Equation 3) per user. Hence,
+this approach does not scale to large number of users and items.
+Next, we illustrate our proposed cascaded inference algorithm, that
+exploits the taxonomy to speedup the inference.
+
+5.1 Cascaded Inference
+
+The overall idea is depicted in Figure 4. In this ﬁgure we depict
+the taxonomy where leaf nodes are product and internal nodes are
+categories (and sub-categories). As we noted earlier, each node
+in the tree is associated with a factor wI which models its offset
+in the latent space from its parent. The products’ factors are then
+computed by the additive model in Equation 1. Taking this idea
+a step further, we can also construct an effective factor for each
+internal node (category) by summing all offsets in the path from
+that node to the root. Therefore we can perform recommendation
+at any level in the tree by ranking that level’s factors according to
+their afﬁnities to the user factor under consideration.
+
+To perform recommendation at the leaf level we have to compute
+the ranking over millions of items, thus to speed this procedure we
+use the taxonomy to prune the search space as follow. We noticed
+(see Figure 7(e)), that the taxonomy imposed a clustering effect
+on the latent factors and that the magnitude of the values of the
+
+offset of nodes form their parents decreases as we move down the
+tree. Therefore, we employ the following top-down algorithm. We
+start the algorithm by considering the nodes in the top most level
+in the taxonomy in our search space. We rank them according to
+our afﬁnity criterion (Equation 3). Next, we pick the top-k1 items
+in this level and include the children of these items in our search
+space. We compute the scores of these items, select the top-k2
+items, and continue the recursion along their children. The beneﬁts
+of this approach are two-fold: ﬁrst, our search space is guaranteed
+to be small, resulting in much better efﬁciency, second we pro-
+vide a more semantically meaningful ranking over the items as we
+can stop the recursion at any level and provide recommendation at
+that level if desired. Cascaded inference naturally provides us with
+a trade-off between accuracy and efﬁciency. As we increase the
+values of ki’s, we improve accuracy at the expense of additional
+computation. We experimentally demonstrate this trade-off in Sec-
+tion 7.5.
+
+6.
+
+IMPLEMENTATION DETAILS
+
+We developed a multi-core implementation of our taxonomy-
+aware latent factor model in C++. We used the BOOST [1] li-
+brary package for storing the factor matrices and for locks. Our
+implementation of TF is generic, i.e., we can simulate a wide vari-
+ety of previously proposed models include latent factor models and
+FPMC [25], which is the current state-of-the-art in next-transaction
+recommendation. We parameterize our implementation using the
+following parameters:
+
+• taxonomyUpdateLevels: This is a parameter that con-
+trols the number of levels of the taxonomy that we use in our
+training/inference (going up from the leaf level of the taxon-
+omy). For instance, if taxonomyUpdateLevels = 1,
+then we only use the product level, just as in traditional latent
+factor models. Similarly, if taxonomyUpdateLevels =
+4, then we use the full taxonomy. The beneﬁt of this parame-
+ter is to test the effect of adding more depth to the taxonomy
+on the quality of the recommendations.
+
+• maxPrevtransactions: This parameter represents the
+number of previous transactions to use when predicting the
+user’s short-term interest, i.e., the order of the Markov chain.
+
+Note that if we set taxonomyUpdateLevels to 1 and the
+maxPrevtransactions to 0, then we only update the last (leaf)
+level in the taxonomy and ignore time – which is equivalent to the
+latent factor model. On the other hand, the conﬁguration where
+taxonomyUpdateLevels = 1 and maxPrevtransactions
+= 1 corresponds to the FPMC technique. In order to scale our learn-
+ing algorithms to very large amounts of users/items, we develop
+techniques to parallelize our training and testing algorithms. We
+start with the a description of the parallelization in train.
+
+6.1 Parallelizing Training
+
+We develop a multi-threaded approach using locks. The global
+state maintained by the SGD algorithm are the 3 factor matrices
+{vU , vI , vI→•}. We introduce a lock for each row in our factor
+matrices. As shown in Section 4, in each iteration of training, we
+execute 3 steps: in the ﬁrst step, we sample a 4-tuple (u, i, j, t);
+in the second step, we compute the gradients with respect to the
+appropriate user and item factors. In the third step, we update the
+factor matrices based on the gradients.
+
+In the second step, we read the item factors. Hence, we need to
+obtain a read-lock over the factor and release it after reading. In
+the third step, we write to the factor thus we need to obtain a write
+
+962
+
+Items per user histogram (level 0)
+
+New items per user histogram (level 0)
+
+Popularity histogram (level 0)
+
+0
+0
+0
+0
+4
+
+0
+0
+0
+0
+3
+
+0
+0
+0
+0
+2
+
+0
+0
+0
+0
+1
+
+0
+
+s
+r
+e
+s
+u
+
+ 
+f
+
+o
+
+ 
+r
+e
+b
+m
+u
+N
+
+0
+0
+0
+0
+4
+
+0
+0
+0
+0
+3
+
+0
+0
+0
+0
+2
+
+0
+0
+0
+0
+1
+
+0
+
+s
+r
+e
+s
+u
+
+ 
+f
+
+o
+
+ 
+r
+e
+b
+m
+u
+N
+
+y
+c
+n
+e
+u
+q
+e
+r
+F
+
+5
+0
++
+e
+4
+
+5
+0
++
+e
+3
+
+5
+0
++
+e
+2
+
+5
+0
++
+e
+1
+
+0
+0
++
+e
+0
+
+0
+
+10
+
+20
+
+30
+
+40
+
+50
+
+0
+
+10
+
+20
+
+30
+
+40
+
+50
+
+0
+
+10
+
+20
+
+30
+
+40
+
+50
+
+Distinct items purchased
+
+Distinct items purchased
+
+Times purchased
+
+(a) # Distinct items
+
+(b) # New items
+
+(c) Item popularity
+
+Figure 5: The ﬁgures illustrate the characteristics of our data set. Part(a) shows the number of distinct items bought by the user (train). Part(b) illustrates the
+number of new items that the user (test), while part (c) illustrates the item popularity.
+
+lock on the item factor and subsequently release the lock once we
+update the factor. As shown in Section 4, for each iteration of SGD,
+we need to update the item factors of all of its ancestors and possi-
+bly all the item factors of its previous transactions. As we describe
+in Section 7, the taxonomy used in the evaluation has 1.5 million
+items at the last level and about 1500 internal nodes. Hence, these
+nodes are updated much more frequently (around 1000 times more
+often) than the items at the last level. Therefore we expect much
+more contention for the factors corresponding to the internal nodes
+in the taxonomy. To handle this issue, we propose the following
+caching technique. Here, each thread maintains a local cache of
+the item factors which correspond to the internal nodes in the tax-
+onomy. Now, in the second step of each SGD iteration, the factors
+are read from the global copy and in the third step, the local cached
+copy is updated. Whenever the difference between the correspond-
+ing local and global copies exceeds a threshold, we reconcile the
+local cached copy with the global factor matrices.
+
+6.2 Parallelizing Evaluation
+
+Next, we propose techniques to parallelize our evaluation and
+computing the metrics. This is particularly signiﬁcant because we
+need to do several rounds of cross-validation to compute the val-
+ues for the parameters (λ, K) of the stochastic gradient descent.
+Essentially, we partitioned the set of users into several machines
+using Hadoop and on each machine, we ran the evaluation and ag-
+gregated the results.
+
+7. EXPERIMENTAL EVALUATION
+
+In this section, we illustrate the beneﬁts of using TF models
+over the state-of-the-art approaches in recommender systems – in
+terms of accuracy and efﬁciency. We start with a description of our
+dataset, metrics and related systems against which we compare our
+proposed TF model.
+
+7.1 Dataset
+
+To evaluate the TF model, we used a log of user online trans-
+actions obtained from a major search engine, email provider and
+online shopping site. The dataset contains information about the
+historical purchases of users over a period of 6 months. We fully
+anonymize the users by dropping the original user identiﬁer and
+assigning a new, sequential numbering of the records. We drop
+the actual time stamp and only maintain the sequence of the trans-
+actional purchase logs. For reasons involving non-disclosure, we
+report results over a sample of the above data. In the sample, we
+have about 1 million anonymized users with an average of 2.3 pur-
+chases per user and 1.5 million distinct individual products, which
+
+is mapped to the Yahoo! shopping taxonomy. The (resulting) tax-
+onomy has about 1.5 million individual products in the leaf level
+organized into a taxonomy 3 levels deep, with around 1500 nodes
+at lowest level, 270 at the middle level and 23 top level categories.
+For each user, we pick a random fraction of transactions (with
+mean µ and variance σ) and select all subsequent (in time) transac-
+tions into the test dataset. All the previous transactions are used for
+training. To simulate sparsity, we experiment with different values
+of µ = {0.25(sparse), 0.50, 0.75(dense)}. We use a small variance
+of 0.05. Unless otherwise speciﬁed, we use µ = 0.5 in all ex-
+periments. The last T transactions in the training dataset are used
+for cross-validation and ﬁrst T transactions in the test dataset is
+used for prediction and reporting the error estimates. In all exper-
+iments, we use T = 1. Since our goal is to build a recommender
+system which is supposed to help users discover new items, we
+remove those items (repeated purchases) from the users’ test trans-
+actions which were previously bought by the user, i.e, they appear
+in the users’ train transactions (which most recommender systems
+can easily do anyway).
+
+In order to better analyze the results of our evaluation, we study
+the characteristics of the data, pertaining to sparsity. We measure
+statistics of the number of items purchased by the users and the
+popularity of the items.
+In the histogram shown in Figure 5(a),
+we depict the number of users who bought k distinct items (in the
+training data) for different values of k. The dataset is quite sparse
+since a very small fraction of the users buy a large number of items.
+In Figure 5(b), we show the the number of new items purchased by
+the users, in the test data. This shows that users bought several new
+items in the test dataset. In Figure 5(c), we depict the item popu-
+larity, i.e., we show the number of distinct users who purchased a
+given item. Notice the heavy tail in the items purchased.
+
+7.2 Systems
+
+• MF(B): Latent factor model where B is the previously in-
+troduced maxPrevtransactions parameter. We com-
+pare our TF model against the basic latent factor model. For
+a fair comparison, we use the BPR algorithm to train the MF
+model as well, using the setup described in Section 2. In ad-
+dition, we vary the number of maxPrevtransactions
+parameter from B = {0, 1, 2, 3}. Note that MF(0) corre-
+sponds to the SVD++ model of Koren et al. [19] and MF(1)
+corresponds to the FPMC (factorized personalized Markov
+chains) model of Rendle et al. [25], which is the current state-
+of-the-art technique.
+
+• TF(U, B): This is our proposed taxonomy-aware latent fac-
+tor model. It is parameterized using two parameters: U de-
+
+963
+
+C
+U
+A
+ 
+e
+g
+a
+r
+e
+v
+A
+
+ 0.82
+
+ 0.8
+
+ 0.78
+
+ 0.76
+
+ 0.74
+
+ 0.72
+
+ 0.7
+
+MF(0)
+TF(4,0)
+
+10
+
+20
+
+30
+
+40
+
+50
+
+factors
+
+k
+n
+a
+r
+ 
+n
+a
+e
+m
+ 
+e
+g
+a
+r
+e
+v
+a
+
+9.50E4
+
+9.00E4
+
+8.50E4
+
+8.00E4
+
+7.50E4
+
+7.00E4
+
+MF(0)
+
+TF(4,0)
+
+10
+
+20
+
+30
+
+40
+
+50
+
+factors
+
+(a) T F (4, 0) outperforms M F (0) (AUC)
+
+(b) Same as part(a), with average mean rank.
+
+ 0.9
+
+)
+l
+e
+v
+e
+l
+ 
+y
+r
+o
+g
+e
+t
+a
+c
+(
+ 
+
+C
+U
+A
+ 
+e
+g
+a
+r
+e
+v
+A
+
+ 0.85
+
+ 0.8
+
+ 0.75
+
+ 0.7
+
+MF(0)
+TF(4,0)
+
+ 4.45
+
+ 4.4
+
+k
+n
+a
+R
+ 
+n
+a
+e
+M
+
+ 4.35
+
+ 4.3
+
+ 4.25
+
+ 4.2
+
+ 4.15
+
+TF(4,0)
+
+C
+U
+A
+ 
+e
+g
+a
+r
+e
+v
+A
+
+ 0.85
+
+ 0.8
+
+ 0.75
+
+ 0.7
+
+ 0.65
+
+ 0.6
+
+MF(1)
+TF(4,1)
+
+10
+
+20
+
+30
+
+40
+
+50
+
+10
+
+20
+
+30
+
+40
+
+50
+
+10
+
+20
+
+30
+
+40
+
+50
+
+(c) T F (4, 0): AUC at category level
+
+(d) T F (4, 0): mean rank at category level
+
+(e) T F (4, 1) outperforms M F (1) (AUC)
+
+factors
+
+factors
+
+factors
+
+Figure 6: In this ﬁgure, we illustrate the beneﬁts of using the TF model over the baseline models. In part(a,b) we illustrate the beneﬁt of TF(4,0) over the
+standard MF(0) model. In part(a), we present AUC values and show that improvements of more than 6% are achieved using the taxonomy. In part(b) we
+illustrate the average mean rank. TF models allow recommendation at the category level. In part(c), we show the AUC of the TF(4,0) model at the category
+level, in comparison with the MF model. As shown in part(d), the average mean rank of the TF(4,0) model at the category level is around 4. In part(e), we
+show that using T F (4, 1) provides higher AUC than M F (1).
+
+notes the taxonomyUpdateLevels parameter (i.e.
+the
+number of super-categories used from the taxonomy, for ex-
+ample for U = 1, no part of the taxonomy is used, just like
+MF and for U = 2 only the sub-categories above the item
+level are used) and B denotes the maxPrevtransactions
+parameter (Section 6). In our experiments, we use U ={2,
+3, 4} and B = {0, 1, 2, 3}.
+
+across all users. The average meanRank is related to f-measure
+metric (harmonic mean of precision and recall) metrics, which
+are commonly used in information retrieval.
+
+Next, we present the results of our experimental analysis. We
+illustrate the experimental results relating to the accuracy of the
+modeling in Section 7.4 and the results relating to the efﬁciency of
+our models in Section 7.5.
+
+7.3 Metrics
+
+We use the metrics described below to compare our model with
+
+the above systems.
+• AUC: (Area under the ROC curve)
+
+AUC is a widely used metric for testing the quality of rank order-
+ings. Suppose the list of items to rank is X and our test transac-
+tion is T . Also suppose r(x) is the numerical rank of the item
+x according to our model (from 1 . . . n). Then, the formula to
+compute AUC is given by: (Here δ(φ) is the indicator function
+that returns 1 if φ is true or 0 otherwise)
+
+1
+
+|T ||X \ T | X
+
+x∈T,y∈X\T
+
+δ(r(x) < r(y))
+
+• Average meanRank
+
+While the AUC metric is widely adopted in practice, it is insen-
+sitive to the ranking in our case since we have over 1 million
+products in our dataset. Suppose we have exactly 1 item in the
+test transaction and its rank (e.g., according to MF) is 10, 000.
+The AUC value is approximately 0.99. However, if the item’s
+rank is 100 (which is clearly much better than 1000), the AUC
+value is 0.999. For better comparison between the different ap-
+proaches, we also measure the average meanRank. We com-
+pute the average rank for each user and them average this value
+
+964
+
+7.4 Accuracy Results
+
+In this section, we show results about the beneﬁts of using TF
+
+models for improving accuracy of recommendation.
+
+7.4.1 Accuracy Improvement over Baseline Models
+
+Improvement over MF(0) model
+In the ﬁrst experiment, we compare the accuracy of T F (4, 0) and
+M F (0) models. Recall from Section 7.2, that T F (4, 0) indicates
+that we use all the levels of the taxonomy (taxonomyUpdateLevels
+= 4) and we do not use any previous transactions in the Markov
+chain (maxPrevtransactions = 0). Since the number of free pa-
+rameters in T F (4, 0) and M F (0) are different, we experiment
+with a range of factors (to effectively carry out model selection for
+each model). We investigate the performance of the models with
+{10, 20, 30, 40, 50} factors. We measure the average AUC for the
+two approaches. The results are shown in Figure 6(a). As shown in
+Figure 6(a), the best average AUC for T F (4, 0) (which occurs at
+20 factors) is higher than the best average AUC for M F (0) (also
+occurring at 50 factors). We would like to note here that both the
+models above use the same amount of information: they do not take
+into the account the actual sequence of items purchased, rather they
+only consider the set of items that has been purchased.
+
+As described in Section 1, using a taxonomy allows us to rank
+
+ 0.8
+
+ 0.78
+
+C
+U
+A
+ 
+e
+g
+a
+r
+e
+v
+A
+
+ 0.76
+
+ 0.74
+
+ 0.72
+
+ 0.7
+
+C
+U
+A
+ 
+e
+g
+a
+r
+e
+v
+A
+
+ 0.82
+
+ 0.8
+
+ 0.78
+
+ 0.76
+
+ 0.74
+
+ 0.72
+
+ 0.7
+
+MF(0)
+TF(4,0)
+
+ 0.9
+
+ 0.85
+
+C
+U
+A
+ 
+e
+g
+a
+r
+e
+v
+A
+
+ 0.8
+
+ 0.75
+
+ 0.7
+
+ 0.65
+
+MF(0)
+
+TF(2,0)
+
+TF(3,0)
+
+TF(4,0)
+
+(a) Effect of taxonomy level
+
+0.25 (SPARSE) 0.50
+
+0.75 (DENSE)
+
+Sparsity
+
+(b) Study of sparsity
+
+Sibling training
+No Sibling training
+
+ 
+
+1
+
+2
+
+3
+
+10
+
+20
+
+30
+
+40
+
+50
+
+factors
+
+k
+n
+a
+r
+ 
+
+w
+e
+n
+ 
+e
+g
+a
+r
+e
+v
+a
+
+ 0.84
+
+ 0.83
+
+ 0.82
+
+ 0.81
+
+ 0.8
+
+ 0.79
+
+ 0.78
+
+ 0.77
+
+ 0.76
+
+ 0.75
+
+ 0.74
+
+ 0.8
+
+ 0.79
+
+C
+U
+A
+ 
+e
+g
+a
+r
+e
+v
+A
+
+ 0.78
+
+ 0.77
+
+ 0.76
+
+ 0.75
+
+MF(0)
+
+TF(4,0)
+
+10
+
+20
+
+30
+
+factors
+
+40
+
+50
+
+(c) Study of cold start effects
+
+TF(4,1)
+
+TF(4,2)
+
+TF(4,3)
+
+(d) Effect of Sibling training
+
+(e) Visualizing 2-d projection of factors
+
+(f) Effect of time
+
+Figure 7: In this ﬁgure, we study the effects of taxonomy. (a) As we increase the number of levels, we improve the average AUC. (b) When the data set is
+sparse, usage of taxonomy provides much greater beneﬁts. (c) T F models provide better AUC for items with cold start by exploiting taxonomy. (d) Sibling
+training techniques improve AUC. In part(e), we project the learned factors on to a 2-dimensional plane; notice that the item factors occur close to their
+ancestors. (f) AUC improves as we increase the order of the Markov chain.
+
+In
+not only at the product level, but also at the category levels.
+Figure 6(c), we show the average AUC at the category level for
+the T F (4, 0) model for various factor sizes. For comparison, we
+also indicate the AUC of the M F (0) model at the product level.
+As shown in the ﬁgure, the taxonomy-aware factor model greatly
+outperforms the matrix factorization approach.
+
+In Figure 6(b), we indicate the meanRank for the M F (0) and
+the T F (4, 0) models at the product level. As shown in the ﬁgure,
+the mean rank for the taxonomy models is an order-of-magnitude
+less than that for the matrix factorization model. In Figure 6(d),
+we indicate the mean rank at the category level for the T F (4, 0)
+model. As shown in the ﬁgure, the mean rank is just 4, illustrating
+the beneﬁts of using taxonomy for recommendation. We note here
+that even though the average mean rank at the product level is high
+(about 10,000), the average mean rank at the category level is very
+small and is practical to use.
+
+Improvement over MF(1) model
+In the second experiment, we compare the accuracy of T F (4, 1)
+and M F (1) models. Recall from Section 7.2 that M F (1) corre-
+sponds to the matrix factorization model along with a single step
+Markov chain (maxPrevtransactions = 1), which also corresponds
+to the state-of-the-art FPMC technique of Rendle et al. [25]. We
+compute the average AUC for the two approaches and show the
+results Figure 6(e). As shown in the ﬁgure, using taxonomy signif-
+icantly improves the recommendation accuracy.
+
+7.4.2
+
+Study of Taxonomy over Recommendation
+
+as we incorporate more levels in the taxonomy. This is because of
+the additional latent factors that we introduce, based on the taxon-
+omy enables better sharing of the statistical strength across items.
+
+Tackling sparsity and cold start problems
+As discussed in Section 1, the two key problems with state-of-the-
+art systems in collaborative ﬁltering is sparsity and cold start prob-
+lems. We simulate sparsity by generating multiple datasets with
+different values of the split parameter µ. For each dataset, we train
+the M F (0) and the T F (4, 0) models and measure the accuracy
+of prediction using AUC. We present the results in Figure 7(b).
+As shown in the ﬁgure, for all the three data sets (from sparse to
+dense), the taxonomy model outperforms the matrix factorization
+models. Also, note that the beneﬁt of using the taxonomy is very
+large when the data is sparse. As shown in the ﬁgure, for the sparse
+dataset, we obtain more than a 5% improvement in the AUC for the
+highly sparse dataset and about 2% for the less sparse dataset.
+Next, we show how the taxonomy helps in ameliorating the cold
+start problem. For each of the new items, items which do not ap-
+pear in the training dataset (i.e., they are released at a later time),
+we measure the average rank of these items, over all the times it
+was purchased. We compare M F (0) and T F (4, 0) for this ex-
+periment. As described in Section 3, while the ranking of M F (0)
+is completely random; in TF-based models, we use the item’s im-
+mediate super-category as an estimate for its factor. We plot the
+average rank of the new items in Figure 7(c). As shown in the
+ﬁgure, for new items, TF models outperform the M F (0) approach
+for almost all factor sizes.
+
+Effect of Taxonomy over recommendation accuracy
+In this experiment, we plan to understand the effect of taxonomy
+over the recommendation accuracy. We compare the following
+models: M F (0), T F (2, 0), T F (3, 0), T F (4, 0). We show the re-
+sults in Figure 7(a). As shown in the ﬁgure, the accuracy increases
+
+Performance of sibling training
+In this experiment, we evaluate the beneﬁts of using the sibling
+based training for training the T F models. We train the T F (4, 0)
+models with and without the sibling training and compare the re-
+sulting prediction performance. We show the results in Figure 7(d).
+
+965
+
+TF(4,0) no caching
+TF(4,0) caching th=0.1
+MF(0)
+
+)
+c
+e
+s
+(
+ 
+e
+m
+
+i
+t
+ 
+
+n
+u
+R
+
+ 350
+
+ 300
+
+ 250
+
+ 200
+
+ 150
+
+ 100
+
+ 50
+
+ 0
+
+p
+u
+-
+d
+e
+e
+p
+S
+
+ 12
+
+ 10
+
+ 8
+
+ 6
+
+ 4
+
+ 2
+
+ 0
+
+TF(4,0) no caching
+TF(4,0) caching th=0.1
+MF(0)
+
+ 0
+
+ 10
+
+ 20
+
+ 30
+
+ 40
+
+ 50
+
+ 0
+
+ 10
+
+ 20
+
+ 30
+
+ 40
+
+ 50
+
+Number of threads
+
+Number of threads
+
+(a) Overhead of TF is small
+
+(b) TF has higher speed-up
+
+Cascaded Inference Trade-off
+
+Cascaded Inference Trade-off
+
+Accuracy Ratio
+Time Ratio
+
+o
+
+i
+t
+
+a
+R
+
+ 1.2
+
+ 1
+
+ 0.8
+
+ 0.6
+
+ 0.4
+
+ 0.2
+
+ 0
+
+Accuracy Ratio
+Time Ratio
+
+o
+
+i
+t
+
+a
+R
+
+ 1.1
+ 1
+ 0.9
+ 0.8
+ 0.7
+ 0.6
+ 0.5
+ 0.4
+ 0.3
+ 0.2
+ 0.1
+ 0
+
+ 0  10  20  30  40  50  60  70  80  90  100
+
+ 0  10  20  30  40  50  60  70  80  90  100
+
+K in percent
+
+K in percent
+
+(c,d) Beneﬁts of cascaded inference
+
+Figure 8: (a) Here, we indicate the time per epoch for T F (4, 0) and M F (0). The overhead of training the TF model is much less as we increase the number
+of threads. (b) In this ﬁgure, we show the speedups of the above models. Note that T F (4, 0) has a maximum speedup of 8 which is higher than M F (0)’s
+maximum speedup of 6. In parts (c,d), we show the trade-offs obtained using our cascaded inference algorithms. As shown in part(c), we can achieve 80%
+accuracy in 50% of the computation time.
+
+As before, we depict the results for various factor sizes. As shown
+in the ﬁgure, using sibling training improves the overall AUC by
+more than 3%.
+
+Visualizing factors in T F model
+Next, we examine the structure of the factors. We use t-SNE [28]
+a tool that can be used to perform dimensionality reduction on the
+factors. We plot the item factors (Section 3) on a 2-dimensional
+plane. In Figure 7(e) we plot the upper 3 levels of the taxonomy.
+As shown in the ﬁgure, the red color points correspond to the top-
+most level of the taxonomy, similarly the green and the blue color
+points correspond to levels 2 and 3 of the taxonomy. The factors
+are clustered into various clusters as expected. Also notice that
+each red point (corresponding to the topmost level) is surrounded
+by a set of green points (level 2), which in turn is surrounded by the
+blue points (level 3), indicating the role that the taxonomy plays in
+constraining such factors together, i.e., items being close to their
+children. We also note that some of the factors corresponding to
+lower levels have moved away from their ancestor factors; we at-
+tribute this to the data. Apriori, the factors are similar to their an-
+cestor factors. After an item is purchased a few times and becomes
+popular, its buying pattern no longer matches that of its parent and
+therefore its factor gets modiﬁed such that it moves away from its
+ancestors.
+
+7.4.3
+
+Improvement with Higher Order Markov Chains
+In this experiment, we study the beneﬁt of using higher order
+Markov chains. We compare the accuracy of T F (4, 0), T F (4, 1)
+and T F (4, 2): which progressively increases the number of pre-
+vious transactions considered, i.e., the order of the Markov chain
+(Section 3). We plot the corresponding AUC values in Figure 7(f).
+As shown in the ﬁgures, the prediction error increases as we in-
+crease the order of the Markov chain.
+
+7.5 Performance Results
+
+In this section, we present the results pertaining to the efﬁciency
+of our approaches against naive methods. Speciﬁcally, we present
+the speedups in learning that we are able to obtain using multiple
+cores and the beneﬁts of using our cascaded inference algorithm.
+
+Training parallelization
+We investigate the performance of our multi-core implementation
+of the training algorithm. For the models {M F (0), T F (4, 0)},
+we measure the time taken per epoch. For this experiment, we
+used a 12 core machine running Linux. Note that epoch is a ﬁxed
+number of iterations for both models. We plot the results in Fig-
+ure 8(a,b) as a function of the number of threads used. Figure 8(a)
+shows the absolute wall-clock times and (b) indicates the speed-
+up. Clearly, T F (4, 0) is more expensive since it has to update
+the higher levels of the taxonomy as well. We make the follow-
+
+ing observations. First, as we increase the number of cores, we
+observe that we obtain an almost linear speed-up initially. Subse-
+quently, the speed-up ﬂattens out as expected. Second, we observe
+that the maximum speedup for T F (4, 0) is 8, whereas the maxi-
+mum speedup for M F (0) is only 6. Since T F (4, 0) also needs to
+update the higher levels of the taxonomy (of which there are only
+about 2000 nodes), we expect it to be bottlenecked by the lock con-
+tention at this level. However, surprisingly, T F (4, 0) has a higher
+speedup than M F (0). This behavior can be explained if we note
+that T F (4, 0) requires more computation per thread than M F (0)
+and thus the rate of updating the shared factors per thread is less
+than the same rate from M F (0). Therefore, to reach the same
+bottleneck update rate of M F (0), T F (4, 0) requires more threads
+before its speed-up starts to asymptote. As a result of this, we see
+that when we use a reasonable number of thread (about 10), using
+T F (4, 0) has very little additional overhead over using M F (0).
+As shown in the ﬁgure, as the number of threads is increased, the
+gap between M F (0) and T F (4, 0) reduces to almost zero. Next,
+we investigate the beneﬁts of our caching techniques in improv-
+ing speedup. As shown in Figure 8(b), we see that after 40 threads,
+while the speedup without caching drops, we continue to see a con-
+stant speedup with caching. However, we notice that caching only
+helps when we have more than 40 threads. This is because the
+bottleneck due to lock contention over the upper levels of the tax-
+onomy occurs only with 40 threads while the bottleneck due to the
+number of cpu cores occurs earlier, around 10 threads.
+
+Cascaded Inference
+As illustrated in Section 5.1, cascaded inference provides a trade-
+off between accuracy and performance. As we increase the search
+space (increase the values of n1, n2, n3 (Section 5.1)), we improve
+accuracy at the expense of computational efﬁciency. In this exper-
+iment, we study this trade-off empirically. Since the number of
+nodes in each level of the taxonomy is different, we use the ki to
+denote the percentage of the number of nodes in level i that is con-
+sidered, i.e., ni = kisize(i), where size(i) denotes the number
+of nodes in level i. We evaluate two models of cascading: In the
+ﬁrst model, we increase the values of all of k1, k2 and k3 from 0 to
+100% gradually. To illustrate the trade-off, we plot two quantities.
+First, we plot the ratio of the AUC obtained using cascaded infer-
+ence against the actual AUC (which we computed using the naive
+method). Second, we also plot the ratio of the computation times
+between cascaded inference and the naive method. The results are
+shown in Figure 8(c). As we increase k, note that the AUC values
+increase and the time taken also increases. Even at around 50% of
+the time consumed, we can achieve close to 80% of the accuracy.
+In the second model, we hold k1 and k2 to the maximum possible
+value (the size of the level) and increase k3 from 0 to 100%. We
+observe a similar trade-off with this model as shown in Figure 8(d).
+While in the ﬁrst model, we obtain a non-monotone behavior of
+
+966
+
+the accuracy curve (since we are modifying the number of inter-
+nal nodes used), we observe a monotonically increasing accuracy
+in the second approach. Since we only append to the set of items
+considered, the AUC values increase gradually.
+
+8. RELATED WORK
+
+FPMC model (Next-basket recommendation)
+Rendle et al. [25] proposed the FPMC model which is a combi-
+nation of the latent factor model and the Markov chain model for
+predicting the next basket that will be purchased by the users. Our
+proposed TF model is a more general model and it subsumes FPMC
+and other models (by setting the taxonomyUpdateLevels pa-
+rameter to 1 and maxPrevtransactions to 1, we can recover
+FPMC). As shown in our experimental analysis, TF outperforms
+FPMC by exploiting the additional features of the taxonomy.
+
+Taxonomy-aware latent factor models
+In the recently concluded KDDCup 2011 [2], Yahoo! released a
+portion of the Yahoo! Music ratings dataset with information about
+songs, genres, albums and artists which form a taxonomy. Mnih
+et al. [22] and Menon et al. [21] propose to use the taxonomy to
+guide learning. The purpose of using the taxonomy was to account
+for the biases involved in the ratings (since users were allowed to
+rate songs, genres and artists – multiple levels of the taxonomy)
+and not particularly to improve recommendation accuracy. In our
+work, we propose a principled approach to incorporate taxonomy
+data into the latent factor model framework for improving the ac-
+curacy of the prediction and efﬁciency of the training. In addition,
+we present the sibling-based training algorithm which enables us to
+fully exploit the taxonomy. Further, we also present the cascaded
+inference algorithm for improving the efﬁciency of inference. Ear-
+lier work by Ziegler et al. [30] and Weng et al. [29] also incorporate
+taxonomies for recommendation using alternative approaches.
+
+Association rule mining & variants
+Frequent itemset mining and association rule mining [14] tech-
+niques have been extensively studied in the database literature over
+the past couple of decades and led to the foundation of data min-
+ing. In their seminal work, Agrawal et al. [5] developed the Apriori
+algorithm for efﬁciently extracting sets of items that are purchased
+together. In subsequent work [6, 27], the above algorithm has been
+extended to mine temporal sequences and also incorporate a taxon-
+omy of items into the Apriori algorithm. As shown by its success
+in the Netﬂix prize [8], latent factor models typically outperform
+these techniques for personalized recommendations.
+
+9. CONCLUSIONS
+User personalization and targeting are key problems in Compu-
+tational Advertising. Developing accurate recommendation algo-
+rithms is therefore key to learning user preferences and providing
+content that is of interest, to the users. In this paper, we develop
+a system for product recommendations to the users based on his-
+torical purchase logs. However, much of the data is sparse (too
+few purchases and too many items) and several new items are re-
+leased each day (leading to cold start issues). Also, most of the user
+feedback is implicit, i.e., we know of a purchase, but do not know
+about the users’ ratings for the product. In our work, we propose
+a principled approach for combining latent factor models and tax-
+onomies to resolve the above challenges. Taxonomies are available
+for large number of products including music (genre, artist, album),
+movies (genre, director) and we exploit such additional data to de-
+velop richer models for recommendation. We develop efﬁcient al-
+gorithms to learn taxonomy-based models and also show how to
+
+improve the efﬁciency of our inference algorithms by making use
+of the taxonomy. Our comprehensive experimental analysis illus-
+trates the beneﬁts of our approaches for product recommendation.
+
+10. REFERENCES
+[1] Boost c++ libraries. http://www.boost.org/.
+[2] Kdd cup 2011. http://kddcup.yahoo.com/.
+[3] Pricegrabber. http://www.pricegrabber.com/.
+[4] D. Agarwal and B.-C. Chen. Regression-based latent factor models.
+
+In KDD, pages 19–28, 2009.
+
+[5] R. Agrawal and R. Srikant. Fast algorithms for mining association
+
+rules in large databases. In VLDB, pages 487–499, 1994.
+
+[6] R. Agrawal and R. Srikant. Mining sequential patterns. In ICDE,
+
+pages 3–14, 1995.
+
+[7] A. Ahmed, Y. Low, M. Aly, V. Josifovski, and A. J. Smola. Scalable
+
+distributed inference of dynamic user interests for behavioral
+targeting. In KDD, pages 114–122, 2011.
+
+[8] J. Bennett and S. Lanning. The netﬂix prize. In In KDD Cup and
+
+Workshop in conjunction with KDD, 2007.
+
+[9] L. Bottou. Stochastic learning. In Advanced Lectures on Machine
+
+Learning, pages 146–168, 2003.
+
+[10] L. Bottou and O. Bousquet. The tradeoffs of large scale learning. In
+
+NIPS, 2007.
+
+[11] L. Bottou and Y. LeCun. Large scale online learning. In NIPS, 2003.
+[12] A. Gelman, J. B. Carlin, H. S. Stern, and D. B. Rubin. Bayesian Data
+Analysis. Chapman and Hall/CRC Texts in Statistical Science, 2003.
+
+[13] A. Y. Halevy, P. Norvig, and F. Pereira. The unreasonable
+
+effectiveness of data. IEEE Intelligent Systems, 24(2):8–12, 2009.
+
+[14] J. Han, H. Cheng, D. Xin, and X. Yan. Frequent pattern mining:
+
+current status and future directions. Data Min. Knowl. Discov.,
+15(1):55–86, 2007.
+
+[15] M. I. Jordan. Learning in Graphical Models (ed). MIT Press, 1998.
+[16] N. Koenigstein, G. Dror, and Y. Koren. Yahoo! music
+
+recommendations: modeling music ratings with temporal dynamics
+and item taxonomy. In RecSys, pages 165–172, 2011.
+
+[17] Y. Koren. Factorization meets the neighborhood: a multifaceted
+
+collaborative ﬁltering model. In KDD, pages 426–434, 2008.
+
+[18] Y. Koren. Collaborative ﬁltering with temporal dynamics. In KDD,
+
+pages 447–456, 2009.
+
+[19] Y. Koren and R. M. Bell. Advances in collaborative ﬁltering. In
+
+Recommender Systems Handbook, pages 145–186. 2011.
+
+[20] Y. Koren, R. M. Bell, and C. Volinsky. Matrix factorization
+
+techniques for recommender systems. IEEE Computer, 42(8):30–37,
+2009.
+
+[21] A. K. Menon, K. P. Chitrapura, S. Garg, D. Agarwal, and N. Kota.
+
+Response prediction using collaborative ﬁltering with hierarchies and
+side-information. In KDD, pages 141–149, 2011.
+
+[22] A. Mnih. Taxonomy-informed latent factor models for implicit
+
+feedback. In KDD Cup and Workshop, KDD 2011, 2011.
+
+[23] J. Pearl. Probabilistic Reasoning in Intelligent Systems: Networks of
+
+Plausible Inference. Morgan Kaufmann, 1988.
+
+[24] S. Rendle, C. Freudenthaler, Z. Gantner, and L. Schmidt-thieme. L.s.:
+
+Bpr: Bayesian personalized ranking from implicit feedback. In UAI,
+pages 452–461, 2009.
+
+[25] S. Rendle, C. Freudenthaler, and L. Schmidt-Thieme. Factorizing
+personalized markov chains for next-basket recommendation. In
+WWW, pages 811–820, 2010.
+
+[26] S. Rendle and L. Schmidt-Thieme. Pairwise interaction tensor
+
+factorization for personalized tag recommendation. In WSDM, 2010.
+[27] R. Srikant and R. Agrawal. Mining generalized association rules. In
+
+VLDB, pages 407–419, 1995.
+
+[28] L. van der Maaten. Learning a parametric embedding by preserving
+
+local structure. JMLR, 5:384–391, 2009.
+
+[29] L.-T. Weng, Y. Xu, Y. Li, and R. Nayak. Exploiting item taxonomy
+
+for solving cold-start problem in recommendation making. In ICTAI,
+pages 113–120, 2008.
+
+[30] C.-N. Ziegler, G. Lausen, and L. Schmidt-Thieme. Taxonomy-driven
+computation of product recommendations. In CIKM, pages 406–415,
+2004.
+
+967
+
+

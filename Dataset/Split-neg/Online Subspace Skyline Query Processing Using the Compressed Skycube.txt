@@ -1,0 +1,2323 @@
+Online Subspace Skyline Query Processing Using
+the Compressed Skycube
+
+TIAN XIA, Teradata Corporation
+DONGHUI ZHANG, Microsoft Gray Systems Lab
+ZHENG FANG, CINDY CHEN, and JIE WANG, University of Massachusetts Lowell
+
+The skyline query can help identify the “best” objects in a multi-attribute dataset. During the past decade,
+this query has received considerable attention in the database research community. Most research focused
+on computing the “skyline” of a dataset, or the set of “skyline objects” that are not dominated by any other
+object. Such algorithms are not appropriate in an online system, which should respond in real time to
+skyline query requests with arbitrary subsets of the attributes (also called subspaces). To guarantee real-
+time response, an online system should precompute the skylines for all subspaces, and look up a skyline upon
+query. Unfortunately, because the number of subspaces is exponential to the number of attributes, such pre
+computation has very expensive storage cost and update cost. We propose the Compressed SkyCube (CSC)
+that is much more compact, yet can still return the skyline of any subspace without consulting the base
+table. The CSC therefore combines the advantage of precomputation in that it can respond to queries in real
+time, and the advantage of no-precomputation in that it has efﬁcient space cost and update cost. This article
+presents the CSC data structures, the CSC query algorithm, the CSC update algorithm, and the CSC initial
+computation scheme. A solution to extend to high-dimensional data is also proposed.
+
+Categories and Subject Descriptors: H.4.0 [Information Systems Applications]: General
+
+General Terms: Algorithms, Design, Performance
+
+Additional Key Words and Phrases: Skyline, subspace, compressed, update support, workload
+
+ACM Reference Format:
+Xia, T., Zhang, D., Fang, Z., Chen, C., and Wang, J. 2012. Online subspace skyline query processing using
+the compressed skycube. ACM Trans. Datab. Syst. 37, 2, Article 15 (May 2012), 36 pages.
+DOI = 10.1145/2188349.2188357 http://doi.acm.org/10.1145/2188349.2188357
+
+1. INTRODUCTION
+Given a set of multi-attribute objects, the skyline query returns the “best” objects that
+are not dominated by any other object. An object t1 is said to dominate an object t2 if
+t1 is better than or equal to t2 in all dimensions, and is strictly better in at least one
+dimension. A classic example of the skyline query is to ﬁnd the “best” hotels in Nassau,
+Bahamas, considering both the price and the distance to the beach for each hotel. In
+Figure 1, objects t1 − t8 represent the hotels, and the skyline consists of t1, t4, t6, and t8.
+Introduced by B¨orzs¨onyi et al. [2001] to the database research community, the concept
+of skyline query has attracted much attention during the past decade [Hristidis et al.
+
+The research of T. Xia and D. Zhang is supported in part by the NSF under CAREER Award IIS-0347600
+and the research of Z. Fang and J. Wang is supported in part by the NSF under grants CNS-0709001 and
+CCF-0830314.
+Authors’ addresses: T. Xia, Teradata Corporation, 100 N. Sepulveda Blvd., El Segundo, CA 90245; D. Zhang,
+Microsoft Gray Systems Lab, 634 W. Main St., 4th Floor, Madison, WI 53703; Z. Fang, C. Chen (corresponding
+author), and J. Wang, University of Massachusetts, Lowell, MA 01854; email: cchen@cs.uml.edu.
+Permission to make digital or hard copies of part or all of this work for personal or classroom use is granted
+without fee provided that copies are not made or distributed for proﬁt or commercial advantage and that
+copies show this notice on the ﬁrst page or initial screen of a display along with the full citation. Copyrights for
+components of this work owned by others than ACM must be honored. Abstracting with credit is permitted.
+To copy otherwise, to republish, to post on servers, to redistribute to lists, or to use any component of this
+work in other works requires prior speciﬁc permission and/or a fee. Permissions may be requested from
+Publications Dept., ACM, Inc., 2 Penn Plaza, Suite 701, New York, NY 10121-0701 USA, fax +1 (212)
+869-0481, or permissions@acm.org.
+c(cid:2) 2012 ACM 0362-5915/2012/05-ART15 $10.00
+DOI 10.1145/2188349.2188357 http://doi.acm.org/10.1145/2188349.2188357
+
+ACM Transactions on Database Systems, Vol. 37, No. 2, Article 15, Publication date: May 2012.
+
+15
+
+15:2
+
+T. Xia et al.
+
+e
+c
+i
+r
+P
+
+t2
+
+t5
+
+t
+1
+t4
+
+t3
+
+t6
+
+t7
+
+8t
+
+Distance to the beach
+
+Fig. 1. A classic example of the skyline query.
+
+Fig. 2. The dataset.
+
+2001; Chomicki et al. 2003; Kossmann et al. 2002; Papadias et al. 2003; Jin et al.
+2004; Chan et al. 2005; Sharifzadeh and Shahabi 2006; Lin et al. 2007; Wong et al.
+2008; Zhang et al. 2009a; Jin et al. 2010; Sheng and Tao 2011], largely because of
+its importance in multi-criteria decision making, data mining, and user-preference
+queries. Most existing work focus on the algorithms to calculate skylines. Pei et al.
+[2005], Yuan et al. [2005], and Tao et al. [2006] recognize the fact that in practice, the
+users may issue skyline queries with some subsets of the full set of attributes. A subset
+of attributes is called a subspace, and the full set of attributes is called the fullspace.
+
+In an online system that accepts multiple concurrent subspace skyline queries, the
+query response time is important, and most existing skyline computation algorithms
+do not satisfy the real-time response requirement. To address this issue, Yuan et al.
+[2005] and Pei et al. [2005] independently proposed the Skycube, which pre-computes
+all the subspace skylines. The name is a blend of “skyline” and “datacube” [Agarwal
+et al. 1996].
+
+As an example, given the dataset in Figure 2, the full Skycube1 is shown in Figure 3.
+Here each row is a “cuboid” with label being the subspace and value being the subspace
+skyline. Note that the notion of cuboid was used in a datacube, to represent a subset
+of attributes (the label) and the corresponding group-by result (the value). Although
+having very good query response time, the Skycube has a very expensive space cost,
+because the number of subspaces is exponential to the number of attributes. If a dataset
+has 20 attributes, there are more than a million subspaces. A related drawback of
+the Skycube is that its updates are expensive. Here the updates of the Skycube are
+triggered by updates in the base table, for example, a price change of a hotel.
+
+We propose the Compressed SkyCube (CSC). An example is shown in Figure 4.
+Comparing Figure 4 with Figure 3, it is clear that the CSC is much more compact
+
+1Note that in Yuan et al. [2005], a d-dimensional Skycube is divided into ( d
+⌈d/2⌉ ) paths called Skylists. The
+storage is less than the full Skycube. But still, the CSC is much more compact than the Skylists, as discussed
+in Section 3.2.
+
+ACM Transactions on Database Systems, Vol. 37, No. 2, Article 15, Publication date: May 2012.
+
+Online Subspace Skyline Query Processing Using the Compressed Skycube
+
+15:3
+
+Fig. 3. The full Skycube.
+
+Fig. 4. The Compressed SkyCube (CSC).
+
+User
+
+The CSC System
+
+DBA
+
+Skyline query
+
+Query result
+
+CSC Query 
+
+Engine
+
+CSC Update 
+
+Base-table
+
+Engine
+
+update request
+
+CSC Storage
+
+Base Table
+
+Fig. 5. A simpliﬁed view of the CSC System.
+
+because: (a) the CSC does NOT store all the subspaces; and (b) even for a subspace
+that is stored in the CSC, it does NOT store all the skyline objects for the subspace.
+For instance, while the actual skyline for the subspace {u1, u2} is {t5, t6, t7, t9}, in the
+CSC for this subspace only {t5, t9} is stored. What the CSC stores for each subspace is
+the minimum skyline to be deﬁned in Section 3.
+
+Throughout this article, we assume the existence of a dataset, without mentioning
+it. We use D to represent the fullspace, that is, the set of all attributes (of the omitted
+dataset), and we use sky(·) to represent the skyline (of the omitted dataset) on a subset
+of D. For instance, sky(D) is the fullspace skyline.
+
+The architecture of our proposed CSC System is shown in Figure 5.
+
+ACM Transactions on Database Systems, Vol. 37, No. 2, Article 15, Publication date: May 2012.
+
+15:4
+
+T. Xia et al.
+
+—The query use case. A user issues a subspace skyline query. The CSC Query Engine
+“looks up” the query result from the CSC Storage, and returns the result to the user.
+—The update use case. A DBA issues a request to update the Base Table. The CSC
+Update Engine modiﬁes the Base Table accordingly. In addition, it updates the CSC
+Storage, if needed.
+
+For ease of understanding, the architecture is simpliﬁed by omitting the CSC Ini-
+tialization Engine that handles additions of new base tables, and by omitting the CSC
+Query Proﬁler and CSC Reorganizer that handle high-dimensional data.
+
+To implement such a CSC system, there are ﬁve challenges.
+
+(1) Challenge in storage structure. The CSC Storage should be viewed as a lossless
+compression of the Skycube. What data exactly does the CSC System store to
+minimize storage cost yet to guarantee fast query response by capturing all the
+information in the full Skycube?
+
+(2) Challenge in query processing. When a subspace skyline query is issued to the CSC
+Query Engine, the CSC Storage may not have a record for the subspace; even if
+it does, the “minimum skyline” that is stored with the subspace may not include
+the complete skyline. How can the CSC System deliver the subspace skyline query
+result, without consulting the Base Table?
+
+(3) Challenge in update. As objects in the Base Table are added/deleted/updated, the
+subspace skylines may change as well. How can the CSC System efﬁciently update
+the CSC Storage?
+
+(4) Challenge in initial computation. When a new Base Table is available, how can
+the CSC System create the corresponding CSC Storage without ﬁrst calculating
+the actual Skycube? Because the Skycube is so large, it may be unacceptable to
+calculate it even if the initialization is a one-time thing.
+
+(5) Challenge in handling high-dimensional data. How can the CSC System handle
+very high-dimensional data (e.g., more than 100), where maintaining a CSC for all
+the dimensions is not possible?
+
+Our key contributions in this article are to solve all the aforesaid ﬁve challenges.
+Compared with the conference version [Xia and Zhang 2006], signiﬁcant new materials
+are added. In particular, the solution to Challenge 4 is completely new. The solution
+to Challenge 5 is also new, although initial ideas were presented in Fang et al. [2009].
+Other additions include theorem proofs, detailed experimental results, detailed survey
+of related work, and an analysis of applying our update scheme on the Skycube.
+
+The idea to solve Challenge 1 (storage structure) is to introduce a novel concept
+called the “minimum skyline”. Given a subspace U ∈ D, the minimum skyline of U is
+the subset of sky(U ) where no object is a skyline object in any proper subset of U . For
+instance, for the subspace {u1, u2}, the objects t6 and t7 belong to the skyline, but not
+to the minimum skyline. In particular, t6 is a skyline object in {u2} (a proper subset of
+{u1, u2}), and t7 is a skyline object in {u1}. Section 3 proves the Lossless-Compression
+Theorem which guarantees that any subspace skyline can be derived from the minimum
+skylines that the CSC stores.
+
+The idea to solve Challenge 2 (query processing) is to examine, in the CSC Storage,
+those subspaces that are subsets of the query subspace. Section 4 proves the Local-
+Comparison Theorem which allows the CSC Query Engine to omit comparing the
+objects in one minimum skyline against the objects in other minimum subspaces. This
+theorem not only improves performance, but also allows a nonblocking algorithm that
+reports results without waiting until the end of the algorithm.
+
+The idea to solve Challenge 3 (update) is to propose an object-aware update scheme.
+Section 5 proves that the fullspace skyline objects play critical roles in the CSC Update
+
+ACM Transactions on Database Systems, Vol. 37, No. 2, Article 15, Publication date: May 2012.
+
+Online Subspace Skyline Query Processing Using the Compressed Skycube
+
+15:5
+
+Engine. Based on the types of objects, the update engine triggers different process-
+ing mechanisms, and accesses the base table to retrieve new CSC objects only when
+necessary.
+
+The idea to solve Challenge 4 (initial computation) is to combine duplicate elimi-
+nation into the construction of a full skycube. In Section 6, we propose extensions to
+the existing bottom-up and top-down frameworks to efﬁciently compute a CSC from
+scratch. An optimization which builds the “skeleton CSC” from the fullspace skyline is
+also discussed.
+
+The idea to solve Challenge 5 (high-dimensional data) is to store multiple CSCs
+each corresponding to a selected subset of the complete set of attributes. Given a
+query proﬁle, which records the number of queries that are issued on each subspace,
+Section 7 formalizes the multiple CSC problem that aims to identify the set of subspaces
+such that, if a set of CSCs is built, one for each identiﬁed subspace, then a given size
+constraint is met, and the maximum number of queries in the query proﬁle is “covered”.
+The problem is proved to be NP-hard. And an efﬁcient polynomial approximation
+algorithm is proposed.
+
+The rest of this article is organized as follows. The related work is reviewed in Section
+2. The CSC Storage is described in Section 3. The CSC Query Engine is presented in
+Section 4. The CSC Update Engine is proposed in Section 5. The initial computation
+of the CSC is discussed in Section 6. The CSC extension to handle high-dimensional
+data is shown in Section 7. The experimental results appear in Section 8. Finally, the
+article concludes in Section 9.
+
+2. RELATED WORK
+The concept of skyline queries can be traced back to the 1960s, where the skyline
+was called the Pareto set, and the skyline objects were called the admissible points
+[Barndorff-Nielsen and Sobel 1966] or maximal vectors [Bentley et al. 1978]. The cor-
+responding problem in theoretical studies is also known as the maximal vector problem
+[Kung et al. 1975; Preparata and Shamos 1985]. Kung et al. [1975] published an in-
+memory divide-and-conquer algorithm for the problem and gave theoretical analysis.
+Other in-memory algorithms for the maximum vector problem were proposed in spe-
+ciﬁc settings [Stojmenovic and Miyakawa 1988; Bentley et al. 1990; Matousek 1991;
+Rhee et al. 1995]. These in-memory algorithms, however, are inefﬁcient for the skyline
+query because of the large sizes of the underlying datasets.
+
+B¨orzs¨onyi et al. [2001] proposed the ﬁrst two in-memory algorithms for the skyline
+computation. They are referred to as Block Nested Loop (BNL) algorithm and m-way
+DC algorithm, respectively. BNL is an iterated algorithm. It compares every object
+with others and produces a block of skyline objects in each iteration. The m-way DC
+algorithm is a divide-and-conquer algorithm. It divides recursively the objects into m
+partitions such that each partition can ﬁt into the main memory. It produces the ﬁnal
+skyline objects by merging the local skyline in each partition. Both BNL and m-way
+DC extend their in-memory algorithm counterparts by taking the memory size into
+consideration.
+
+BNL makes a large number of unnecessary comparisons between objects that are
+not in the skyline. To eliminate these comparisons, Chomicki et al. [2003] devised a
+Sort-Filter-Skyline (SFS) algorithm with the minimum number of iterations. Recently,
+Godfrey et al. [2005] proposed a Linear-Elimination-Sort-for-Skyline (LESS) algorithm
+with an improved time complexity. LESS also requires that the data be presorted. Its
+average time complexity is O(dn), where n is the number of objects and d the number of
+dimensions of an object. Tan et al. [2001] proposed an alternate method called Bitmap
+to map each object to a bit string, and the skyline is computed using efﬁcient bit
+operations.
+
+ACM Transactions on Database Systems, Vol. 37, No. 2, Article 15, Publication date: May 2012.
+
+15:6
+
+T. Xia et al.
+
+The aforesaid algorithms are index independent. Several index-based algorithms
+have also been proposed to provide pruning power, where only a fraction of data need
+to be visited. The ﬁrst index-based algorithm, called Index, was proposed in Tan et al.
+[2001]. Index organizes the objects based on their minimum coordinate-value among all
+the d dimensions. There are d sorted lists of objects, where the ith list contains sorted
+objects in ascending order according to the ith coordinate-values. An object appears in
+the ith list if its ith coordinate-value is the minimum among all dimensions, where ties (if
+any) are broken randomly. Index then scans the d lists sequentially and simultaneously
+from the ﬁrst entries in each list. Index provides pruning opportunities in the following
+way: If the current ﬁrst unexamined object in a list has key value larger than the
+maximum coordinate-value of some object, the remaining of the list is pruned.
+
+The Nearest-Neighbor (NN) algorithm [Kossmann et al. 2002] computes the skyline
+objects using nearest-neighbor query, where the objects are indexed using an R-tree.
+NN ﬁnds the ﬁrst nearest-neighbor (say, o1) to the origin, and divides the space into 4
+partitions intersecting at o1. Partition 2 is pruned because it is dominated by o1 and
+partition 4 contains no objects. NN recursively performs nearest-neighbor search on
+partitions 1 and 3. The Branch-and-Bound-Skyline (BBS) algorithm [Papadias et al.
+2003] is also an index-based algorithm and achieves I/O optimal. BBS performs a
+single nearest-neighbor search, visiting once the R-tree nodes that may contain skyline
+objects.
+
+Recently, Sheng and Tao [2011] proposed the ﬁrst external-memory skyline compu-
+tation algorithm that beats the blocked-nested-loop algorithm in the worst-case I/O
+time for any ﬁxed dimensionality.
+
+Several other papers have also studied skyline queries under certain speciﬁc settings.
+
+These include the following:
+
+(1) Balke et al. [2004], Wu et al. [2006], and Hose et al. [2006], where skyline queries
+
+were studied in distributed and P2P systems;
+
+(2) Lin et al. [2005], Tao and Papadias [2006], where sliding window skyline queries
+
+over data streams are investigated;
+
+(3) Chan et al. [2005] where the computation of skyline queries with partially ordered
+
+attributes was studied;
+
+(4) Huang and Jensen [2004], Huang et al. [2006a, 2006b], Morse et al. [2006], where
+
+skyline queries with road networks or moving objects were studied;
+
+(5) Sharifzadeh and Shahabi [2006] where spatial skyline queries were introduced
+to ﬁnd the skyline objects based on derived spatial attributes, namely, based on
+objects’ distances to a set of query points;
+
+(6) Jin et al. [2004] where the concept of thick skylines was introduced to increase the
+
+number of ﬁnal results returned to users;
+
+(7) Chan et al. [2006a] where the concept of k-dominant skylines was introduced to
+
+decrease the number of skyline objects in high-dimensional spaces;
+
+(8) Chan et al. [2006b] where the skyline frequency was introduced to rank the skylines
+
+so that the skyline objects can be output in top-K fashion;
+
+(9) Lin et al. [2007] where the problem of ﬁnding k representative skyline objects (top-
+k RSP) was studied to maximize the number of objects dominated by one of the k
+skyline objects.
+
+In addition, papers [Bentley et al. 1978; Buchta 1989; Godfrey 2004; Chaudhuri
+et al. 2006; Zhang et al. 2009b] studied the cardinality of the skyline under certain
+distributions of the datasets.
+
+ACM Transactions on Database Systems, Vol. 37, No. 2, Article 15, Publication date: May 2012.
+
+Online Subspace Skyline Query Processing Using the Compressed Skycube
+
+15:7
+
+ABCD
+
+ABCD
+
+ABC
+
+ABD
+
+ACD
+
+BCD
+
+ABC
+
+BCD
+
+ACD
+
+ABD
+
+AB
+
+AC
+
+AD
+
+BC
+
+BD
+
+CD
+
+AB
+
+BC
+
+CD
+
+AD
+
+BD
+
+AC
+
+DCBA
+
+A
+
+B
+
+C
+
+D
+
+(a)
+
+the skycube
+
+(b)
+
+the
+
+corresponding
+
+skylists
+
+Fig. 6.
+
+Illustration of the skycube and the skylist.
+
+2.1. Subspace Skyline and the Skycube
+Recently a more general query scenario was proposed, where queries can be made
+on different dimensionality. For example, given a set of objects with d dimensions, a
+skyline query can be made on a subset of the d dimensions. The subset of interest
+is called a subspace and the corresponding skyline query is called a subspace skyline
+query. The conventional skyline is the fullspace skyline. Fullspace skyline approaches
+are optimized for a ﬁxed set of dimensions, which may not be efﬁcient for the general
+case.
+
+Yuan et al. [2005] and Pei et al. [2005] proposed the concept of Skycube, which consists
+of all possible subspace skylines. There are 2d subspace skylines in a skycube from d
+dimensional data. Figure 6(a) shows a skycube with four dimensions. With a complete
+skycube, any subspace skyline query can be answered with minor overhead cost. Yuan
+et al. [2005] focused on the initial construction of the skycube, where computations
+can be shared by different subspace skylines. Two approaches were proposed: the
+Bottom-Up Skycube (BUS) and the Top-Down Skycube (TDS). BUS extends SFS by
+sharing d sorted lists of objects during the computation. It computes the skycube by
+levels bottom up, where lower-level cuboids are merged to form (part of) an upper-level
+parent cuboids. TDS extends DC by sharing the partitions and merging along a path of
+cuboids. In particular, a structure called a skylist is utilized in TDS. Figure 6(b) shows
+the corresponding skylists for the skycube in Figure 6(a). A skylist stores the skylines
+of a path without duplications, such that a cuboid (e.g., BC) contains only the skyline
+objects that do not appear in the skylines of its descendant cuboids (e.g., B). To compute
+the skycube, TDS constructs ( d
+⌈d/2⌉ ) skylists, and each cuboid can be computed along the
+path. However, Yuan et al. [2005] did not discuss how to maintain the skycube upon
+updates and how to balance the query and update costs.
+
+Pei et al. [2005, 2006] discussed subspace skylines from the view of query semantics.
+They provided a solution to the skyline membership query using the notion of skyline
+groups, which looks at which subspaces contain an object in the skyline. A skyline
+group (cid:5)G, U (cid:6) in subspace U is a set of objects that: (1) share the same values on U
+and are in the skyline of U ; (2) do not share any value on any other dimension u /∈ U ;
+and (3) no other object o /∈ G shares the same value with objects in G on subspace U .
+Furthermore, for a skyline group (cid:5)G, U (cid:6), a subspace V ⊆ U is a decisive subspace if:
+(1) all objects in G are in the subspace skyline of V ; (2) there is no other object outside
+G that shares the same values with objects in G on subspace V ; and (3) there is no
+V ′ ⊂ V which also satisﬁes (1) and (2). To capture the semantics of skyline objects,
+the deﬁnitions of skyline group and the decisive subspace are quite complicated and
+restricted. The following theorem holds for skyline groups and decisive subspaces.
+
+ACM Transactions on Database Systems, Vol. 37, No. 2, Article 15, Publication date: May 2012.
+
+15:8
+
+T. Xia et al.
+
+{t}, ABCD
+
+ABC
+
+ACD
+
+BCD
+
+AC
+
+CD
+
+Fig. 7. Subspaces determined by skyline groups and decisive spaces.
+
+THEOREM 2.1 [PEI ET AL. 2006]. For skyline group (G, U ), if V is a decisive subspace,
+then for any subspace V ′ such that V ⊆ V ′ ⊆ U , all objects in G are in the subspace
+skyline of V ′.
+
+For example, suppose t is a skyline group ({t}, ABC D) in a fullspace ABC D, and
+subspace AC and C D are the decisive subspaces. Then t is a skyline object on all
+subspaces satisfying Theorem 2.1, as shown in Figure 7.
+
+Theorem 2.1 provides a quick answer to skyline membership query. Suppose the
+skyline groups and the corresponding decisive subspaces are precomputed for a dataset.
+For any object in the dataset, instead of searching for all possible subspaces, we only
+need to look at the skyline groups and the decisive subspaces where the object is a
+member. It follows from Theorem 2.1 that we can immediately tell on which subspaces
+the object is an skyline object. The set of all skyline groups is also called a Skyline
+Group lattice (SG lattice). To save space, the skyline group lattice only needs to keep
+fullspace skyline objects, since all other objects are either dominated by, or sharing
+coordinate values with, fullspace skyline objects, which are not needed in answering
+skyline membership queries.
+
+Compared to the skycube, the SG lattice may have many more cuboids (i.e., skyline
+groups) than the skycube has, for one subspace may contain many skyline groups,
+especially in a dense data space. A skyline membership query can then be answered
+using the SG lattice, while an SG lattice may be inadequate for answering the subspace
+skyline queries, since it contains only the fullspace skyline objects. Pei et al. [2007]
+extended this work and proposed an efﬁcient algorithm to compute the skyline group
+lattice. Ra¨ıssi et al. [2010] further improved this work by proposing a new concept
+called closed skycubes.
+
+Tao et al. [2006] proposed an index-based method called SUBSKY to compute sky-
+lines in low-dimensionality subspaces (e.g., in subspaces of 2 dimensions), while the
+total dimensionality may be high (e.g., 10). The idea of SUBSKY is to convert all objects
+into a single value, and index the values using a B+-tree. Dellis et al. [2006] proposed
+the concept of constrained subspace skyline query, which ﬁnds subspace skylines within
+a query region. The data space is vertically partitioned, and multiple low-dimensional
+subspace indices are built. To compute the constrained subspace skyline, a threshold-
+based Skyline algorithm was proposed in Dellis et al. [2006], which merges the results
+of constrained nearest-neighbor queries on multiple indices in a synchronized manner.
+In Lee and Hwang [2011], a point-based space partitioning and result sharing sub-
+space skyline algorithm is proposed. This algorithm computes skycubes in a top-down
+fashion. A d − dimensional binary vector is used to represent relationships between re-
+gions. A SkyTree is then constructed to represent the relationships between the binary
+vectors.
+
+3. THE CSC STORAGE
+Section 3.1 presents the CSC Storage. Section 3.2 compares the CSC Storage with the
+Skylists that is proposed in the Skycube paper [Yuan et al. 2005].
+
+ACM Transactions on Database Systems, Vol. 37, No. 2, Article 15, Publication date: May 2012.
+
+Online Subspace Skyline Query Processing Using the Compressed Skycube
+
+15:9
+
+Fig. 8. Minimum subspaces.
+
+3.1. The CSC Storage and its Properties
+The key idea behind the CSC Storage is a novel concept called the minimum skyline.
+
+Deﬁnition 1. Given a subspace U , the minimum skyline of U , denoted as
+
+min sky(U), is {t|t ∈ sky(U ) and (cid:10) ∃V ⊂ U such that t ∈ sky(V )}.
+
+That is, the minimum skyline of a subspace U is the subset of skyline objects on U
+
+which are not skyline objects in any proper subset of U .
+
+Deﬁnition 2. The CSC Storage consists of (cid:5)D, sky(D) and {(cid:5)U, min sky(U )(cid:6) | U ⊂ D
+
+and min sky(U ) (cid:10)= ∅}.
+
+That is, the CSC stores, in addition to the fullspace skyline, the nonempty minimum
+skylines. For instance, for the dataset shown in Figure 2, the CSC is shown in Figure 4.
+For the fullspace, the CSC could store only min sky(D). However, we choose to store
+sky(D), because this fullspace skyline is very important in the CSC Update Engine. It
+would be inefﬁcient to recompute the fullspace skyline upon every update.
+
+THEOREM 3.1 (LOSSLESS COMPRESSION). ∀ subspace U , sky(U ) ⊆ (cid:2)V ⊆U min sky(V ).
+PROOF. ∀t ∈ sky(U ), either t ∈ min sky(U ), or ∃V ⊂ U such that t ∈ min sky(V ). So
+
+the theorem holds.
+
+Theorem 3.1 indicates that the CSC Storage is a lossless compression of the full
+
+Skycube.
+
+The “reverse” concept of the minimum skyline (for a subspace) is the minimum
+
+subspaces (for an object).
+
+Deﬁnition 3. A subspace U is a minimum subspace of an object t, if and only if
+t ∈ min sky(U ). The minimum subspaces of an object t, denoted by mss(t), is {U |U is a
+minimum subspace of t}.
+
+Given the dataset in Figure 2, the minimum subspaces for each object are shown in
+
+Figure 8.
+
+Next we prove another interesting property of the CSC: every minimum skyline
+must contain some object in sky(D). This property is important as it implies that the
+fullspace skyline plays a key role in the CSC Update Engine (Section 5). For instance,
+as long as the fullspace skyline is unchanged, no new minimum skyline will be added
+to the CSC.
+
+LEMMA 3.2. Given an object t and a subspace U ∈ mss(t), at least one of the following
+two conditions holds: (1) t ∈ sky(D); or (2) ∃t′ ∈ sky(D), such that t and t′ share the same
+values on U and U ∈ mss(t′).
+
+PROOF. Since U ∈ mss(t), it follows from Deﬁnition 3 that t ∈ sky(U ). As proved by
+Yuan et al. [2005] and Pei et al. [2005], if t ∈ sky(U ), then either: (1) t ∈ sky(D); or (2)
+∃ t′ ∈ sky(D) such that t′ shares the same values on U with t. Therefore we only need
+
+ACM Transactions on Database Systems, Vol. 37, No. 2, Article 15, Publication date: May 2012.
+
+15:10
+
+T. Xia et al.
+
+Fig. 9. The populated Skylists using our example data in Figure 2.
+
+to prove that when t /∈ sky(D), ∃ t′ ∈ sky(D) and U is a minimum subspace of t′. This is
+proved using contradiction as follows.
+
+Suppose U /∈ mss(t′). By Deﬁnition 1, since t′ ∈ sky(U ), there must exist V ⊂ U ,
+such that t ∈ sky(V ). By Deﬁnition 3, V ∈ mss(t′). Since t and t′ share the same values
+on U and V ⊂ U , they must also share the same values on V . Therefore, t ∈ sky(V ).
+Since V ⊂ U and t ∈ sky(V ), it contradicts with the assumption that U∈ mss(t), or
+equivalently t ∈ min sky(U ).
+
+THEOREM 3.3. Each minimum subspace in the CSC contains at least one object in
+
+sky(D).
+
+PROOF. Consider a subspace U and an object t ∈ min sky(U ). By Lemma 3.2, either
+t ∈ sky(D), or ∃t′ ∈ sky(D), such that t′ ∈ min sky(U ) (because t′ and t have the same
+values on U ). In both cases, min sky(U ) includes an object in sky(D).
+
+3.2. Comparison with the Skylists
+The CSC structure is also superior to the Skylists shown in Figure 6(b). Note that
+in Yuan et al. [2005], a d-dimensional skycube is divided into d/[d/2] paths (Skylists)
+during the top-down computation of the skycube. The Skylists can be used to store the
+ﬁnal results, such that there is no duplicate along a path. In addition to keeping all
+cuboids, the Skylists also contain more objects than CSC (see Theorem 3.4). Intuitively,
+the Skylists select only one of the possible descendants and so cannot avoid duplicates
+among ( d
+⌈d/2⌉ ) paths, while a CSC looks at all possible descendants and thus avoids
+duplicates in all cuboids which are supersets of the minimum subspaces.
+
+As an illustration, Figure 9 shows the Skylists computed on the data of Figure 2. The
+Skylists contain 22 objects (divided into six paths), while our CSC (shown in Figure 4)
+contains only eleven objects not including sky(D) (for fair comparison, as the Skylists
+stores an empty skyline for the fullspace).
+
+THEOREM 3.4. The CSC has strictly fewer duplicates than the Skylists.
+
+PROOF. We prove the theorem in two steps. First, we show that any object in a cuboid
+of CSC must also appear in the same cuboid of a Skylist. Given an object t and a
+subspace U ∈ mss(t), it follows from Deﬁnition 3 that ∀V ⊂ U , t /∈ sky(V ). Let P be the
+Skylist in the Skylists that contains U . By the deﬁnition of the Skylist, U is the ﬁrst
+cuboid in P such that t ∈ sky(U ). Therefore, t is stored in U in the Skylist P.
+
+Second, we show that there exist objects that appear in cuboids of the Skylists but
+not in any cuboid of a CSC. Let P be the path in the Skylists that contains only one
+
+ACM Transactions on Database Systems, Vol. 37, No. 2, Article 15, Publication date: May 2012.
+
+Online Subspace Skyline Query Processing Using the Compressed Skycube
+
+15:11
+
+Fig. 10. Algorithm QueryCSC.
+
+cuboid U . Suppose an object t is in cuboid V ⊂ U , such that t is not dominated on
+subspace U − V by any other object ∈ V . Since t is also not dominated on subspace V
+by any object not in cuboid V , t ∈ sky(U ). Since P contains only U , t is in cuboid U .
+However, in a CSC, since V ⊂ U , t is not in cuboid U .
+
+4. THE CSC QUERY ENGINE
+According to Theorem 3.1, given a subspace U , a straightforward algorithm to compute
+sky(U ) is to ﬁrst compute (cid:2)V ⊆U min sky(V ) and then remove false positives. Although
+the algorithm is already efﬁcient, as it computes the subspace skyline without checking
+the Base Table, the CSC Query Engine does even better. This section ﬁrst proposes the
+Local-Comparison Theorem, and then derives a more efﬁcient query algorithm.
+
+THEOREM 4.1 (LOCAL-COMPARISON). Given a query subspace UQ, a subspace V ⊆ UQ,
+and an object t ∈ min sky(V ), if t is not dominated by any other object in min sky(V )
+(evaluated on UQ), then t ∈ sky(UQ).
+
+PROOF. Suppose the theorem were wrong, that is, t /∈ sky(UQ). There must exists an
+object t′ which dominates t on UQ. Since V ⊆ UQ, t′ either dominates t on V , or has the
+same values as t on V . The ﬁrst case contradicts with the condition that t ∈ min sky(V ).
+For the second case, since t ∈ min sky(V ) and t = t′ on V , we can conclude that
+t′ is also in min sky(V ). The reasons are: (a) t does not dominate t′ on V because
+they are “equal”; (b) no other object may dominate t′ on V , because it would also
+dominate t on V , but t is a skyline object on V ; and (c) t′ can’t be a skyline object in a
+subspace V ′ ⊂ V , because that would make t a skyline object in V ′ as well, which in
+turn would disqualify t from belonging to min sky(V ) (Deﬁnition 1). So there exists an
+object t′ ∈ min sky(V ) that dominates t (evaluated on UQ). This contradicts with the
+assumption of the theorem.
+
+Theorem 4.1 is powerful. It enables the CSC Query Engine to compare objects only
+against the other objects in the same minimum skyline. An additional beneﬁt is that
+the query result can be reported in a nonblocking fashion. That is, after one minimum
+subspace is examined, the identiﬁed skyline objects can be reported, before the other
+minimum subspaces are examined.
+
+Based on the theorem, the following algorithm computes subspace skylines from the
+
+CSC Storage.
+
+Suppose |sky(D)| = n, the worst-case cost is O(n2), since nonfullspace skyline objects
+share the same value with the fullspace skyline objects. In practice, the cost is much
+smaller as the cuboid in CSC contains much fewer fullspace skyline objects.
+
+THEOREM 4.2. Algorithm QueryCSC returns the complete and correct skyline (see
+
+Figure 10).
+
+ACM Transactions on Database Systems, Vol. 37, No. 2, Article 15, Publication date: May 2012.
+
+15:12
+
+T. Xia et al.
+
+PROOF. Theorem 3.1 proves the completeness of the results and Theorem 4.1 proves
+
+the correctness.
+
+5. THE CSC UPDATE ENGINE
+As the objects in the Base Table are inserted/deleted/updated, the CSC Storage needs
+to be modiﬁed accordingly. This section focuses on the update case, as both insertion
+and deletion are special cases of update. Let’s use WORST to represent the object which
+has the worst values in all the dimensions. Naturally WORST is dominated by all the
+existing objects. To the CSC, inserting a new object in the Base Table is equivalent
+to updating the object from WORST; and deleting an object from the Base Table is
+equivalent to updating the object to WORST. In the experiments of Section 8.3, our
+proposed update schemes are also applied to the original Skycube to make it more
+efﬁcient.
+
+This section is organized as follows. Section 5.1 proves that there is no need to
+access the Base Table when a nonfullspace skyline object is updated. Sections 5.2 and
+5.3 differentiate the cases when the updated object is not/is in the fullspace skyline.
+Section 5.4 explains an important operation: how to identify the minimum subspaces
+of a fullspace-skyline object. Finally, Section 5.5 summarizes the update algorithm of
+the CSC.
+
+5.1. The Fullspace Skyline Theorem
+When the Base Table changes, the CSC Storage needs to keep its data up-to-date.
+Naively, the complete CSC is recomputed upon each update. Such a “blind” updating
+method is extremely inefﬁcient, as it needs to access the Base Table (disk pages) and
+the computation may also be unnecessary if the minimum skyline cuboids are not
+changed.
+
+In our CSC update scheme, accessing the Base Table is needed only if the update
+of an object may introduce new objects to a CSC, and should be completely avoided
+if otherwise. Therefore, it is crucial to decide the updates of which objects will need
+probing the Base Table for new objects in a CSC. We prove in Theorem 5.1 that, for any
+update of the object which does not belong to the fullspace skyline, disk accesses are
+not necessary. Based on Theorem 5.1, we differentiate fullspace skyline objects (sky(D))
+from others, since only the updates of objects in sky(D) may require accessing the disk.
+
+THEOREM 5.1 (FULLSPACE SKYLINE THEOREM). Given an object t /∈ sky(D), any update
+
+of t does not introduce new objects ((cid:10)= t) to CSC.
+
+PROOF. Let the updated value of t be tnew. Suppose there is no update of other objects.
+
+Given that t /∈ sky(D), we prove the theorem in two cases.
+
+If tnew /∈ sky(D), sky(D) is not changed after the update of t. In this case, we prove
+that no new cuboid is added to the CSC. Since t /∈ sky(D) and for any space U where
+t ∈ sky(U ), t shares the same values with a fullspace skyline t′ on U . Therefore, any
+object dominated by t will still be dominated by t′, and it follows that by removing
+t, no new cuboid will be added. On the other hand, since tnew /∈ sky(D), according to
+Lemma 3.2 and Theorem 3.3, for any U ∈ mss(tnew), tnew shares the same values with an
+existing fullspace skyline t′, and similarly, no new cuboid will be added. Since sky(D)
+and cuboids remain the same, it follows that any object (cid:10)= t not in the CSC cannot
+appear in any cuboid after the update of t.
+
+If tnew ∈ sky(D), we prove by contradiction. Let U ∈ mss(tnew), that is, tnew ∈ sky(U ).
+Suppose there exists a new object t′ not in the CSC sharing the same values on U with
+tnew. Thus t′ ∈ sky(U ), which is independent of t or tnew. This contradicts the assumption
+that t′ is not in the CSC before the update of t.
+
+ACM Transactions on Database Systems, Vol. 37, No. 2, Article 15, Publication date: May 2012.
+
+Online Subspace Skyline Query Processing Using the Compressed Skycube
+
+15:13
+
+5.2. Handling Updates of Objects Not in Sky(D)
+In this section, we assume t is not a fullspace skyline object, and t is updated to tnew.
+By Theorem 5.1, we can safely remove t from every cuboid U ∈ mss(t) if t is in CSC.
+To deal with tnew, there are two cases based on whether tnew is in the sky(D) or not. In
+either case, no Base Table access is needed.
+
+5.2.1. Case1: tnew /∈ sky(D). According to Lemma 3.2, any object in a cuboid U is either
+a fullspace skyline object, or its values on U overlap with some fullspace skyline object.
+Therefore, if neither t nor tnew is in the fullspace skyline (i.e., the set of fullspace skyline
+objects is not changed), all existing objects ((cid:10)= t) in the CSC remain in the same cuboids.
+To decide the minimum subspaces of the new object tnew, Lemma 5.2 and Theorem 5.3
+show that mss(tnew) is a subset of the minimum subspaces of any fullspace skyline object
+that dominates tnew.
+
+LEMMA 5.2. Given two objects t and t′ such that t and t′ share the same values on a
+
+subspace U , U ∈ mss(t) if and only if U ∈ mss(t′).
+
+PROOF. Two directions are symmetric, so we prove one direction here. If U ∈ mss(t),
+since t and t′ share the same values on U , t′ ∈ sky(U ). By Deﬁnition 3, ∃V ⊆ U ,
+V ∈ mss(t′). Since t and t′ also share the same values on V , t ∈ sky(V ). Thus U ⊆ V .
+Therefore, U = V and U ∈ mss(t′).
+
+THEOREM 5.3. Given an object t and any fullspace skyline t f . If t is dominated by t f ,
+
+then mss(t) ⊆ mss(t f ).
+
+PROOF. Let U be the subspace on which t and t f share the same values. By
+Lemma 5.2, ∀V ⊆ U , if V ∈ mss(t f ), V ∈ mss(t). Since t f strictly dominates t on
+D − U , t cannot be in the skyline of any subspace V ′, V ′ ∩ (D − U ) (cid:10)= ∅.
+
+Let us see an example using the dataset in Figure 2. Assume t9 is not in the table
+and we are about to insert t9 into the table. Since the ﬁrst object t5 dominates t9, we
+stop searching, and check mss(t5) to determine mss(t9). The minimum subspaces of t9
+are (cid:5)u1, u2(cid:6) and (cid:5)u1, u3(cid:6), as t9 overlaps with t5 on dimensions u1, u2, and u3. Therefore,
+we link t9 with those two cuboids.
+
+5.2.2. Case 2: tnew ∈ sky(D). In this case, the new fullspace skyline tnew may affect the
+existing objects in CSC. We handle this case as follows. First, object tnew is compared
+to existing skyline objects te to eliminate false positives introduced by tnew. Note that
+none of the existing skyline objects should dominate tnew in this case, otherwise it will
+be handled in Case 1. During the comparison routine, there are two subcases.
+
+(1) tnew dominates te on D. We remove any subspace U ∈ mss(te), on which te is domi-
+
+nated by tnew. If mss(te) = ∅, te is removed from CSC.
+
+(2) tnew dominates te on U ∈ mss(te) and U (cid:10)= D. We check if there is any new V ⊃ U
+and V ∈ mss(te). Since te was a skyline of U , only existing objects ((cid:10)= tnew) with the
+same values as te on U may dominate te on V ⊃ U . Therefore, te is compared with
+local objects plus tnew in the cuboid U .
+
+Next, in order to properly insert tnew into the CSC, mss(tnew) need to be determined.
+In contrast to ﬁnding mss(t), t /∈sky(D) (discussed in Case 1), computing the minimum
+subspaces of a fullspace skyline object is not trivial for the following reasons. First,
+the mss(tnew) is determined by all existing fullspace skyline objects, not just one object.
+Second, subspaces in mss(tnew) are not restricted to the existing cuboids, but could
+potentially be any subspace. In Section 5.4, we provide an efﬁcient algorithm without
+exponentially exploring all possible subspaces.
+
+ACM Transactions on Database Systems, Vol. 37, No. 2, Article 15, Publication date: May 2012.
+
+15:14
+
+T. Xia et al.
+
+Fig. 11. The updated CSC after insertion of t10.
+
+Finally, we use a running example to show how Case 2 works. Suppose t10 = (cid:5)1, 3, 1, 3(cid:6)
+is inserted into the Base Table (Figure 2). Since t5 and t9 are dominated by t10 on (cid:5)u1, u3(cid:6)
+for t5 or t9, there is no new minimum subspace V , such that V ⊃ (cid:5)u1, u3(cid:6) and u2, u4 /∈ V .
+We remove t1 from the CSC as it is strictly dominated by t10. The updated CSC after
+the insertion of t10 is shown in Figure 11.
+
+5.3. Handling Updates of Objects in Sky(D)
+In this section, we consider the updates of fullspace skyline objects. Assume t ∈ sky(D)
+is updated to tnew. Because the fullspace skyline has changed, new (subspace) skyline
+objects may be retrieved from the Base Table into the CSC.
+
+If tnew dominates t, Base Table access is still not needed, since every object dominated
+by t continues to be dominated by tnew. We simply delete t, and insert tnew into the CSC
+following the same routine as in Section 5.2, Case 2.
+
+If tnew does not dominate t, it is possible that some objects that were dominated by t
+may become skyline objects, and need to be retrieved from the Base Table. To retrieve
+these objects, we ﬁrst deﬁne the Exclusive Region (ER) of a fullspace skyline object.
+The ER of t ( /∈ D) contains objects that are dominated by t but not by any other objects
+in D. It is easy to see that only objects in t’s ER are the candidates to be retrieved. The
+insertion of the new objects follows the same routine described in the previous section.
+As Wu et al. [2007] pointed out, the cost of computing ER is quite expensive. This might
+inherently degrade the performance of the algorithm when the dimensionality grows.
+
+5.4. Identifying the Minimum Subspaces of a Fullspace Skyline Object
+Given a new object t in fullspace skyline, we need to identify mss(t) in order to insert t
+into the CSC. As we discussed in Section 5.2, subspaces in mss(t) are not restricted to the
+existing cuboids in the CSC. Straightforwardly, the minimum subspaces of a fullspace
+skyline object t can be computed by visiting all possible subspaces and comparing t
+with their skylines. This method is inefﬁcient as it examines too many subspaces.
+In this section, we propose a novel solution which efﬁciently reports the minimum
+subspaces of a fullspace skyline object without examining any cuboids. We ﬁrst deﬁne
+the nondominant dimensions, then propose Theorem 5.6, which is the basis of our
+solution.
+
+Deﬁnition 4. Given an object t and a fullspace skyline object ti, the nondominant
+
+dimensions of t with regard to ti is a dimension set Ui(t), such that:
+
+(1) For any dimension uj, if t(uj) < ti(uj), then uj ∈ Ui(t).
+(2) For the set of dimensions V = {uk | t(uk) = ti(uk)}, if ∃U ∈ mss(ti), U ⊆ V , then
+
+V ⊆ Ui(t) (i.e., ∀uk ∈ V , uk ∈ Ui(t)).
+
+ACM Transactions on Database Systems, Vol. 37, No. 2, Article 15, Publication date: May 2012.
+
+Online Subspace Skyline Query Processing Using the Compressed Skycube
+
+15:15
+
+Intuitively, Ui(t) contains those dimensions on which t is not dominated by ti. How-
+ever, when t and ti share the same values on some dimensions, the meaning of “domi-
+nate” is ambiguous. To solve this, the second condition in Deﬁnition 4 deﬁnes that only
+when t overlaps with ti on some minimum subspace of ti, the overlapping dimensions
+are the nondominant dimensions. The reason behind the second condition is that, if the
+dimensions in V (where t(uj) = ti(uj)) are not a superset of any mss(ti), then t (as well
+as ti) could never be a skyline in V . Such dimensions in V are not useful in determining
+the skyline objects. The set {Ui(t) | ti ∈ sky(D)} can be calculated during the previous
+steps of our update scheme.
+
+Given a new fullspace skyline object t, for each existing object ti in sky(D), we can
+compute Ui(t). In what follows, we ﬁrst review two properties of dominance relations
+[Chomicki 2002], and then we introduce Theorem 5.6 and Corollary 5.7. We use “t1 ≺V t2
+(t1 ⊀V t2) to denote “t1 (does not) dominate t2 on subspace V ”, and use “t1 ≡V t2” to denote
+“t1 is equal to t1 on every dimension of subspace V ”.
+
+PROPERTY 5.4. Asymmetry: ∀t, s, t ≺ s ⇒ s ⊀ t.
+
+PROPERTY 5.5. Transitivity: ∀x, y, z, (x ≺ y ∧ y ≺ z) ⇒ x ≺ z.
+
+THEOREM 5.6. Given a new fullspace skyline object t, a subspace V , and a set of
+nondominant dimensions {Ui(t) | ti ∈ sky(D)}, t ∈ sky(V ) if and only if at least one of the
+two conditions holds for all ti ∈ sky(D): (1) ∃u ∈ V ∩ Ui(t), t(u) < ti(u); or (2) V ⊆ Ui(t).
+
+PROOF. “=⇒”: We ﬁrst prove that if conditions (1) or (2) are satisﬁed, t is not dom-
+inated by any object in sky(D). For any ti ∈ sky(D), it is clear that if ∃u ∈ V ∩ Ui(t),
+t(u) < ti(u) (condition 1), then ti ⊀V t. Otherwise, condition (2) must hold. By the deﬁ-
+nition of nondominant dimensions (Deﬁnition 4), ∀u ∈ Ui(t), t ≤ ti. Since condition (1)
+fails and condition (2) holds, t ≡V ti. Thus, ti ⊀ tV . Therefore, ∀ti ∈ sky(D), ti ⊀V t.
+For any t′ /∈ sky(D), ∃s ∈ sky(D) ∪ {t} (note that t is a new fullspace skyline object by
+the assumption of this section), such that s ≺V t′ or s ≡V t′. By the asymmetry and
+transitivity properties, ∀t′ /∈ sky(D), t′ ⊀V t. Therefore, t ∈ sky(V ).
+
+“⇐=”: We prove that if t ∈ sky(V ), at least one of conditions (1) and (2) is satisﬁed.
+Since t ∈ sky(V ), for any ti ∈ sky(D), by deﬁnition either (a) ∃u ∈ V , t(u) < ti(u), or
+(b) t ≡V ti. Now we show that statements (a) and (b) correspond to conditions (1) and
+(2), respectively. If ∃u ∈ V such that t(u) < ti(u), then by Deﬁnition 4, u ∈ Ui(t). Thus
+u ∈ V ∩ Ui(t) and t(u) < ti(u). Otherwise, t ≡V ti. Since t ∈ sky(V ), ti ∈ sky(V ). By the
+deﬁnition of the minimum subspace, ∃U ∈ mss(ti) such that U ⊆ V . By Deﬁnition 4,
+V ⊆ Ui(t). Therefore, if t ∈ sky(V ), at least one of condition (1) and (2) is satisﬁed.
+
+COROLLARY 5.7 (SHARING AND MINIMAL CONDITIONS). Given a new fullspace object t, a
+subspace V , and a set of nondominant dimensions {Ui(t) | ti ∈ sky(D)}, V ∈ mss(t) if and
+only if both of the following conditions hold: (1) (Sharing) ∀ti ∈ sky(D), (∃u ∈ V ∩ Ui(t)
+such that t(u) < ti(u)) ∨ (V ⊆ Ui(t)); and (2) (Minimal) ∄V ′ ⊂ V , V ′ also satisﬁes
+condition (1).
+
+PROOF. “⇐=”: We prove if condition (1) and (2) hold, V ∈ mss(t). Since condition (1)
+holds, by Theorem 5.6, t ∈ sky(V ). By condition (2) and Theorem 5.6, ∄V ′ ⊂ V such
+that t ∈ sky(V ′). By the deﬁnition of the minimum subspace, V is a minimum subspace
+of t.
+
+“=⇒”: We prove if V ∈ mss(t), condition (1) and (2) must hold. Since t ∈ sky(V ), by
+Theorem 5.6, condition (1) holds. By the deﬁnition of the minimum subspace, ∄V ′ ⊂ V
+such that t ∈ sky(V ′). By Theorem 5.6, condition (2) also holds.
+
+According to Corollary 5.7, the mss(t) are the minimal subsets of {Ui(t) | ti ∈ sky(D)}
+(obtained from previous steps) satisfying the sharing condition. In the following
+
+ACM Transactions on Database Systems, Vol. 37, No. 2, Article 15, Publication date: May 2012.
+
+15:16
+
+T. Xia et al.
+
+discussion, we ﬁrst present our algorithm using the distinct value assumption, and we
+discuss how to drop this assumption in general cases.
+
+5.4.1. DistinctValueAssumption
+
+Deﬁnition 5 (Distinctive Value Assumption [Yuan et al. 2005]). Given a set of ob-
+jects T in d-dimensional space (D), the distinctive value assumption holds if ∀t1, t2 ∈ T
+and ∀u ∈ D, t1(u) (cid:10)= t2(u).
+
+The distinct value assumption guarantees that no two objects share the same value
+on any dimension. Under the distinct value assumption, Theorem 5.6 and Corollary 5.7
+are reduced to the following two corollaries.
+
+COROLLARY 5.8 (SKYLINE UNDER DISTINCT VALUE ASSUMPTION). Given a new fullspace
+skyline object t, a subspace V , and a set of non-dominant dimensions {Ui(t) | ti ∈ sky(D)},
+under distinct value assumption, t ∈ sky(V ) if and only if ∀Ui(t), V ∩ Ui(t) (cid:10)= ∅
+
+COROLLARY 5.9 (SHARING AND MINIMAL CONDITIONS UNDER DISTINCT VALUE ASSUMPTION).
+Given an object
+t, a subspace V , and a set of nondominant dimensions
+{Ui(t) | ti ∈ sky(D)}, under distinct value assumption, V ∈ mss(t) if and only if
+both the following conditions hold: (1) ∀Ui(t), V ∩ Ui(t) (cid:10)= ∅, and (2) ∄V ′ ⊂ V , V ′ also
+satisﬁes condition (1).
+
+Based on Corollary 5.9, computing the minimum subspaces (under the distinct value
+assumption) is now reduced to the following problem: Given a list U of itemsets, enu-
+merate all minimal itemsets, each of which shares at least one item with every itemset
+Ui ∈ U.
+
+For example, let U be {u1u2, u1u3, u2u3, u2u4}. The minimal itemsets that share at
+
+least one item with every itemset are u1u2, u1u3u4 and u2u3.
+
+This problem is challenging because a naive solution, which enumerates all possibili-
+ties by choosing one item from every itemset in U, will examine an exponential number
+of combinations. However, in practice the resulting size is much smaller because of item
+overlap. As in the previous example, there are in total 24 = 16 combinations, while the
+size of results (minimal itemsets) is only 3.
+
+Our solution is a recursive algorithm enumerating only the minimal itemsets.
+Figure 12 shows the complete algorithm FindMinimum. The idea is that we dynam-
+ically choose an object u and recursively enumerate the minimal itemsets in two cases
+based on whether they contain u or not (step 10 and step 13). In a special case, if an
+itemset only contains u, all minimal itemsets must contain u (step 2–8). If we choose
+u to be contained in the minimal itemsets, all given itemsets that contain u can be
+omitted, since the sharing condition is satisﬁed for these itemsets. To further avoid
+enumerating false positives, we introduce a ﬁlter. In general, the ﬁlter is represented
+as a logic formula F initialized to false. For all Ui which contain u, we connect other
+items in the same Ui with AND, and then those clauses are connected with OR (step 16
+and 17). To understand the rationale of the ﬁlter, we use the previous example.
+If u1 appears in the minimal itemset M, u2 (in u1u2) and u3 (in u1u3) cannot all
+appear in M. Otherwise M is not minimal, since by removing u1, M still satisﬁes the
+sharing condition. We stop exploring the path if the ﬁlter is true. The complexity of
+Algorithm 12 is O(n) where n is the output result set.
+
+Figure 13 illustrates the complete process of running our algorithm on the example.
+For clarity, the function name is omitted in every recursive call except the initial
+invocation. Finally, we point out that in the Case 1 of u2, F is set to false because of
+u2 = false. And in Case 2 of u2, the ﬁlter F is computed as follows: F = (u2 ∧ u3) ∨ (u3 ∧
+u4) = (true ∧ u3) ∨ (u3 ∧ u4) = u3 ∨ (u3 ∧ u4) = u3.
+
+ACM Transactions on Database Systems, Vol. 37, No. 2, Article 15, Publication date: May 2012.
+
+Online Subspace Skyline Query Processing Using the Compressed Skycube
+
+15:17
+
+Fig. 12. Algorithm FindMinimum.
+
+Fig. 13. An example of Algorithm FindMinimum.
+
+5.4.2. General Scenario. Now we drop the distinct value assumption, and discuss the
+general scenario where objects may share same values. We differentiate two kinds of
+nondominant dimensions Ui(t): we use U <
+i (t) to denote the nondominant dimensions
+i (t), t(u) < ti(u), and we use U =
+where ∀u ∈ U <
+i (t) to denote the nondominant dimensions
+where ∀u ∈ U =
+i (t), t(u) = ti(u), U <
+i (t) = Ui(t). Also, since t is a new fullspace
+skyline object, U <
+
+i (t) ∪ U =
+
+i (t) (cid:10)= ∅.
+
+ACM Transactions on Database Systems, Vol. 37, No. 2, Article 15, Publication date: May 2012.
+
+15:18
+
+T. Xia et al.
+
+Fig. 14. Algorithm UpdateCSC.
+
+Without the distinct value assumption, a minimum subspace V of t shares with any
+Ui(t) in two cases: (1) there is a dimension u where t is smaller than ti; or (2) there is
+a collection of dimensions V where t equals to ti and ∃U ∈ mss(ti) such that U ⊆ V .
+i ∪ U =
+Formally, this problem is deﬁned as follows: Given a list L of itemsets Ui = U <
+i ,
+enumerate all minimal itemsets Mj satisfying one of the sharing conditions: for all Ui
+and Mj, (1) Mj and U <
+
+i share at least one item; or (2) Mj is a subset of U =
+i .
+
+We extend the algorithm FindMinimum under the distinct value assumption to
+handle both sharing conditions. In general, the work ﬂow of the extended algorithm
+is the same as the recursive function FindMinimum, with modiﬁcations that take U =
+i
+into consideration. In each recursive function call with a list of itemsets U, we ﬁrst
+process U <
+1 in two cases similar to the special case algorithm FindMinimum. Let U1
+be the itemset with minimum number of total items where U <
+1 (cid:10)= ∅, we then
+process items in U =
+
+1 = ∅. If U =
+
+1 in the following two cases.
+
+—If M (cid:4) U =
+
+1 , function stops and returns, because M does not satisfy both sharing
+conditions with U1, and should be discarded. Recall that for any remaining Ui, U <
+i
+does not contain any object in M. Otherwise, it will be removed when processing U <
+i .
+i }, compare V with other itemsets
+
+—Otherwise, for all itemsets {V | M ⊆ V ∧ V ⊆ U =
+
+in U. If V satisﬁes the sharing conditions, V is output to the ﬁnal candidate pool.
+
+5.5. The UpdateCSC Algorithm
+As a summary, Algorithm UpdateCSC in Figure 14 shows the complete work ﬂow of
+the update scheme.
+
+Unless the dimensionality is very high, the size of the fullspace skyline is typically
+small compared with the total number of objects in the database. The efﬁciency of
+Algorithm UpdateCSC lies in the fact that the update of any nonfullspace skyline
+object does NOT need to access the Base Table.
+
+6. THE CSC INITIALIZATION
+We have discussed in previous sections the structure of the compressed skycube, sub-
+space skyline query processing using the CSC, and the dynamic maintenance of the
+CSC upon updates. In this section, we will focus on the initial computation of the com-
+pressed skycube structure. We can obtain the compressed skycube by scanning through
+the full skycube and removing objects from their nonminimum subspaces. Although the
+initial computation is usually processed only once, efﬁcient methods are desirable. We
+
+ACM Transactions on Database Systems, Vol. 37, No. 2, Article 15, Publication date: May 2012.
+
+Online Subspace Skyline Query Processing Using the Compressed Skycube
+
+15:19
+
+propose two such methods. The idea is to combine the duplication elimination into
+the construction of a full skycube. The ﬁrst method (see Section 6.1) uses a bottom-up
+framework in constructing a full skycube, and the second method (see Section 6.2)
+extends a top-down construction. Finally, in Section 6.3, we propose an optimization
+for both methods.
+
+6.1. Bottom-Up Construction
+Recall that in Deﬁnition 3, the minimum subspaces of a skyline object are the smallest
+subspaces where the object is in the skylines. Therefore, it is natural to construct the
+compressed skycube following a bottom-up approach. Given a d-dimensional fullspace,
+the cuboids are organized into d levels, such that i-dimensional cuboids are in level i.
+The bottom-up method builds the full skycube or the compressed skycube in a level-
+wise and bottom-up manner from level 1 to level d. Our bottom-up construction of a
+CSC adopts the framework of the Bottom-Up Skycube algorithm (BUS) [Yuan et al.
+2005]. We will ﬁrst introduce the ideas of the BUS framework, and then discuss how
+to extend the BUS algorithm to construct the CSC.
+
+6.1.1. Review of the Bottom-Up Skycube Algorithm (BUS). The BUS framework uses BNL
+[B¨orzs¨onyi et al. 2001] and SFS [Chomicki et al. 2003] (refer to Section 2) as the
+underlying skyline algorithms. Straightforward applications of traditional skyline al-
+gorithms to each cuboid computation are unnecessarily expensive for two reasons:
+(1) Each cuboid is computed from the whole dataset independently. (2) Each cuboid
+computation needs an independent sorting on the whole dataset. The BUS framework
+uses the following two sharing strategies to address the preceding issues.
+
+—Sharing Results. In this strategy, the union of child cuboids (already computed) is
+utilized to compute the parent cuboid. When computing a cuboid, a set of skyline
+objects of the cuboid can be generated from all objects in its child cuboids before
+accessing the original dataset. The beneﬁt of doing so is that the pregenerated skyline
+objects can reduce the number of dominance comparisons, since they can be used to
+prune other objects in the original dataset. This strategy is effective in the bottom-up
+framework, since all child cuboids are computed before the parent cuboid.
+
+—Sharing Sorting. The underlying skyline algorithm SFS needs to presort data based
+on an entropy function. Each subspace U can have a different entropy function
+E(t) = (cid:3)ui ∈U ln(t(ui) + 1), for the set of dimensions may be different. Therefore, to
+compute the skycube, SFS will need 2d − 1 sorting operations. In the Sharing Sorting
+strategy, BUS sorts the whole dataset d times (in nondecreasing order) based on the
+d dimensions, which can be shared by 2d − 1 cuboids, while still guaranteeing the
+correctness of the underlying skyline algorithms.
+
+In addition, the skyline objects generated from the child cuboids of subspace U are
+sorted in nondecreasing order (smaller is better) by a ﬁlter function f (t) = (cid:3)ui ∈U t(ui).
+It can be seen that if f (ti) < f (tj), then ti cannot be dominated by tj or any object
+with a larger f (·). Therefore, when comparing object t in the original dataset with a
+skyline object s, we immediately know that t is a new skyline object if f (t) < f (s). This
+optimization reduces the number of dominance tests in practice.
+
+6.1.2. OurExtensions. Unlike the bottom-up skycube algorithm that needs to compute
+and store complete cuboids for all subspaces, we only store objects in their minimum
+subspaces. By deﬁnition, objects that appear in child cuboids (or descendants) will not
+be stored in parent cuboids, and some cuboids may be empty in a CSC. During the
+computation of a CSC, we only keep nonempty cuboids. The nonempty descendants
+of a cuboid are retrieved to form a skyline set. The set of skyline objects are used as
+
+ACM Transactions on Database Systems, Vol. 37, No. 2, Article 15, Publication date: May 2012.
+
+15:20
+
+T. Xia et al.
+
+Fig. 15. Example of computing a compressed skycube in a bottom-up manner.
+
+Fig. 16. Algorithm BU SC SC for bottom-up construction of a CSC.
+
+ﬁlters, and if no new skyline object is found, the cuboid is discarded from the CSC.
+Consider the sample dataset in Figure 2 as an example. After computing cuboids in
+the ﬁrst two levels (level 1 and 2), we have six nonempty cuboids shown in Figure 15.
+Empty cuboids in these two levels are discarded. To compute the cuboid (cid:5)u2, u3, u4(cid:6),
+we retrieve the descendant cuboids (cid:5)u2(cid:6), (cid:5)u3(cid:6), (cid:5)u4(cid:6) in the lower levels to generate ﬁlter
+skyline objects t5 and t6. Notice that t4 and t7 are discarded as they are dominated by
+t5 on subspace (cid:5)u2, u3, u4(cid:6). The process of computing ﬁlter skyline objects is the same
+as our query process algorithm QueryCSC (Figure 10) discussed in Section 4. After
+scanning through the original dataset, the cuboid (cid:5)u2, u3, u4(cid:6) is discarded as there is no
+new skyline object found.
+
+For completeness, we present the modiﬁed BUS algorithm in Figure 16. The com-
+plexity of this algorithm is the same as the original BUS algorithm in Yuan et al.
+[2005].
+
+6.2. Top-Down Construction
+In this section, we adopt the Top-Down Skyline (TDS) algorithm [Yuan et al. 2005] to
+construct the compressed skycube. We ﬁrst review the TDS algorithm for computing
+the skylists. We then discuss how to convert skylists to form a CSC.
+
+ACM Transactions on Database Systems, Vol. 37, No. 2, Article 15, Publication date: May 2012.
+
+Online Subspace Skyline Query Processing Using the Compressed Skycube
+
+15:21
+
+Fig. 17. Algorithm SkylistsToCSC.
+
+6.2.1. Review of Top-Down Skyline (TDS) Algorithm. The major component of TDS is the
+Shared Divide-and-Conquer (SDC) algorithm. While DC computes one cuboid at a time,
+the SDC computes a number of related cuboids at a time, using the sharing principles of
+sharing-partition-and-merging. Both the divide step and the merge step can be shared
+between a parent cuboid and a child cuboid.
+
+(1) Shared Divide. Note that the DC algorithm computes the median value on some
+dimension and (recursively) divides the input data on the same dimension in the
+divide step. Clearly, to compute skylines for a child cuboid U and a parent cuboid
+V (U ⊂ V ), we can divide the input data on any dimension u, such that u ∈ U ∩ V .
+The partitions in both computations are the same. Thus, the divide step can be
+shared.
+
+(2) Shared Merge. In the merge step, DC merges the two partitions (divided on di-
+mension u) by recursively dividing the rest of the dimensions (U − u or V − u) and
+merging the subpartitions. Also, since V − u of the parent cuboid contains U − u of
+the child cuboid, the merge step of the parent cuboid V can be shared with that of
+the child cuboid U . We will use an example shortly to illustrate the shared merge.
+
+In general, TDS divides the skycube into several skylists (cf. Section 2.1), and applies
+the SDC algorithm to the skylists. After the skylists are computed, TDS generates the
+whole skycube from the skylists.
+
+6.2.2. Converting Skylists to a CSC. To build a CSC in a top-down manner, we use the
+TDS framework to compute the skylists. To build the compressed skycube from the
+skylists, the idea is to add one skylist at a time to a CSC. The objects already in a CSC
+are guaranteed to satisfy the minimum subspace requirement within the cuboids in
+the CSC. Figure 17 shows our algorithm. When adding a skylist, we check the cuboids
+in it from level 1 to the head of the list. Note that the skylists select only one of the
+possible descendants and cannot avoids duplicates among d/[d/2] paths, while the CSC
+looks at all the possible descendants and thus avoids duplicates in all cuboids which
+are supersets of the minimum subspaces. Therefore, for each cuboid u, there are two
+tasks: (1) Remove any object from u that already appears in cuboids v ⊂ u in the current
+CSC (in steps 5, 6, and 7, note that we use set difference in the algorithm). (2) Remove
+
+ACM Transactions on Database Systems, Vol. 37, No. 2, Article 15, Publication date: May 2012.
+
+15:22
+
+T. Xia et al.
+
+any object from v ⊃ u in the CSC that appears in u after the ﬁrst task (in steps 8 and
+9), and remove a cuboid from the CSC if the cuboid is empty (step 10). Notice that if
+cuboid u becomes empty in the ﬁrst task (step 7), the second task for u can be safely
+skipped, since all objects in u already conform to the minimum subspace requirement
+in the current CSC. Finally, we only add nonempty cuboids in the skylist to the CSC
+(step 11). The operation of set difference can be efﬁciently implemented by bitmap and
+bit operations.
+
+Let the number of skylist be N, in the worst-case scenario, the comlexity of the
+
+algorithm is O(N ∗ 2d).
+
+6.3. Optimization: Constructing a CSC from a Fullspace Skyline
+Both the bottom-up and top-down methods need to scan through the original dataset
+multiple times. This is not necessary. Recall that in Section 3, Lemma 3.2 and Theo-
+rem 3.3 tell us that: (1) each cuboid contains at least one fullspace skyline object, and
+(2) a nonfullspace skyline object must share values with a fullspace skyline object on
+the minimum subspaces. Therefore, during the construction of a CSC, that is, when
+deciding whether a cuboid is not empty, only the fullspace skyline objects are needed.
+We can therefore avoid scanning the original data multiple times by only using the
+fullspace skyline objects to construct a CSC. All other skyline objects can be populated
+later in one scan of the original data.
+
+Our optimization works as follows. We ﬁrst compute the fullspace skyline objects
+from the original dataset. This step can be implemented by any existing skyline algo-
+rithm (which normally scans through the original dataset once or a few times during
+computation). Note that in the top-down construction, computing the fullspace skyline
+objects is naturally the ﬁrst step. Then we apply the bottom-up or top-down methods
+only on the fullspace skyline. In general, the size of a fullspace skyline is much smaller
+than that of the whole dataset. Finally, after we construct the “skeleton” of a CSC, we
+scan through the original dataset one more time to ﬁll in other skyline objects. This
+can be done efﬁciently. For each object t, we compare it with the fullspace skyline to
+ﬁnd the ﬁrst object t f ≺ t. As we showed before, the minimum subspaces of t share the
+same values with the minimum subspaces of t f .
+
+7. THE HIGH-DIMENSIONAL EXTENSION OF THE CSC
+A compressed skycube is expected to be much smaller than a full skycube. However,
+the CSC structure still suffers the curse of dimensionality. In particular, when the
+dimensionality is high, the CSC structure may become space inefﬁcient, for the number
+of subspaces is exponential to the number of dimensions. What if we do not have enough
+space in the main memory to build a CSC to support high-dimensional data?
+
+One way to solve this problem is to build multiple smaller CSC structures, called
+“subspace CSCs”, each of which corresponds to a subset of attributes. This reduces the
+total size exponentially. For example, with a 12-dimensional dataset, the total size of
+three subspace CSCs, corresponding to three nonoverlapping 4-dimensional subspaces,
+is usually much smaller than the original CSC for the 12-dimensional space. Clearly,
+multiple subspace CSCs may not cover all subspace skyline queries. To answer a rare
+query that is not supported by the set of CSCs, the original dataset should be examined.
+Since the beneﬁt of using a CSC is to quickly answer as many subspace skyline queries
+as possible, without scanning the original dataset, we would like to determine which
+subspaces should be selected to construct CSCs, to serve the largest possible number of
+queries. A query proﬁle is a collection of subspace skylines associated with an expected
+number of queries on each subspace skyline. In this section, we introduce the workload-
+driven CSC problem based on a given query proﬁle. The CSC Query Proﬁler collects the
+query proﬁle; the CSC Reorganizer is triggered when the size constraint of the query
+
+ACM Transactions on Database Systems, Vol. 37, No. 2, Article 15, Publication date: May 2012.
+
+Online Subspace Skyline Query Processing Using the Compressed Skycube
+
+15:23
+
+proﬁle is exceeded, then the CSC Reorganizer rebuilds the multiple CSCs based on the
+updated query proﬁle.
+
+Section 7.1 provides a motivating example of the workload-driven CSC problem.
+Section 7.2 formulates the problem and shows that it is NP-hard. Section 7.3 presents
+a polynomial-time approximation algorithm.
+
+7.1. Motivating Example
+
+Example 7.1. This example motivates the concept of subspace CSC. Consider an
+NBA dataset with dimensions indicating points(P), rebounds(R), assists(A), foul(F),
+play minutes(M), free throws(T), and some other attributes. Over the past month, a
+collected query proﬁle contains the following subspace skyline query distribution:
+
+—200 thousand skyline queries over P (i.e., {points})
+—150 thousand skyline queries over PR (i.e., {points, rebounds})
+—100 thousand skyline queries over PA
+—100 thousand skyline queries over RA
+—50 thousand skyline queries over AFM
+—5 thousand skyline queries over TPM
+
+Since the query proﬁle mentioned six attributes, a 6-dimensional CSC can support
+all the 605 thousand queries. However, the size of this CSC may be too big (bigger than
+some user-speciﬁed size constraint B).
+
+Alternatively, one can maintain ﬁve CSCs, one for each subspace mentioned in the
+proﬁle (not including P, which is a subset of PR). However, the size may still be too big.
+The goal of the workload-driven CSC problem is to determine a set of subspaces so as
+to build a subspace CSC on each of them, with a total size within some constraint B, and
+covering the maximal number of distinct queries in the query proﬁle. For instance, the
+best solution might be to construct two CSCs on PRA and AFM, to cover 600 thousand
+out of 605 thousand queries.
+
+In the worst-case scenario, if there are many queries and one query in particular is
+especially expensive, CSC may not be built for this particular query. But, in general,
+the more distinct queries covered by CSC, the better the performance.
+
+Notice that a subspace chosen to build a CSC on (e.g., PRA) may not be one of the
+given query subspaces, but should be the union of some given query subspaces (e.g.,
+PRA is the union of PR and PA).
+
+7.2. Problem Formulation
+Let there be a query proﬁle (Q, q()), where Q is a set of subspaces for which sub-
+space skyline queries have been issued, and for each D ∈ Q, q(D) is the number
+of times the subspace skyline query on D was issued. For instance, in Example 7.1,
+Q = {P, P R, P A, RA, AF M, T P M}, q(P)=200, q(P R)=150, etc.
+
+Let there be a size estimation function s(), deﬁned for an arbitrary subspace (not
+necessarily in Q). For each subspace D, s(D) could be accurately calculated by actually
+computing the subspace CSC of D, but should in practice be estimated, via a combina-
+tion of sampling, scaling, and comparing with the sizes of previously computed CSCs.
+The detailed discussions are beyond the scope of this article.
+
+Given a set W of subspaces (imagine a subspace CSC is built for each subspace in
+W), the size, s(W), (i.e., total size of the CSCs) and proﬁt, p(W), (i.e., total number of
+queries covered) are deﬁned next.
+
+s(W) = (cid:4)
+
+s(D).
+
+D∈W
+
+ACM Transactions on Database Systems, Vol. 37, No. 2, Article 15, Publication date: May 2012.
+
+15:24
+
+T. Xia et al.
+
+Note that s() is overloaded to deﬁne the size of both a single subspace D and a set of
+subspaces W.
+
+p(W) = SU M{q(D)|D ∈ Q and ∃D′ ∈ W such that D ⊆ D′}.
+
+For instance, in Example 7.1, p({P A, T P M}) = q(P)+q(P A)+q(T P M) = 200+100+5 =
+305. Intuitively, if two CSCs are built, over the subspaces PA and TPM, respectively,
+the “proﬁt” is that 305 thousand queries in the proﬁle are covered.
+
+Deﬁne S as the set of unions of subspaces in Q that satisfy the size constraint. That
+
+is:
+
+S = {∪Q′|Q′ ⊆ Q, Q′ (cid:10)= ∅, and s(∪Q′) ≤ B}.
+
+Our goal is to select a subset S∗ ⊆ S, where no set in S∗ is a proper subset of another
+set in S∗, such that the proﬁt p(S∗) is maximized, and the size s(S∗) does not exceed a
+given constraint B. More formally, we have the following.
+
+The Workload-driven-CSC (WCSC) problem is to ﬁnd a subset S∗ ⊆ S that satisﬁes
+
+the following requirements:
+
+(1) No proper subset. No set in S∗ is a proper subset of another set in S∗.
+(2) Size constraint. s(S∗) ≤ B.
+(3) Maximization. p(S∗) is maximum among all possible selections of S∗ that satisﬁes
+
+the no-proper-subset and size constraint requirements.
+
+We note that when the elements in S are disjoint pairwise, then the problem is exactly
+the 0/1 knapsack problem which is NP-hard. Thus WCSC is also NP-hard. However, the
+standard Polynomial-Time Approximation Scheme (PTAS) for the knapsack problem
+does not apply to WCSC because of the “no proper subset” constraint. We present a
+polynomial-time approximation algorithm (polynomial to |S|) for WCSC in the next
+section.
+
+7.3. Polynomial-Time Approximation
+For ease of presentation, we deﬁne the notion of feasible. Let c be a subset of S. We
+say that c is feasible if c satisﬁes the “no proper subset” and the “size” constraints. In
+addition, a subspace i is feasible to c, if i (cid:10)∈ c and c ∪ {i} is feasible.
+
+The algorithm is presented in Figure 18.
+The algorithm has three phases.
+The ﬁrst phase (steps 4–7) derives S, the set of unions of all subspaces in Q, where
+every union should satisfy the size constraint. Any result of the WCSC problem is a
+subset of S.
+
+The second phase (steps 9–15) derives C, the candidate solutions of size no more
+
+than k.
+
+The third phase (steps 17–24) repeatedly expands each c ∈ C by making two greedy
+choices at each step. To choose a candidate c to expand, the algorithm greedily chooses
+the one with the largest proﬁt-size ratio. To expand by choosing a subspace i ∈ S to
+add to c, the algorithm chooses the subspace with the largest proﬁt-size ratio as well.
+The complexity of the algorithm is O(|S|k+1). Since k is a constant, the complexity is
+
+polynomial to |S|.
+
+8. EXPERIMENTAL EVALUATION
+We present in this section experimental results on performance of constructing and
+querying CSC and Workload-Driven CSC structures. We compare the running time
+of the CSC with that of the original skycube [Yuan et al. 2005]. We implemented our
+experiments in Java, running on a PC with P4 2.66 GHz processor and 1GB main
+memory. We used three of the most popular synthetic benchmark datasets commonly
+
+ACM Transactions on Database Systems, Vol. 37, No. 2, Article 15, Publication date: May 2012.
+
+Online Subspace Skyline Query Processing Using the Compressed Skycube
+
+15:25
+
+Fig. 18. Algorithm Approximate W orkload Driven C SC.
+
+used for evaluating skyline queries. They are independent (distribution), anticorrelated
+(distribution) and correlated (distribution). Details of how these datasets are generated
+can be found in B¨orzs¨onyi et al. [2001]. In particular, in each dataset, 20% of the objects
+overlap with another object on a random subspace. The dimensionality d of the datasets
+varies in the range from 4 to 8, and the cardinality varies in the range from 100,000 to
+500,000. The default dimensionality is six and the default cardinality is 300,000.
+
+The skycube is constructed using the Top-Down Skyline algorithm (TDS). As shown
+in Yuan et al. [2005], TDS outperforms the Bottom-Up Skyline algorithm (BUS) in most
+cases, and is regarded the best algorithm to compute skycubes at the present time.
+Since TDS is an in-memory algorithm, to achieve a fair comparison, we carried out all
+of our experiments in the main memory without using external memories. Our previous
+analysis of the disk-based scenario is also applicable to the in-memory scenario, since
+accessing the whole dataset is much more costly than accessing only the skyline objects.
+In the rest of this section, we will ﬁrst show the storage advantage of CSC over skycube,
+followed by query performance using a CSC. We then compare update processing on a
+CSC and on a skycube. Finally, we compare the performance of workload-driven CSC
+between solutions obtained from the polynomial-time approximation algorithm and
+the optimal solutions.
+
+ACM Transactions on Database Systems, Vol. 37, No. 2, Article 15, Publication date: May 2012.
+
+15:26
+
+T. Xia et al.
+
+(a) independent
+
+(b) anti-correlated
+
+(c) correlated
+
+Fig. 19. Comparing storage by varying dimensionality.
+
+8.1. Storage Comparison
+We ﬁrst compare the storage of CSC to Skycube, showing how much storage space CSC
+can save. We construct a CSC from a given skycube by removing redundant objects
+based on the concept of minimum subspaces. The storage size is computed by summing
+up the number of all objects stored in each cuboid.
+
+Figure 19 shows the storage comparison on different dimensionality. Notice that
+we use a logarithmic scale to reﬂect the exponential effect of the dimensionality. For
+
+ACM Transactions on Database Systems, Vol. 37, No. 2, Article 15, Publication date: May 2012.
+
+Online Subspace Skyline Query Processing Using the Compressed Skycube
+
+15:27
+
+the independent and anticorrelated datasets, the number of the skyline objects in a
+CSC and the number of skyline objects in a skycube both increase as dimensionality in-
+creases, but the CSC outperforms the skycube in as much as an order of magnitude. The
+number of skyline objects in the anticorrelated dataset increases dramatically as di-
+mensionality increases, and so we only show the evaluation results of anticorrelated on
+dimensionality of d < 8 in our experiments. For correlated performance in Figure 19(c),
+CSC has a relatively stable performance in a small range. This is because the number
+of distinct skyline objects in correlated data does not increase exponentially in dimen-
+sionality. The effect of duplicate elimination is most obvious for correlated data, as the
+CSC is smaller than the skycube by more than one order of magnitude.
+
+Figure 20 shows the storage comparison on the ﬁxed dimensionality of six with differ-
+ent cardinality. Again, because of fewer duplicates, CSC is less affected by cardinality
+change than skycube. CSC uses less storage than skycube by at least 70% in size for all
+data distribution. The advantage in the storage size of CSC provides a solid ground for
+efﬁcient and scalable processing of updates. We will show the experimental evidence
+in Section 8.3.
+
+8.2. Query Performance
+Both the skycube and CSC structures can efﬁciently support skyline queries for arbi-
+trary combinations of dimensions by precomputing certain information. It is therefore
+more interesting to compare update performance of CSC with skycube (see in Sec-
+tion 8.3). Nevertheless, in this section we show that the query time for CSC is indeed
+small, ranging from a fraction of a millisecond to a fraction of a second.
+
+We compute the average query processing time of 100 randomly selected subspace
+skyline queries. The query is performed without using any query buffer. That is, for
+each query, we compute the results from the CSC. Since a correlated dataset contains
+very few skyline objects (fewer than 100 objects in all cases), the size of the CSC is
+small. Experimental results show that the query time on correlated datasets is very
+small, only in a neighborhood of a fraction of a millisecond. Therefore, we will only
+show the query performance of CSC on independent and anticorrelated datasets.
+
+Figure 21 shows the query performance of the CSC by varying the dimensionality,
+and Figure 22 shows that of the CSC by varying the cardinality of the objects. Since
+querying on the skycube is just fetching the cuboids and does not involve any compu-
+tation, we omit its query time in our ﬁgures. In general, query processing of the CSC is
+very fast (less than a second in most cases). This is due to the local-comparison prop-
+erty discussed in Section 4. Since the number of objects in each cuboid of the CSC is
+greatly reduced, as shown in previous experiments, the number of comparisons within
+a cuboid is small, which leads to more efﬁcient query processing. Note that we use
+“milliseconds” for independent and “seconds” for anticorrelated. The query response
+time on anticorrelated is larger than that on independent, because of the much larger
+size of the CSC on anticorrelated.
+
+8.3. Update Performance
+We compare in this section the update support of CSC and skycube. We divide our
+experiments into two parts. The ﬁrst part shows the improved performance using the
+object-aware update scheme. The second part shows that CSC can efﬁciently execute
+the object-aware update scheme. Each object is updated in one dimension at a time
+as follows. We randomly choose a dimension of the object and randomly generate a
+value for that dimension. Again, as in the previous section, we only show the results
+on independent and anticorrelated.
+
+To see the effect of the object-aware update scheme, we randomly choose an object to
+update from all objects. As a result, not all updated objects may affect a CSC/skycube.
+
+ACM Transactions on Database Systems, Vol. 37, No. 2, Article 15, Publication date: May 2012.
+
+15:28
+
+T. Xia et al.
+
+(a) independent
+
+(b) anti-correlated
+
+(c) correlated
+
+Fig. 20. Comparing storage by varying cardinality.
+
+We call this scenario a “general update”. We implement the object-aware scheme on a
+CSC and the naive update scheme on a skycube. Upon each update of an object, the sky-
+cube is computed from scratch. Figure 23 shows the general update by varying the
+dimensionality, and Figure 24 shows that by varying the cardinality. As expected, the
+CSC update outperforms the skycube update by several orders of magnitude. This
+is because our object-aware scheme updates CSC incrementally and avoids many
+unnecessary computations when an object’s update does not affect the CSC structure.
+
+ACM Transactions on Database Systems, Vol. 37, No. 2, Article 15, Publication date: May 2012.
+
+Online Subspace Skyline Query Processing Using the Compressed Skycube
+
+15:29
+
+(a) independent
+
+(b) anti-correlated
+
+Fig. 21. Effect of dimensionality on query.
+
+(a) independent
+
+(b) anti-correlated
+
+Fig. 22. Effect of cardinality on query.
+
+(a) independent
+
+(b) anti-correlated
+
+Fig. 23. Comparing general updates by varying dimensionality.
+
+As we see in the ﬁgures, recomputing the skycube is extremely inefﬁcient, and the
+cost increases dramatically with the increase of the dimensionality and cardinality of
+objects.
+
+In the next set of experiments, we randomly choose a fullspace skyline object to up-
+date, such that each update changes the CSC/skycube structure. We call this scenario
+a “skyline update”. By eliminating false updates, which do not trigger any computation
+on CSC, we show how efﬁciently our CSC executes the object-aware scheme. For a
+
+ACM Transactions on Database Systems, Vol. 37, No. 2, Article 15, Publication date: May 2012.
+
+15:30
+
+T. Xia et al.
+
+(a) independent
+
+(b) anti-correlated
+
+Fig. 24. Comparing general updates by varying cardinality.
+
+(a) independent
+
+(b) anti-correlated
+
+Fig. 25. Comparing skyline update by varying dimensionality.
+
+(a) independent
+
+(b) anti-correlated
+
+Fig. 26. Comparing skyline update by varying cardinality.
+
+fair comparison, the skycube is not computed from scratch upon each update. Instead,
+we ﬁrst retrieve the candidate objects from the dataset if necessary, and then compute
+the skycube using existing objects in the skycube plus the new ones. Figure 25 shows the
+skyline update by varying the dimensionality and Figure 26 shows that by varying the
+cardinality of the objects. Even though skycube is now computed from a much smaller
+
+ACM Transactions on Database Systems, Vol. 37, No. 2, Article 15, Publication date: May 2012.
+
+Online Subspace Skyline Query Processing Using the Compressed Skycube
+
+15:31
+
+(a) independent
+
+(b) anti-correlated
+
+Fig. 27. Using update scheme by varying dimensionality.
+
+(a) independent
+
+(b) anti-correlated
+
+Fig. 28. Using update scheme by varying cardinality.
+
+dataset, CSC still outperforms skycube by more than one order of magnitude. This
+is due to the expensive cost of cuboid computation in skycube. In our CSC, existing
+cuboids are not recomputed. Instead, we only recompute the minimum subspaces of
+the affected objects. Since the CSC is a concise structure and maintains many fewer
+objects in each cuboid than the skycube, the amount of computation is greatly reduced.
+Finally, we apply our update scheme to both the skycube and the CSC, and the results
+are shown in Figure 27 and Figure 28. Compared to the performance in Figure 25 and
+Figure 26, updating the original skycube becomes more efﬁcient due to our update
+scheme. However, updating a skycube is still much less efﬁcient than updating a CSC,
+because we need to maintain many more objects in the skycube and each cuboid needs
+to maintain the complete skyline.
+
+8.4. Construction Comparison
+In this section, we compare the performances of the CSC initial computations. CSC-
+BUS denotes the bottom-up constructions, and CSC-SKYLIST represents the top-down
+construction of CSC from skylists. As we noted from all ﬁgures, CSC-BUS outperforms
+CSC-SKYLIST in most cases. This is because in CSC-BUS, skyline objects are only
+kept in their minimum subspaces/cuboids and the number of objects involved in the
+construction is signiﬁcantly less than the whole skycube. For CSC-SKYLIST, the cost
+is very close to the whole skycube construction, since skylists are built in the same way
+which accounts for the majority of the cost. Therefore, we apply our optimization on the
+
+ACM Transactions on Database Systems, Vol. 37, No. 2, Article 15, Publication date: May 2012.
+
+15:32
+
+T. Xia et al.
+
+)
+c
+e
+s
+(
+ 
+e
+m
+T
+
+i
+
+250
+
+200
+
+150
+
+100
+
+50
+
+0
+
+)
+c
+e
+s
+(
+ 
+e
+m
+T
+
+i
+
+30
+
+25
+
+20
+
+15
+
+10
+
+5
+
+0
+
+)
+c
+e
+s
+(
+ 
+e
+m
+T
+
+i
+
+350
+
+300
+
+250
+
+200
+
+150
+
+100
+
+50
+
+0
+
+CSC-BUS
+
+CSC-SKYLIST
+
+CSC-BUS-OPT
+
+4
+
+5
+
+6
+
+7
+
+Dimensionality
+
+(a) independent
+
+CSC-BUS
+
+CSC-SKYLIST
+
+CSC-BUS-OPT
+
+4
+
+5
+
+6
+
+7
+
+Dimensionality
+
+(b) anti-correlated
+
+CSC-BUS
+
+CSC-SKYLIST
+
+CSC-BUS-OPT
+
+4
+
+5
+
+6
+
+7
+
+Dimensionality
+
+(c) correlated
+
+Fig. 29. Comparing skyline construction by varying dimensionality.
+
+CSC-BUS method, labeled as CSC-BUS-OPT. Figure 29(a) and Figure 30(a) show the
+performances on independent Dataset, Figure 29(b) and Figure 30(b) show on correlated
+Dataset, and Figure 29(c) and Figure 30(c) show on anticorrelated Dataset. CSC-BUS-
+OPT builds the CSC skeleton from fullspace skyline and scan the dataset only twice
+(one for computing the fullspace skyline and one for populating the nonfullspace skyline
+objects). As we can see from Figure 29 and Figure 30, CSC-BUS-OPT outperforms all
+other methods due to the reduced number of objects involved in the construction and
+dataset scans. This is especially obvious on the correlated dataset since the fullspace
+skyline is relatively very small compared to the whole dataset, while the three methods
+perform similarly on anticorrelated dataset since the magnitude of skyline objects is
+about the same as the whole dataset.
+
+8.5. Workload-Driven CSC
+In this section, we will compare the number of queries served by (a) the optimal solution;
+(b) Approximate Workload Driven CSC; and (c) a simple greedy algorithm, on different
+dimensionality. We will also compare their time complexity.
+
+To perform numerical analysis on performance of our approximation algorithm, it
+is desirable to compare its query coverage and running time with that of the optimal
+solutions to WCSC. In addition, we will also compare with a simple greedy algorithm.
+
+ACM Transactions on Database Systems, Vol. 37, No. 2, Article 15, Publication date: May 2012.
+
+Online Subspace Skyline Query Processing Using the Compressed Skycube
+
+15:33
+
+CSC-BUS
+
+CSC-SKYLIST
+
+CSC-BUS-OPT
+
+1
+
+2
+
+3
+
+4
+
+5
+
+Cardinality
+
+(a) independent
+
+CSC-BUS
+
+CSC-SKYLIST
+
+CSC-BUS-OPT
+
+100
+
+200
+
+300
+
+400
+
+500
+
+Cardinality
+
+(b) anti-correlated
+
+CSC-BUS
+
+CSC-SKYLIST
+
+CSC-BUS-OPT
+
+)
+c
+e
+s
+(
+ 
+e
+m
+T
+
+i
+
+200
+
+180
+
+160
+
+140
+
+120
+
+100
+
+80
+
+60
+
+40
+
+20
+
+0
+
+)
+c
+e
+s
+(
+ 
+e
+m
+T
+
+i
+
+25
+
+20
+
+15
+
+10
+
+5
+
+0
+
+)
+c
+e
+s
+(
+ 
+e
+m
+T
+
+i
+
+160
+
+140
+
+120
+
+100
+
+80
+
+60
+
+40
+
+20
+
+0
+
+100
+
+200
+
+300
+
+400
+
+500
+
+Cardinality
+
+(c) correlated
+
+Fig. 30. Comparing skyline construction by varying cardinality.
+
+Finding the optimal solutions to WCSC may only be doable on instances of moderate
+sizes (i.e., with low dimensions) because of its NP-hardness.
+
+We note that the standard dynamic programming methods to obtain optimal solu-
+tions for the knapsack problem do not work for WCSC because of the “no proper subset”
+constraint. We will instead perform an exhaustive search as follows: Enumerate all pos-
+sible combinations of subspaces, calculate the proﬁt of each combination, and choose
+the optimal solution from them.
+
+The simple greedy algorithm ﬁrst sorts all the subspaces according to the proﬁt-size
+ratio, that is, according to pro f it/size, then greedily chooses feasible subspaces with
+the largest proﬁt-size ratio to form a feasible solution.
+
+In the experiment in this section, the physical memory size is 4GB. We set a memory
+constraint to be 50% of the space required for storing the whole CSC, although the size
+constraint should be smaller if the number of dimensions is higher. An exponential
+function to the dimension of subspace is used to generate the size of each subspace
+CSCs, that is, s = (1 + rand(0, 1)) ∗ ed. The number of queries is randomly generated
+from 0–200 on each combination of subspaces.
+
+Figure 31 depicts the numerical results with dimensionality ranging from 4 to
+8, where the running-time ﬁgure is under logarithm. The performance of Approxi-
+mate Workload Driven CSC depends on the value of k, where k should be set to a
+relatively small value to obtain approximation solutions in reasonable time. In our
+
+ACM Transactions on Database Systems, Vol. 37, No. 2, Article 15, Publication date: May 2012.
+
+15:34
+
+T. Xia et al.
+
+(a)
+
+(b)
+
+Fig. 31. Performance comparisons on different dimensionality. The dashed rectangles in (a) represent the
+best solutions we obtained before the program used up 4GB main memory of the underlying computer. The
+dashed line in (b) indicates the logarithm of the expected running time for achieving optimal solutions.
+
+experiments we chose k = 2 and k = 3. At dimensionality of 4 and 5, setting k = 3
+yields solutions that are close to being optimal. At dimensionality of 6, the approx-
+imation ratio can reach as high as 93.6% when k = 2 and 99.6% when k = 3. When
+dimensionality grows higher, it is almost impossible to get an optimal solution because
+of the exponential increase of time complexity. We ran our brute-force algorithm for
+days trying to obtain the optimal solution for dimensionality of 7 and 8. Unfortunately,
+the program ran out of memory without producing optimal solutions. The dashed rect-
+angles in Figure 31(a) represent the best results before the program used up the main
+memory. We also observe that the simple greedy algorithm, although fast, performs
+poorly. For example, at dimensionality of 8, it only serves about 7% of the queries
+servable by the 2-phase approximation algorithm. The reason is that subspace CSCs
+that can only serve small number of queries may have large pro f it/size. These poor
+choice of subspace CSCs are actually selected by the simple greedy algorithm, keeping
+most of the good candidates from being selected because of the “no proper subset”
+constraint.
+
+9. CONCLUSIONS
+In this article, we propose the Compressed Skycube (CSC) System, to efﬁciently sup-
+port online ad hoc subspace skyline queries. The CSC Storage Engine uses a lossless
+compression of the full Skycube that stores the skyline result for all subspaces. The
+CSC Query Engine delivers subspace skyline query result only by examining the CSC
+Storage, without examining the Base Table. A nonblocking query algorithm is given,
+based on the Local-Comparison Theorem. The CSC Update Engine uses an object-
+aware update scheme which is both incremental and scalable. Although the update
+scheme can be easily modiﬁed to apply to the Skycube, the efﬁciency is hindered by
+the inherent drawbacks of the Skycube. Our extensive experiments show that the CSC
+structure with the object-aware update scheme outperforms the Skycube structure on
+update support by several orders of magnitude. In the experiments, we also showed
+that the CSC structure only uses about 10% disk space needed by the Skycube. Finally,
+we dealt with the dimensionality curse by proposing a workload-driven, multiple CSC
+solution. As the problem is NP-hard, we devised a polynomial-time approximation al-
+gorithm with a small approximation ratio. Our experiments showed that the number of
+queries served by the approximation algorithm is close to that by the optimal solution.
+
+ACM Transactions on Database Systems, Vol. 37, No. 2, Article 15, Publication date: May 2012.
+
+Online Subspace Skyline Query Processing Using the Compressed Skycube
+
+15:35
+
+REFERENCES
+
+AGARWAL, S., AGRAWAL, R., DESHPANDE, P., GUPTA, A., NAUGHTON, J., RAMAKRISHNAN, R., AND SARAWAGI, S. 1996.
+On the computation of multidimensional aggregates. In Proceedings of the International Conference on
+Very Large Data Bases (VLDB). 506–521.
+
+BALKE, W.-T., G ¨UNTZER, U., AND ZHENG, J. X. 2004. Efﬁcient distributed skylining for web information systems.
+
+In Proceedings of the International Conference on Extending Database Technology (EDBT). 256–273.
+
+BARNDORFF-NIELSEN, O. AND SOBEL, M. 1966. On the distribution of the number of admissable points in a vector
+
+random sample. Theory Probab. Appl. 11, 2, 249–269.
+
+BENTLEY, J. L., CLARKSON, K. L., AND LEVINE, D. B. 1990. Fast linear expected-time algorithms for computing
+maxima and convex hulls. In Proceedings of the Annual ACM-SIAM Symposium on Discrete Algorithms
+(SODA). 179–187.
+
+BENTLEY, J. L., KUNG, H. T., SCHKOLNICK, M., AND THOMPSON, C. D. 1978. On the average number of maxima in
+
+a set of vectors and applications. J. Assoc. Comput. Mach. 25, 4, 536–543.
+
+B ¨ORZS ¨ONYI, S., KOSSMANN, D., AND STOCKER, K. 2001. The skyline operator. In Proceedings of the International
+
+Conference on Data Engineering (ICDE). 421–430.
+
+BUCHTA, C. 1989. On the average number of maxima in a set of vectors. Inf. Process. Lett. 33, 2, 63–65.
+CHAN, C. Y., ENG, P.-K., AND TAN, K.-L. 2005. Stratiﬁed computation of skylines with partially-ordered domains.
+In Proceedings of the ACM/SIGMOD Annual Conference on Management of Data (SIGMOD). 203–214.
+CHAN, C. Y., JAGADISH, H. V., TAN, K.-L., TUNG, A. K. H., AND ZHANG, Z. 2006a. Finding k-dominant skylines
+in high dimensional space. In Proceedings of the ACM/SIGMOD Annual Conference on Management of
+Data (SIGMOD). 503–514.
+
+CHAN, C. Y., JAGADISH, H. V., TAN, K.-L., TUNG, A. K. H., AND ZHANG, Z. 2006b. On high dimensional skylines.
+
+In Proceedings of the International Conference on Extending Database Technology (EDBT). 478–495.
+
+CHAUDHURI, S., DALVI, N. N., AND KAUSHIK, R. 2006. Robust cardinality and cost estimation for skyline operator.
+
+In Proceedings of the International Conference on Data Engineering (ICDE). 64.
+
+CHOMICKI, J. 2002. Querying with intrinsic preferences. In Proceedings of the International Conference on
+
+Extending Database Technology (EDBT). 34–51.
+
+CHOMICKI, J., GODFREY, P., GRYZ, J., AND LIANG, D. 2003. Skyline with presorting. In Proceedings of the Inter-
+
+national Conference on Data Engineering (ICDE). 717–816.
+
+DELLIS, E., VLACHOU, A., VLADIMIRSKIY, I., SEEGER, B., AND THEODORIDIS, Y. 2006. Constrained subspace skyline
+computation. In Proceedings of the International Conference on Information and Knowledge Management
+(CIKM).
+
+FANG, Z., WANG, J., AND ZHANG, D. 2009. Workload-driven compressed skycube queries in wireless applications.
+In Proceedings of the International Conference on Wirelss Algorithms, Systems, and Applications (WASA).
+244–253.
+
+GODFREY, P. 2004. Skyline cardinality for relational processing. In Proceedings of the International Symposium
+
+on Foundations of Information and Knowledge Systems (FoIKS). 78–97.
+
+GODFREY, P., SHIPLEY, R., AND GRYZ, J. 2005. Maximal vector computation in large data sets. In Proceedings of
+
+the International Conference on Very Large Data Bases (VLDB). 229–240.
+
+HOSE, K., LEMKE, C., AND SATTLER, K.-U. 2006. Processing relaxed skylines in pdms using distributed data
+summaries. In Proceedings of the International Conference on Information and Knowledge Management
+(CIKM).
+
+HRISTIDIS, V., KOUDAS, N., AND PAPAKONSTANTINOU, Y. 2001. PREFER: A system for the efﬁcient execution of
+multi-parametric ranked queries. In Proceedings of the ACM/SIGMOD Annual Conference on Manage-
+ment of Data (SIGMOD). 259–270.
+
+HUANG, X. AND JENSEN, C. S. 2004. In-route skyline querying for location-based services. In Proceedings of the
+
+International Symposium on Web and Wireless Geographical Information Systems (W2GIS). 120–135.
+
+HUANG, Z., JENSEN, C. S., LU, H., AND OOI, B. C. 2006a. Skyline queries against mobile lightweight devices in
+
+manets. In Proceedings of the International Conference on Data Engineering (ICDE). 66.
+
+HUANG, Z., LU, H., OOI, B. C., AND TUNG, A. K. H. 2006b. Continuous skyline queries for moving objects. IEEE
+
+Trans. Knowl. Data Engin. 18, 12, 1645–1658.
+
+JIN, W., HAN, J., AND ESTER, M. 2004. Mining thick skylines over large databases. In Proceedings of the
+
+European Conference on Principles of Data Mining and Knowledge Discovery (PKDD). 255–266.
+
+JIN, W., MORSE, M. D., PATEL, J. M., ESTER, M., AND HU, Z. 2010. Evaluating skylines in the presence of
+
+equijoins. In Proceedings of the International Conference on Data Engineering (ICDE). 249–260.
+
+KOSSMANN, D., RAMSAK, F., AND ROST, S. 2002. Shooting stars in the sky: an online algorithm for skyline queries.
+
+In Proceedings of the International Conference on Very Large Data Bases (VLDB). 275–286.
+
+ACM Transactions on Database Systems, Vol. 37, No. 2, Article 15, Publication date: May 2012.
+
+15:36
+
+T. Xia et al.
+
+KUNG, H. T., LUCCIO, F., AND PREPARATA, F. P. 1975. On ﬁnding the maxima of a set of vectors. J. Assoc. Comput.
+
+Mach. 22, 4, 469–476.
+
+LEE, J. AND HWANG, S. 2011. Qskycube: efﬁcient skycube computation using point-based space partitioning.
+
+In Proceedings of the International Conference on Very Large Data Bases (VLDB). 185–196.
+
+LIN, X., YUAN, Y., WANG, W., AND LU, H. 2005. Stabbing the sky: efﬁcient skyline computation over sliding
+
+windows. In Proceedings of the International Conference on Data Engineering (ICDE). 502–513.
+
+LIN, X., YUAN, Y., ZHANG, Q., AND ZHANG, Y. 2007. Selecting stars: The k most representative skyline operator.
+
+In Proceedings of the International Conference on Data Engineering (ICDE).
+
+MATOUSEK, J. 1991. Computing dominances in En. Inf. Process. Lett. 38, 5, 277–278.
+MORSE, M. D., PATEL, J. M., AND GROSKY, W. I. 2006. Efﬁcient continuous skyline computation. In Proceedings
+
+of the International Conference on Data Engineering (ICDE). 108.
+
+PAPADIAS, D., TAO, Y., FU, G., AND SEEGER, B. 2003. An optimal and progressive algorithm for skyline queries.
+In Proceedings of the ACM/SIGMOD Annual Conference on Management of Data (SIGMOD). 467–478.
+PEI, J., FU, A. W.-C., LIN, X., AND WANG, H. 2007. Computing compressed multidimensional skyline cubes
+
+efﬁciently. In Proceedings of the International Conference on Data Engineering (ICDE).
+
+PEI, J., JIN, W., ESTER, M., AND TAO, Y. 2005. Catching the best views of skyline: a semantic approach based
+on decisive subspaces. In Proceedings of the International Conference on Very Large Data Bases (VLDB).
+253–264.
+
+PEI, J., YUAN, Y., LIN, X., JIN, W., ESTER, M., LIU, Q., WANG, W., TAO, Y., YU, J. X., AND ZHANG, Q. 2006. Towards
+
+multidimensional subspace skyline analysis. ACM Trans. Datab. Syst. 31, 4, 1335–1381.
+
+PREPARATA, F. AND SHAMOS, M. 1985. Computational Geometry: An Introduction. Springer.
+RA¨ISSI, C., PEI, J., AND KISTER, T. 2010. Computing closed skycubes. Proc. VLDB Endow. 3, 838–847.
+RHEE, C. J., DHALL, S. K., AND LAKSHMIVARAHAN, S. 1995. The minimum weight dominating set problem for
+
+permutation graphs is in nc. J. Parallel Distrib. Comput. 28, 2, 109–112.
+
+SHARIFZADEH, M. AND SHAHABI, C. 2006. The spatial skyline queries. In Proceedings of the International
+
+Conference on Very Large Data Bases (VLDB).
+
+SHENG, C. AND TAO, Y. 2011. On ﬁnding skylines in external memory. In Proceedings of the ACM International
+
+Symposium on Principles of Database Systems (PODS). 107–116.
+
+STOJMENOVIC, I. AND MIYAKAWA, M. 1988. An optimal parallel algorithm for solving the maximal elements
+
+problem in the plane. Parallel Comput. 7, 2, 249–251.
+
+TAN, K.-L., ENG, P. K., AND OOI, B. C. 2001. Efﬁcient progressive skyline computation. In Proceedings of the
+
+International Conference on Very Large Data Bases (VLDB). 301–310.
+
+TAO, Y. AND PAPADIAS, D. 2006. Maintaining sliding window skylines on data streams. IEEE Trans. Knowl.
+
+Data Engin. 18, 3, 377–391.
+
+TAO, Y., XIAO, X., AND PEI, J. 2006. Subsky: efﬁcient computation of skylines in subspaces. In Proceedings of
+
+the International Conference on Data Engineering (ICDE).
+
+WONG, R. C.-W., FU, A. W.-C., PEI, J., HO, Y. S., WONG, T., AND LIU, Y. 2008. Efﬁcient skyline querying with
+
+variable user preferences on nominal attributes. Proc. VLDB Endow. 1, 1, 1032–1043.
+
+WU, P., AGRAWAL, D., EGECIOGLU, ¨O., AND EL ABBADI, A. 2007. Deltasky: optimal maintenance of skyline deletions
+without exclusive dominance region generation. In Proceedings of the International Conference on Data
+Engineering (ICDE). 486–495.
+
+WU, P., ZHANG, C., FENG, Y., ZHAO, B. Y., AGRAWAL, D., AND ABBADI, A. E. 2006. Parallelizing skyline queries for
+scalable distribution. In Proceedings of the International Conference on Extending Database Technology
+(EDBT). 112–130.
+
+XIA, T. AND ZHANG, D. 2006. Refreshing the sky: the compressed skycube with efﬁcient support for frequent
+updates. In Proceedings of the ACM/SIGMOD Annual Conference on Management of Data (SIGMOD).
+491–502.
+
+YUAN, Y., LIN, X., LIU, Q., WANG, W., YU, J. X., AND ZHANG, Q. 2005. Efﬁcient computation of the skyline cube.
+
+In Proceedings of the International Conference on Very Large Data Bases (VLDB). 241–252.
+
+ZHANG, S., MAMOULIS, N., AND CHEUNG, D. W. 2009a. Scalable skyline computation using object-based space par-
+titioning. In Proceedings of the ACM/SIGMOD Annual Conference on Management of Data (SIGMOD).
+483–494.
+
+ZHANG, Z., YANG, Y., CAI, R., PAPADIAS, D., AND TUNG, A. K. H. 2009b. Kernel-Based skyline cardinality esti-
+mation. In Proceedings of the ACM/SIGMOD Annual Conference on Management of Data (SIGMOD).
+509–522.
+
+Received December 2010; revised December 2011; accepted February 2012
+
+ACM Transactions on Database Systems, Vol. 37, No. 2, Article 15, Publication date: May 2012.
+
+
