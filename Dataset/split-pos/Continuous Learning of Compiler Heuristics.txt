@@ -1,0 +1,1476 @@
+46
+
+Continuous Learning of Compiler Heuristics
+
+MICHELE TARTARA and STEFANO CRESPI REGHIZZI, Politecnico di Milano
+
+Optimizing programs to exploit the underlying hardware architecture is an important task. Much research
+has been done on enabling compilers to ﬁnd the best set of code optimizations that can build the fastest
+and less resource-hungry executable for a given program. A common approach is iterative compilation,
+sometimes enriched by machine learning techniques. This provides good results, but requires extremely long
+compilation times and an initial training phase lasting even for days or weeks.
+
+We present long-term learning, a new algorithm that allows the compiler user to improve the performance
+of compiled programs with reduced compilation times with respect to iterative compilation, and without an
+initial training phase. Our algorithm does not just build good programs: it acquires knowledge every time
+a program is compiled and it uses such knowledge to learn compiler heuristics, without the need for an
+expert to manually deﬁne them. The heuristics are evolved during every compilation, by evaluating their
+effect on the generated programs. We present implementations of long-term learning on top of two different
+compilers, and experimental data gathered on multiple hardware conﬁgurations showing its effectiveness.
+
+Categories and Subject Descriptors: D.3.4 [Programming Languages]: Processors—Compilers; I.2.2 [Ar-
+tiﬁcial Intelligence]: Automatic Programming—Program transformation
+
+General Terms: Algorithms, Performance
+
+Additional Key Words and Phrases: Iterative compilation, machine learning, PetaBricks
+
+ACM Reference Format:
+Tartara, M. and Crespi Reghizzi, S. 2013. Continuous learning of compiler heuristics. ACM Trans. Architec.
+Code Optim. 9, 4, Article 46 (January 2013), 25 pages.
+DOI = 10.1145/2400682.2400705 http://doi.acm.org/10.1145/2400682.2400705
+
+1. INTRODUCTION
+Building an exact model of modern computer architectures that a compiler can use
+to decide what optimizations algorithms to apply and what values to assign to her
+numerical parameters is impractical. Therefore, all compilers use heuristics to make
+such decisions, based on program-dependent values, called features.
+
+Usually, compiler experts write the heuristics. This is a time-consuming task, and it
+is likely to yield suboptimal results since it is entirely based on the skill of one or few
+experts. Furthermore, in order to obtain the best results, the process of deﬁning the
+heuristics should be repeated for every new architecture the compiler has to target.
+
+In order to face these issues, researchers proposed various techniques. Iterative com-
+pilation [Kisuki et al. 2000] is the simplest one. It is based on generating hundreds
+of versions of the program being compiled, then running them while gathering execu-
+tion times. The fastest version is then kept as the ﬁnal result of the compilation. The
+
+M. Tartara was partially supported by a Roberto Rocca Doctoral Fellowship, awarded by "Fondazione Fratelli
+Agostino ed Enrico Rocca" Lugano, CH.
+Authors’ address: M. Tartara (corresponding author), and S. Crespi Reghizzi, Dipartimento di Elettronica e
+Infomazione, Politecnico di Milano, Italy; email: mtartara@elet.polimi.it.
+Permission to make digital or hard copies of part or all of this work for personal or classroom use is granted
+without fee provided that copies are not made or distributed for proﬁt or commercial advantage and that
+copies show this notice on the ﬁrst page or initial screen of a display along with the full citation. Copyrights for
+components of this work owned by others than ACM must be honored. Abstracting with credit is permitted.
+To copy otherwise, to republish, to post on servers, to redistribute to lists, or to use any component of this
+work in other works requires prior speciﬁc permission and/or a fee. Permissions may be requested from
+Publications Dept., ACM, Inc., 2 Penn Plaza, Suite 701, New York, NY 10121-0701 USA, fax +1 (212)
+869-0481, or permissions@acm.org.
+c(cid:2) 2013 ACM 1544-3566/2013/01-ART46 $15.00
+DOI 10.1145/2400682.2400705 http://doi.acm.org/10.1145/2400682.2400705
+
+ACM Transactions on Architecture and Code Optimization, Vol. 9, No. 4, Article 46, Publication date: January 2013.
+
+46:2
+
+M. Tartara and S. Crespi Reghizzi
+
+various versions are created by applying a different compiler conﬁguration for each
+of them. Depending on the speciﬁc iterative compilation algorithm considered, each
+conﬁguration can determine the set of optimizations to be used, the order in which
+the optimization algorithms are applied, or some compilation parameters (e.g., loop
+unrolling factor, size of the tiles for a matrix tiling algorithm, limits for function inlin-
+ing, etc.). The choice of which conﬁgurations, to try is determined by random selection.
+The overhead introduced by iterative compilation is too high for most applications, but
+the technique is useful in some speciﬁc areas, such as embedded systems [Bodin et al.
+1998], where the available resources are scarce and a program is likely to be deployed
+on many identical systems, making the extra compilation time worth spending.
+
+Machine learning compilation techniques have been introduced to restrict the con-
+ﬁgurations’ search space [Kulkarni et al. 2004; Park et al. 2011]: a training phase is
+performed when the compiler is deployed, gathering data that are used to train a model.
+Whenever a new program needs to be compiled, the model is queried to predict good
+conﬁgurations. Usually, this just aims at focusing the selection of the conﬁgurations to
+be tested through iterative compilation on more promising areas [Agakov et al. 2006],
+but a similar approach can be used to predict a single conﬁguration to be used as the
+result of the compilation [Fursin and Temam 2010]. Unfortunately, the training phase
+for building a good model is really long, up to several weeks [Fursin et al. 2008], and
+this limits the applicability of machine learning approaches.
+
+The contributions of this article are as follows.
+
+—We introduce long-term learning, a new learning algorithm for compilers able to
+build a model of the target system while compiling programs. The model is used to
+optimize the programs while avoiding both the long compilation times of iterative
+compilation and the initial training phase of machine-learning-based approaches.
+
+—We show that, starting without knowledge of the target system, long-term learning
+is able to create heuristics at least as good as those of existing compilers (-O3 for
+GCC and the default optimization level for PetaBricks). We also show that, starting
+from such optimization levels, our algorithm is able to improve them.
+
+—We show that long-term learning is able to continuously improve the performance
+of a compiler online1, whereas most compiler learning algorithms work ofﬂine and
+require a long initial training phase.
+
+—We show that different compilers can beneﬁt from the use of long-term learning,
+by presenting two implementation and experimental results gathered on multiple
+hardware conﬁgurations.
+
+The rest of this article is organized as follows: Section 2 describes the long-term learn-
+ing compilation algorithm, Section 3 describes our implementations of the algorithm
+and the setup of the experimental campaign, Section 4 presents the results of the ex-
+periments. Related work is presented in Section 5 and possible future improvements
+are discussed in Section 6. Section 7 concludes.
+
+2. CONTINUOUS LEARNING COMPILATION
+Long-term learning is a new continuous learning evolutionary algorithm meant to avoid
+the main drawbacks of both iterative and machine-learning-based compilation: it only
+needs a small number of compilations and test runs to be performed, thus reducing
+compilation times with respect to iterative compilation; at the same time, it does not
+need the initial training phase usually required by machine learning algorithms.
+
+1In this article online and ofﬂine are used with the meaning they have in the machine learning research
+community [Blum 1996]: the learning process is said to happen online when there are no distinct phases of
+learning and applying the learned knowledge. If the two phases are separated, the learning is termed ofﬂine.
+
+ACM Transactions on Architecture and Code Optimization, Vol. 9, No. 4, Article 46, Publication date: January 2013.
+
+Continuous Learning of Compiler Heuristics
+
+46:3
+
+The aim of long-term learning is to learn a model of the target architecture, in the
+form of a set of heuristics that will allow the compiler to produce highly optimized
+programs without manual tuning by an expert. This learning process takes place over
+time: every time a new program is compiled, the system learns some new piece of
+information to be reused during the next compilations. This is possible thanks to the
+testing phase of the various candidate versions of the program, that happens as a part
+of the compilation process.
+
+Long-term learning (detailed in Algorithm 1) is an evolutionary algorithm [Fogel
+2000]. Each set of compiler heuristics (also termed candidate compiler conﬁguration)
+is seen as an individual of a population. The population evolves along a given number
+of generations, each composed by the same number of individuals. The individuals of
+each generation derive from the best ones of the previous generation by modifying
+them slightly through a process named evolution (described in Section 2.1). At the end
+of each generation, a ﬁtness function evaluates each individual according to the method
+explained in Section 2.6: the ﬁttest individuals are then used as the seed to generate
+the candidates of the next generation.
+
+In order to prevent stagnation of the process into local performance maxima, evolu-
+tionary algorithms deﬁne a mutation operation (detailed in Section 2.2), that modiﬁes
+the candidate conﬁgurations more deeply than evolution, allowing to look for solutions
+that are far away from the current best ones. To speed up the convergence of evolution-
+ary algorithms and to improve the stability of the solution found, a technique known
+as elitism (described in Section 2.4) can be used.
+
+In our system, we decided to represent each compiler heuristic contained in the
+candidate conﬁgurations as a mathematical formula. The result value of the formula
+is the decision made by the heuristic, and variables of the formula represent features
+of the program being compiled. A feature is a value known by the compiler at compile
+time that describes a characteristic of the program (e.g., number of basic blocks in
+a function, loop nesting level, etc.). A similar representation of heuristics has been
+used by Stephenson et al. [2003], although for a system based on ofﬂine learning.
+In particular, we use static features: features that can be extracted by source-code
+analysis, without requiring the program to be executed.
+
+The heuristics are not hard-coded into the compiler source code, to allow them to
+evolve easily: when the compiler needs to make a decision, it loads the current best
+heuristic for that decision from a knowledge base, evaluates it using the values of the
+features, and uses the obtained result as the outcome of the decision process.
+
+In most evolutionary algorithms the individuals of each generation descend from the
+individuals of the previous generation only. Not so in long-term learning: at the end
+of every generation, all the available information is stored in a knowledge base (see
+Section 2.5), and the new candidates are evolved from the best ones of the whole knowl-
+edge base. Moreover, we do not just store information about the best candidates, but
+about all of them, together with their ﬁtness level describing how good each heuristic
+has proved to be over the whole life of the compiler. We can thus reduce the number
+of generations needed to obtain good candidates, since we are using all the already
+gathered data instead of partial information. The heuristics stored in the knowledge
+base (and in particular, the best-scoring ones) constitute the model of the target system
+that the algorithm learns over time.
+
+The general workﬂow of a compiler using long-term learning is represented in
+
+Figure 1.
+
+2.1. Evolution
+In order to learn, every evolutionary algorithm needs to explore the solution space
+by generating and testing new candidates. As the name “evolution" suggests, new
+
+ACM Transactions on Architecture and Code Optimization, Vol. 9, No. 4, Article 46, Publication date: January 2013.
+
+46:4
+
+M. Tartara and S. Crespi Reghizzi
+
+Fig. 1. The workﬂow of a compiler using long-term learning. The number of candidates to test is k.
+
+candidates are derived from the old ones in a nondisruptive way. The idea is to start
+from a candidate conﬁguration known to be good, and to modify it slightly, looking for
+a new conﬁguration that yields better performance when applied.
+
+First of all, the GETBESTCANDIDATES function of Algorithm 1 extracts from the knowl-
+edge base as many candidates as required to reach the user-speciﬁed number k of
+candidates to test. They are taken from the ﬁttest candidates (according to the ﬁt-
+ness function described in Section 2.6) known up to the current time. Each heuristic
+is associated with a decision point name that univocally identiﬁes in which phase of
+the compiler it has to be used. Every time the compiler needs to make a decision, it
+picks from its conﬁguration the unique heuristic formula corresponding to that deci-
+sion point. Therefore, each conﬁguration must contain exactly one formula for each
+decision point name. The set of all possible names is denoted by N in Algorithm 1. Let
+Hi be the set of the names of the heuristics contained in candidate i extracted from
+the knowledge base. In case Hi is not equal to N, the missing heuristics (identiﬁed by
+the names in N \ Hi) will be randomly generated by the GENERATEMISSINGHEURISTICS
+function and used to complete the candidate just before testing it. This happens in
+particular when not enough candidates where found in the knowledge base: they are
+replaced by empty candidates, to be later ﬁlled in by GENERATEMISSINGHEURISTICS.
+
+After the candidates have been extracted from the knowledge base, on each of them
+we execute the EVOLVE function with a given probability ( p in Algorithm 1), meant to
+model the exploration versus exploitation trade-off [Kaelbling et al. 1996], that is the
+expected utility of trying new solutions instead of reusing the old ones, proven good.
+When the exploration decision is taken, EVOLVE determines the number of heuristics to
+evolve, the minimum being one and the maximum being a percentage e of them. Then,
+the actual evolution process takes place for randomly chosen heuristics of the set. We
+allow more than one heuristic to evolve at once to enable a group of decisions that are
+effective only when applied together to be made at the same time.
+
+When a formula is being evolved, it is parsed according to the grammar in Figure 2,
+obtaining a syntax tree where every leaf represents a numeric or boolean value or
+a feature name, and every internal node represents an operator or an if expression.
+Then, the tree is recursively visited, until a single terminal of the grammar is actually
+modiﬁed according to the following rules:
+
+If expression (IFt). Evolution is recursively applied to one element chosen randomly
+
+between the condition formula, the then case formula and the else case formula.
+
+ACM Transactions on Architecture and Code Optimization, Vol. 9, No. 4, Article 46, Publication date: January 2013.
+
+Continuous Learning of Compiler Heuristics
+
+46:5
+
+ALGORITHM 1: The long-term learning algorithm for compiling one program. Variables
+marked as Input have to be provided by the user of the compiler. Variables marked as Con-
+ﬁguration are deﬁned by the implementation and are not directly accessible to the user
+Input: numGenerations, number of candidate generations;
+
+src, source code of the program to be compiled;
+k, number of compiler conﬁgurations (S={C1, C2, . . . , Ck}) to be generated. Each is a set of compiler
+heuristics;
+d, input data for the program timing runs;
+
+Output: bin, binary code generated by the best performing heuristics set;
+Conﬁguration: C, set of default compiler heuristics;
+
+b, number of top-scoring candidates to be preserved by elitism;
+h, number of candidates to be built with top-scoring heuristics;
+f , number of candidates to be built with the most frequently used heuristics;
+N, set of names of the heuristics that need to be part of a conﬁguration;
+p, probability of exploring new candidates instead of exploiting current knowledge;
+e, maximum evolution rate, i.e. maximum percentage of heuristics that can be evolved;
+F, set of names of the features that can be used in formulas;
+m, probability of a mutation to occur instead of an evolution;
+KB, knowledge base including heuristics, sets of heuristics, and their usage information;
+
+for i = 1 to numGenerations do
+
+R (cid:2) ∅;
+
+bin0 (cid:2) COMPILE(src, C);
+execT ime0 (cid:2) GETEXECTIME (bin0);
+speedUp0 (cid:2) 1;
+R (cid:2) R ∪ (cid:2)(cid:3)bin0, C, speedUp0(cid:4)(cid:5)
+// Elitism
+Elite1 (cid:2) GETBESTCANDIDATES (b, KB, N);
+Elite2 (cid:2) GENERATECANDIDATESFROMBESTHEURISTICS (h, KB, N);
+Elite3 (cid:2) GENERATECANDIDATESFROMMOSTFREQUENTHEURISTICS ( f , KB, N);
+Elite = Elite1 ∪ Elite2 ∪ Elite3;
+
+// Evolution and mutation
+missingCandidates = k − |Elite|;
+NewCandidates (cid:2) GETBESTCANDIDATES (missingCandidates, KB, N);
+foreach Ci ∈ NewCandidates do
+
+if UNIFORMRANDOM(0, 1) < p then
+
+Ci (cid:2)EVOLVE (Ci, e, F, m);
+
+end
+
+end
+
+S (cid:2) Elite ∪ NewCandidates;
+
+foreach Ci ∈ S do
+
+// Generation of new formulas
+Ci (cid:2) GENERATEMISSINGHEURISTICS (Ci, N, F);
+
+// Computing the fitness function
+bini (cid:2) COMPILE(src, Ci);
+execTimei (cid:2) GETEXECTIME (bini, d);
+speedUpi = execTime0/execTimei;
+R (cid:2) R ∪ {(cid:5)bini , Ci , speedUpi (cid:6)}
+
+end
+bin (cid:2) SELECTBESTPROGRAM (R);
+// Updating the knowledge base
+KB (cid:2) UPDATEKNOWLEDGEBASE(KB, R);
+
+end
+
+return bin, KB
+
+ACM Transactions on Architecture and Code Optimization, Vol. 9, No. 4, Article 46, Publication date: January 2013.
+
+46:6
+
+M. Tartara and S. Crespi Reghizzi
+
+Fig. 2. Grammar representing all the formulas that can be used as heuristics. S is the axiom. Integer
+and Double represent, respectively, integer values and double-precision ﬂoating-point values. Features are
+represented in formulas as variables, each with a unique name. This will be substituted with their actual
+values by the compiler, when the heuristic is evaluated.
+
+Binary operation (BINOPt). Evolution is applied to one element chosen randomly
+between the left operand, the right operand, and the operator. In the ﬁrst two cases,
+the evolution process continues recursively, in the last case the operator is substituted
+with a different one taken from the same category (ARITH, BOOL, or COMP).
+
+Boolean value (Boolean). The value is negated.
+Feature (Feature). A different feature is used.
+Numeric value (Integer or Double). The current value v is incremented by a value in
+the interval [−v, v]. The resulting value can only be in the interval [0, 2v] if v > 0 or
+[2v, 0] if v < 0. This is done to prevent the value from changing too much, under the
+assumption that a heuristic being evolved derives from one already evaluated as good,
+and therefore does not need to be drastically changed.
+
+2.2. Mutation
+Even if we modify multiple heuristics at once, there is a risk of getting stuck in local
+maxima, since evolution only applies small modiﬁcations to formulas. To avoid this,
+we implemented a mechanism able to provide bigger evolutionary steps, tradition-
+ally named mutation [Russell and Norvig 2010]: every time the evolution function is
+executed, it might be turned into a mutation with probability m.
+
+The conceptual difference between evolution and mutation is in the editing distance.
+Evolution recursively visits the tree until it modiﬁes a single terminal of the grammar.
+Mutation can be applied to either a terminal or a nonterminal and is able to change
+the formula much more deeply. The modiﬁcations applied to the formula are as follows:
+
+Whole formula (S). The formula is substituted by a completely new one.
+
+If expression (IFt). Either the condition, the then case formula or the else case formula
+
+is removed and substituted with a new subformula, generated from scratch.
+
+ACM Transactions on Architecture and Code Optimization, Vol. 9, No. 4, Article 46, Publication date: January 2013.
+
+Continuous Learning of Compiler Heuristics
+
+46:7
+
+Binary operation (BINOPt). Either the left or right operand subformula is substituted
+
+with a new subformula, generated using the grammar in Figure 2.
+
+Boolean value (Boolean). Same behavior as evolution: the current value is negated.
+Feature (Feature). Same behavior as evolution: a different feature is used.
+Numeric value (Integer or Double). A random number is generated. It can be un-
+bounded or, where speciﬁed, comprised in an interval determined by the validity range
+(see Paragraph “Validity range check" of Section 2.3) of the heuristic itself.
+2.3. Generation of New Formulas
+All the formulas that can be used as heuristics in our system can be described using
+the grammar in Figure 2. Every time a formula needs to be generated, the grammar
+is used as a generative device. The generation starts from axiom S. The ﬁrst choice
+(between FORMULAbool and NUMFORMULA) depends on the speciﬁc type of result that is
+needed. If the heuristic aims to decide whether or not to activate an optimization,
+a BOOLFORMULA will be generated. If a compiler parameter has to be heuristically
+determined, NUMFORMULA will be used, in one of its two versions (integer or double).
+
+The choice of the right grammar is essential to generate good heuristics. We want
+to give the system enough ﬂexibility to ﬁnd good results. At the same time, as stated
+in Stephenson et al. [2003], the wider the heuristic search space, the longer it will
+take for the algorithm to converge upon a general solution. Any grammar could be
+expanded to contain more primitives able to produce more complex formulas, so it
+will never be possible to generate a completely unbiased set of heuristic formulas.
+Since we are deﬁning an online learning system, it is particularly important for it
+to converge rapidly, so we choose to only use basic arithmetic and logic operands for
+the formulas. Machine learning techniques aim at being faster than iterative ones by
+biasing the search space in some way, and experimental results on multiple platforms
+and multiple test programs have proved our choice to be valid. Future work could look
+for more complex primitives able to deliver signiﬁcant performance improvements.
+
+2.3.1. PreventingIndeﬁniteGrowthofHeuristics. Formulas generated by the grammar are
+deﬁned recursively and could be arbitrarily long. Should the grammar be used with
+uniform probability of choosing any of the alternative productions, the length of for-
+mulas would tend to increase rapidly, making them slower to evaluate and harder to
+read and understand. Generating readable heuristics is not required, but can be useful
+for compiler writers. When developing new optimizations, being able to easily under-
+stand how a heuristic makes decisions is handier than systems where the optimization
+decision process is less visible, such as the ones in Long [2011] and Fursin et al. [2011].
+The importance of preventing a grammar from generating too long formulas is de-
+scribed in Leather et al. [2009] and Leather [2011]. They use a grammar to automat-
+ically deﬁne complex features to be extracted from programs and used in a classiﬁer
+for implementing a machine-learning-based compilation algorithm. We use a similar
+approch, based on assigning weights to the various productions of the rules, but in our
+algorithm the set of features is ﬁxed and we use the grammar to generate the heuristics
+the compiler will use to make decisions. In our speciﬁc case, weights are needed only
+for the rules describing formulas (i.e., FORMULAint, FORMULAdouble and FORMULAbool). The
+weights we use are described in Figure 3. The actual production to activate is chosen
+by a random roulette-wheel selection algorithm2.
+
+For every other rule with more than one production (BINOPbool, ARITHOPERATOR, BOOL-
+OPERATOR, COMPARISONOPERATOR) the selection is performed with a uniform probability,
+since all the alternatives generate formulas of equivalent length.
+
+2Given a set of elements, each with a ﬁtness value, a roulette-wheel selection algorithm chooses an element
+from the set with a probability proportional to the ﬁtness of the element itself. We use weights as the ﬁtness
+value.
+
+ACM Transactions on Architecture and Code Optimization, Vol. 9, No. 4, Article 46, Publication date: January 2013.
+
+46:8
+
+M. Tartara and S. Crespi Reghizzi
+
+Fig. 3. The weights applied to the grammar to limit the expansion of heuristic formulas. FormulaTypet is
+respectively Integer, Double or Boolean for t equal to int, double or bool.
+
+When the Feature production is activated, the learning algorithm randomly chooses
+a feature from the set F of the features whose value will be provided at compile time.
+
+2.3.2. ReducingtheSearchSpaceSize. The search space of possible heuristics described
+by Figure 2 is inﬁnite. The long-term learning evolutionary algorithm explores it efﬁ-
+ciently, exploiting the acquired knowledge to avoid testing candidates likely to perform
+poorly, and focusing on evolving the sets of heuristics that have proven to be beneﬁcial
+to the execution times of previously compiled programs.
+
+Every restriction of the search space helps to speed up the convergence toward a
+
+useful solution. Therefore, we use two techniques to achieve this.
+
+Constant folding. For every heuristic generated by the system, we apply constant
+folding techniques (e.g., if a fragment of a heuristic formula is 2 ∗ 3 + 4 or 1 + 2 + 3 + 4
+it will be folded to 10 in both cases) before storing the heuristic in the knowledge base.
+This way, apparently different heuristics are reduced to a single one and the informa-
+tion gathered from those heuristics will converge into a single knowledge base record,
+making the data about that heuristic more complete and more useful. Having fewer
+heuristics makes evolution more efﬁcient, since there are less starting points to use.
+Furthermore, this leads to simpler heuristics being stored.
+
+Validity range check. The second technique we use is applicable only to non-boolean
+heuristics and is implemented as part of the scoring system (see Section 2.6). It has
+been introduced after observing that most numerical heuristics must generate results
+within a given range of values. For example, a heuristic determining the unrolling
+factor of a loop has 1 as the minimum acceptable value (meaning no unrolling) and
+could have a maximum around 100 (or it could also be left unbounded). A heuristic
+determining the number of worker threads a program should launch could be limited
+upwards by the number of cores actually available on the machine.
+
+To take into account such boundaries, we introduced the possibility to specify a
+minumum value min and a maximum value max for every heuristic. The formulas we
+use are randomly generated, and they include as variables the features extracted by the
+compiler, therefore it is possible that their evaluation might result in a value outside
+the valid range. The trivial solution is substituting values below min with min itself and
+values above max with max itself. Such an approach ensures valid results, but impacts
+negatively on the heuristics: if the value producing the optimal executable corresponds
+to the min of the range, every formula evaluating to something below min would receive
+a high score. This is bad, because it would increase the number of formulas that are
+considered good, increasing the number of seemingly good starting points for the next
+generations. We decided instead to add a penalty (precisely described in Section 2.6) for
+formulas evaluated outside the valid range. Therefore, their score will become lower,
+favoring only the heuristics that stay within the boundaries.
+
+In order to further reduce the possibility of generating low-scoring formulas, the min
+and max values are provided to the formula generation function, that exploits them to
+build formulas that cannot, by construction, be evaluated outside the validity range,
+as far as no variables (that is, features) are concerned.
+
+ACM Transactions on Architecture and Code Optimization, Vol. 9, No. 4, Article 46, Publication date: January 2013.
+
+Continuous Learning of Compiler Heuristics
+
+46:9
+
+2.4. Elitism
+If all the candidates in a generation are randomly generated, it might happen that their
+results are worse than the one obtainable by using the best set of heuristics known
+up to this point. Elitism is a common solution applied by evolutionary algorithms to
+this problem: it improves the stability of the learning process. Long-term learning
+uses a very reduced amount of candidates, so rapidly reaching stability is particularly
+important. Therefore, we implemented three different elitism mechanisms.
+
+The GETBESTCANDIDATES function of Algorithm 1 (already described in Section 2.1)
+extracts from the knowledge base b candidates whose heuristic formulas have been
+proved to be the highest-scoring ones when used as sets.
+
+GENERATECANDIDATESFROMBESTHEURISTICS extracts from the knowledge base, for each
+needed heuristic name n ∈ N, the h highest-scoring heuristics. Then, it combines them
+in sets, each containing one heuristic for each needed name. These sets are returned as
+candidates. Heuristics receiving high scores independently from the speciﬁc heuristic
+set they belong to are likely to receive a high score in a new set too.
+
+GENERATECANDIDATESFROMMOSTFREQUENTHEURISTICS extracts from the knowledge
+base, for each heuristic name n ∈ N, the f most frequently used heuristics whose
+score is at least 1 (meaning they provide no slowdown, as described in the next sec-
+tion). Then it combines them in sets, each containing one heuristic for each name. These
+sets are returned as candidates. This is done because if an heuristics is frequently used
+without its score becoming too low, it means that, on average, the heuristic is able
+to provide acceptable performance. Reusing such an heuristic again provides a good
+fallback candidate, increasing the stability of the algorithm.
+
+By analyzing the learning algorithm it is possible to determine why it could be slow
+to converge. Each of the elitism mechanisms aims at removing one cause of instability:
+the ﬁrst by keeping the current best results across generations, the second one by
+forcing the creation of candidates likely to perform well, the third one by providing an
+acceptable fallback option in case every other candidate is not good enough. The third
+one is especially useful at the beginning of the learning process, where it might happen
+that the best set of heuristics performs well for all the programs compiled up to now,
+but still fails on a new program, too different from the previous ones.
+
+2.5. Knowledge Base
+The knowledge base stores information about all the tested candidates. In particular,
+for every heuristic, the knowledge base contains the name of the decision point of the
+compiler the heuristic will be used for, the formula of the heuristic, the score earned by
+the heuristic up to the current time, and the number of previous uses of the heuristics.
+The knowledge base also stores all the sets each heuristics has been part of and, for
+
+each set, its score and its number of previous uses.
+
+2.6. Computing the Fitness Function and Updating the Knowledge Base
+For each candidate i, we record the execution time execTimei and we compute the
+speedUp = execTime0
+with respect to the execution time execT ime0 of the default conﬁg-
+execTimei
+uration C. If speedUp > 1, the candidate provides a performance improvement.
+
+The UPDATEKNOWLEDGEBASE function uses the speedups as the ﬁtness function of the
+
+heuristics and updates the scores contained in the knowledge base.
+
+Every candidate contains a set of heuristics, each controlling a compiler decision. We
+keep track of how well the heuristics of the candidate work together by computing the
+score of the set of heuristics as a whole. At the same time, we keep a score for every
+single heuristic, to know how well it works whatever heuristic set it is part of.
+
+ACM Transactions on Architecture and Code Optimization, Vol. 9, No. 4, Article 46, Publication date: January 2013.
+
+46:10
+
+M. Tartara and S. Crespi Reghizzi
+
+We also keep a use count for every heuristic set and for every heuristic. A set is
+counted as used every time it is used to compile a program. A single heuristic is
+counted as used every time it is evaluated, that is every time a decision is made based
+on its value. For example, a heuristic determining the unrolling factor of loops will be
+evaluated (and therefore used) every time an unrollable loop is being compiled.
+
+The scores of both the heuristic sets and the heuristics are updated as
+
+scoreupdated =
+
+scoreold ∗ usecountold + scorenew ∗ validusecountnew
+
+usecountold + usecountnew
+
+,
+
+(1)
+
+where scoreold and usecountold are the score and use count stored in the knowledge base,
+scorenew is the speedup measured during the test execution, usecountnew is the number
+of times the heuristic has been used during the test execution. If we are updating the
+score of a heuristic set, usecountnew will always be equal to one. validusecountnew is the
+number of times the result of the evaluation of the heuristic was inside the validity
+range
+
+validusecountnew = usecountnew − (tooLow + tooHigh)
+
+with tooLow (respectively tooHigh) being the number of times the heuristic was eval-
+uated lower (respectively higher) than min (respectively max).
+
+Immediately later, the use count is incremented too.
+
+usecountupdated = usecountold + usecountnew
+
+On the other hand, it might happen that a candidate conﬁguration fails to generate
+a working executable, usually because some optimizations of the underlying compiler
+cannot be applied at the same time. If a conﬁguration failed, we want to penalize it.
+Therefore we use a scorenew equal to zero and a usecountnew equal to 1, thus decreasing
+its score, especially if this happens when the heuristic that led the conﬁguration to fail
+is fairly new and its usecountold is low.
+
+As it can be seen from Equation (1), the score that is computed along the life of the
+knowledge base is the expected speedup, of each heuristic set and of each heuristic. It
+is used by the algorithm to determine the best known candidates: the higher the score,
+the better the expected speedup while using the heuristic.
+
+Rationale. The current scoring system was chosen because it proved experimentally3
+to be fast at learning when no knowledge is available, while keeping the ability to
+improve later on. Furthermore, the method we use to update the score of each heuristic
+scales well with the number of their executions (the cost of update is constant). This is
+extremely important, since we collect data for every single candidate we test.
+
+It is worth noting that we considered multiple scoring algorithms for long-term learn-
+ing. At ﬁrst, we considered an algorithm that sorted the candidates by speedup, then
+assigned a score based on the ranking (for n candidates, decreasing from n points for
+the best one to 1 for the worst one). Such an algorithm is more robust to measurement
+disturbance during the test phase, since the score is unchanged as long as there is no
+switch in the relative positions of one candidate with respect to another one, whereas
+using the speedup is sensitive to such errors. We decided to use the speedup itself, in-
+stead of the speedup ranking, to determine the score for two reasons. First, it provides
+useful information discerning how better a candidate is compared to another one (e.g.,
+
+3This experimental choice does not reduce the generality of our approach, because only a reduced number of
+programs (namely bitcount, qsort1 and susan c) were used during the development of the GCC version to
+make this decision. Later, performance results over the full set of benchmarks and the implementation in a
+second compiler just conﬁrmed the quality of the chosen scoring system.
+
+ACM Transactions on Architecture and Code Optimization, Vol. 9, No. 4, Article 46, Publication date: January 2013.
+
+Continuous Learning of Compiler Heuristics
+
+46:11
+
+being twice as fast is not as good as being four times as fast). Second, it takes into ac-
+count whether a candidate provides an actual improvement: using the ranking-based
+system, if all the candidates in a set are slower than the default conﬁguration, the best
+one would still get the maximum number of points, making it an apparently good can-
+didate. This problem could be partially solved by assigning zero points to candidates
+with speedup below 1, but this would still lose interesting information: a candidate
+scoring just below 1 might be a good one when applied to a different program, and
+penalizing it too is likely a short-sighted decision.
+
+2.7. Compiler Performance over Time
+The long-term learning algorithm does not have an initial training phase: it can im-
+mediately be used. Therefore it is important to determine what is the performance of
+a pristine system based upon such an algorithm.
+
+A strict requirement of the algorithm is the availability of a default conﬁguration, to
+be used as the comparison term to compute the speedup of each candidate. It can be a
+conﬁguration where all the optimizations are disabled and all the numeric parameters
+of optimization algorithms use generic values: the algorithm does not require any
+pre-existing knowledge about the underlying hardware architecture and the expected
+beneﬁts of the compiler optimizations. It is its task to ﬁgure this out. Nevertheless, if
+there is already available knowledge, the algorithm is able to exploit it. The best way
+to do this is to use such knowledge to deﬁne a nontrivial default conﬁguration.
+
+Since the default conﬁguration is used as the comparison term, only the candidates
+improving upon it will receive a good score: the default conﬁguration can be seen as
+the worst-case fallback the system uses when it cannot ﬁnd a better conﬁguration.
+
+The ideal usage for long-term learning would be to enhance the performance porta-
+bility enabled by iterative compilation algorithms [Dubach et al. 2009]: the compiler
+could be distributed with a generic conﬁguration, containing a set of heuristics good
+for a family of architectures (e.g., x86-i386 architectures). While a program is being
+developed, every time it is compiled, the compiler evolves as well, adapting itself to
+the speciﬁc system it runs on. When it is time to release the production binary, the
+evolution of heuristics can be disabled if the need to keep the performance predictable
+arises. In order to further speedup the evolution of heuristics, the knowledge base can
+be shared by all the developers working on a project. This would also prevent them
+from dealing with different binaries.
+
+Long-term learning is meant to constantly improve the performance of the compiler
+over its whole life. It would be unrealistic to think that the target system is never
+going to change and that the compiler itself is never going to be updated. Therefore,
+the algorithm was designed from the beginning with the objective of being robust to
+this kind of events.
+
+The target system changes. First of all, let us consider the case of the unmodiﬁed
+compiler with a target system that changes (a new processor is installed, the amount
+of available RAM is increased, a new version of the operating system is installed, etc.).
+If the current best heuristics sets performs well with the new system conﬁguration,
+nothing will change. On the other hand, if some new heuristic obtains better perfor-
+mance, it will be chosen more often for originating new candidates. At the same time,
+the score of the old heuristics will slowly decrease, until they drift into oblivion.
+
+Having a new heuristic reach the top of the ranking might seem hard, but it is not.
+New heuristics are able to overcome the old ones because all the scores are determined
+by the speedups weighted by the number of times every heuristic has been used.
+Therefore, old heuristics are resilient to changing their score (since they have proven
+
+ACM Transactions on Architecture and Code Optimization, Vol. 9, No. 4, Article 46, Publication date: January 2013.
+
+46:12
+
+M. Tartara and S. Crespi Reghizzi
+
+their average speedup over time) but new ones have low weight and their score can
+immediately obtain a really high value if they provide a high speedup.
+
+Changing program features’ availability. Let us consider now the availability of a
+new version of the compiler, able to compute a new program feature. All the old heuristic
+formulas are still valid. During the evolution and mutation processes, new formulas
+are generated, and some of them will use the new feature. If they manage to get higher
+speedups, they will earn higher scores and will be used more frequently.
+
+In the opposite scenario, should the compiler lose the ability to compute a feature,
+the heuristic formulas containing that feature will not be able to be evaluated any
+more. This means their score will drop fast, and they will stop being used.
+
+New heuristic needed. Let us consider the scenario where an updated version of the
+compiler has to take a new decision and therefore needs a completely new heuristic.
+Every candidate conﬁguration used in the past is composed by a set of heuristics (one
+for each decision point in the compiler). The names of all the needed heuristics are
+stored in set N of Algorithm 1. When the compiler requires a new heuristic, its name is
+added to N. The GENERATEMISSINGHEURISTICS function is called immediately before us-
+ing each candidate. If a name in set N has not a corresponding heuristic inside the
+candidate, GENERATEMISSINGHEURISTICS will generate the formula for such heuristic,
+completing the candidate.
+
+One compiler, different histories. With long-term learning, every deployed compiler
+has its own compilation history and has generated different heuristics, thus behaving
+differently from every other compiler. This might have downsides, especially in a pro-
+duction environment, when it comes to bug reporting. On the other hand, it should be
+considered that this is no different from every other machine-learning-based compila-
+tion approach: after the training phase, each of these compilers has its own, unique
+model, and modiﬁes its own behavior accordingly. We designed the knowledge base to
+be as small as possible and contained in a single ﬁle. This allows different developers
+to easily exchange their history, when needed, such as for bug ﬁxing or for comparing
+performances. Furthermore, the learning process can easily be disabled, when needed,
+using only the current best heuristics. This allows to have a traditional compiler, but
+with ad hoc heuristics, once the desired performance level has been achieved. As for
+other machine learning approaches, deciding when to stop the learning process is up
+to the user: the longer, the better. But unique to long-term learning is the possibility
+to never stop it: idle CPU times could be used to compile more programs, therefore
+further improving the knowledge and the performance.
+
+3. EXPERIMENTAL SETUP
+In order to show the viability of our approach and its applicability to multiple compilers,
+we implemented long-term learning into two different compilation toolchains (GCC and
+PetaBricks), and performed tests on multiple hardware conﬁgurations.
+
+The long-term learning algorithm implementation is divided into two parts. The
+learning algorithm itself is implemented in Python as a framework, and is common to
+all the compilers. It chooses and learns the heuristics. The second part is implemen-
+tation speciﬁc and it gives the compiler a way to provide the program features to the
+algorithm and to use the chosen heuristics to make decisions about the compilation
+process. The compiler-speciﬁc implementations will be described in Section 3.1 and 3.2.
+In these experiments, most of the times the heuristics are then used to decide the best
+command line parameters, but this is just one possible use: in fact, the heuristic for
+the Petabricks tiling algorithm is evaluated directly inside the compiler itself.
+
+ACM Transactions on Architecture and Code Optimization, Vol. 9, No. 4, Article 46, Publication date: January 2013.
+
+Continuous Learning of Compiler Heuristics
+
+46:13
+
+Table I. The Values We Used for the Parameters of Algorithm 1, Obtained by Experimentation
+
+Parameter
+
+top-scoring candidates preserved by elitism (b)
+candidates built with top-scoring heuristics (h)
+candidates built with most frequently used heuristics ( f )
+needed heuristics (N)
+
+exploration probability ( p)
+maximum evolution rate (e)
+available program features (F)
+mutation probability (m)
+
+Value
+
+1
+1
+1
+compiler-dependent:
+see Section 3.1 and 3.2
+0.2
+0.3
+see Figure 4
+0.3
+
+As it can be seen in the Conﬁguration section of Algorithm 1, long-term learning
+needs a few parameters to be set in order to deﬁne its behavior. We determined the
+values to assign to such parameters (in Table I) through a brief experimentation.
+
+Our implementations were tested on different hardware conﬁgurations, to show that
+
+the algorithm is able to adapt compilers to multiple architectures.
+
+Hardware Conﬁguration 1. A machine with 4 Intel Xeon X7550 processors (8 physical
+
+cores each) running at 2.00 GHz with 128GB of RAM.
+
+Hardware Conﬁguration 2. One core of a machine part of the CILEA Lagrange clus-
+ter [Arlandini and Invernizzi 2008]. Each machine is equipped with two Intel Xeon
+X5460 processors (4 physical core each) running at 3.16 GHz and 16GB of RAM.
+
+Hardware Conﬁguration 3. One processor of a machine equipped with two Intel Xeon
+
+X5460 processors (4 physical cores each) running at 3.16 GHz and 8GB of RAM.
+
+We want to show that the knowledge acquired by the compiler through long-term
+learning can be applied to improve the performance of new programs. Therefore, we
+need to simulate the life of a compiler that has compiled a certain number of programs
+previously, showing how this affects the performance of an unseen program.
+
+We have a set of available programs, taken from a benchmark suite. For every
+simulation, we use one of the programs of the suite as the test program and the rest as
+the training set, in a Leave-One-Out Cross-Validation [Kohavi 1995] conﬁguration.
+
+Each simulation is performed as follows. First of all, the test program is compiled us-
+ing the default compiler conﬁguration to ﬁnd out the reference speed. Then, a program
+from the training set is compiled. Then, the test program is compiled again, using the
+knowledge acquired by the compilation of the ﬁrst training program, and is then tested
+recording its execution time. Later, we compile the second program from the training
+set and then again we compile and run the test program, using the knowledge acquired
+from the compilation of the ﬁrst two training programs. This procedure is repeated for
+each program in the training set.
+
+It should be noted that, in order for the experiment to be meaningful, it is mandatory
+that the test program has never been seen by the system before, to prevent the compiler
+from acquiring knowledge from its compilation. In the simulation setup that was just
+described, the test program is compiled multiple times. In order to allow this, a special
+option was implemented in the compilers, enabling a program to be compiled using the
+current knowledge, but disabling write access to the knowledge base. Such option is
+used every time the test program is compiled, therefore, every time, the system behaves
+as if it never saw such program before.
+
+It is also worth noting that we use the term "training set", but this does not mean
+that a training phase is needed: it just denotes the set of previously compiled programs,
+that provide the data for the learning process. In a production system, such programs
+would be the programs compiled by the compiler during its lifetime, up to the current
+one. The compiler is immediately usable, without an explicit initial training phase.
+
+ACM Transactions on Architecture and Code Optimization, Vol. 9, No. 4, Article 46, Publication date: January 2013.
+
+46:14
+
+M. Tartara and S. Crespi Reghizzi
+
+Fig. 4. The list of features used in heuristic formulas.
+
+Since the long-term learning algorithm performs many operations randomly, it is
+expected that two different simulations will yield different results. Therefore, in order
+to provide more statistically relevant information, all the graphs shown in Section 4
+are plotted using data computed as the average execution time computed over 5 runs.
+The next two sections will describe compiler-speciﬁc details of our implementations.
+
+3.1. GCC
+We implemented long-term learning on top of GCC 4.6.3. The compiler-speciﬁc part
+consists of two components. The ﬁrst component is a GCC plugin, activated during the
+compilation process to extract the static features (that is, extracted from code analysis,
+as opposed to dynamic features, extracted from runtime information) of the program.
+The computed values refer to the GIMPLE [Merrill 2003] intermediate representa-
+tion of GCC. We decided to use a subset of the features proved valid by Namolaru
+et al. [2010], namely those listed in Figure 4, each averaged on the values computed
+for the whole program being compiled. The features we chose are simple but able to
+describe the structure of the program: they allow us to automatically ﬁnd out heuris-
+tics at least as good as the hand-written ones provided by GCC. We might implement
+more feature extractors in the future, to better characterize the programs and further
+optimize them. The second component is the interface between the Python learning
+framework and GCC itself. It is responsible for evaluating the heuristics and invoking
+GCC enabling the optimizations through GCC command line ﬂags according to the
+evaluated heuristics. Unfortunately, GCC doesn’t allow full control over the speciﬁc
+optimizations to be enabled, since many of them depend on a speciﬁc optimization
+level being activated. Therefore, instead of just learning the list of optimization passes
+to enable, long-term learning actually learns both the optimization level (between -O0
+and -O3) and the list of optimization ﬂags to enable (-f<optimization name>) or disable
+(-fno-<optimization name>) explicitly. Is is known that some of GCC’s optimizations
+are disabled by default because they are unsafe. We deal with this by automatically
+discarding executables that turn out to be not working after being generated.
+
+The benchmark suite we used for GCC is cBench [Fursin 2010]. It is composed by
+sequential C programs (listed in Figure 5) and derives from MiBench [Guthaus et al.
+2001], with modiﬁcations aimed at making it better to test the efﬁciency of compiler
+optimizations. We chose this benchmark suite instead of other well-known ones (such
+
+ACM Transactions on Architecture and Code Optimization, Vol. 9, No. 4, Article 46, Publication date: January 2013.
+
+Continuous Learning of Compiler Heuristics
+
+46:15
+
+Fig. 5. The list of programs used for the experimental tests.
+
+as SPEC) because it is used by many other works dealing with machine learning
+and iterative compilation, making it easier to compare the results. In cBench, each
+benchmark is associated with a number representing how many executions (usually
+hundreds) of the program are required to obtain a total running time of about 20
+seconds for the unoptimized version. We use such total running time as the value we
+compute the speedup on, because the multiple executions smooth out measurement
+errors. cBench contains multiple datasets for each program. Nevertheless, we just
+used one dataset for each program, because Fursin et al. [2007] showed it sufﬁcient to
+achieve an optimization level within 5% of the best possible level. We might consider, at
+a later stage, to modify the implementation to use different datasets for each generation
+of candidates. cBench programs are sequential, so they are not inﬂuenced by the fact
+that we are using parallel hardware to run them.
+
+3.2. PetaBricks
+PetaBricks [Ansel et al. 2009] is an open-source compiler and programming language
+developed at MIT that uses machine learning and evolutionary algorithms to auto-
+tune [Ansel et al. 2011] programs, by making both ﬁne-grained and algorithmic choices.
+PetaBricks programs work on numerical matrices as their input and output data. The
+compiler produces executables that expose hooks allowing the autotuner to adapt them
+to the underlying platform and to a given input data size.
+
+PetaBricks does not compile C programs, therefore, we used its own benchmark suite
+
+instead of cBench to perform our tests.
+
+The PetaBricks compiler is a source-to-source translator, reading its own input for-
+mat and generating C++ programs that will be later compiled by GCC, used as the
+backend compiler. Therefore, we reuse part of the setup from the GCC long-term learn-
+ing compiler. In particular, we use the same GCC plugin to compute features about the
+program being compiled. The plugin works at GIMPLE level, so the source language
+(C for the cBench tests, C++ for PetaBricks-generated code) is not important. At ﬁrst,
+we considered using features collected from PetaBricks’s own intermediate represen-
+tation (IR), but PetaBricks has not many optimizers requiring heuristic decisions, so
+we mainly use them to direct the optimizers of the underlying GCC. Therefore, such
+IR is too high level to be useful for our actual setup. Though, given more PetaBricks
+optimizers, PetaBricks’ own IR would provide more interesting features.
+
+The interface between the long-term learning framework and PetaBricks is written
+in Python, as for GCC, but instead of evaluating the heuristics it just stores them in
+a conﬁguration ﬁle passed to PetaBricks as a parameter. We modiﬁed the PetaBricks
+compiler adding a component able to evaluate the heuristics. This shows that it is
+possible to use long-term learning with different levels of integration with the compiler.
+The optimizations the PetaBricks implementation works on include a PetaBricks-
+speciﬁc parameter, inﬂuencing the code it generates: the number of times matrices
+have to be split by the tiling optimizer of PetaBricks. Furthermore, we learn
+the numerical optimization parameters that are passed to the underlying GCC
+compiler, namely those related to function inlining (max-inline-insn-auto,
+
+ACM Transactions on Architecture and Code Optimization, Vol. 9, No. 4, Article 46, Publication date: January 2013.
+
+46:16
+
+M. Tartara and S. Crespi Reghizzi
+
+max-inline-insns-single,
+large-function-growth,
+large-unit-insns, inline-unit-growth) and to loop unrolling (max-unroll-times,
+max-unrolled-insns), because PetaBricks generates C++ code containing many small
+functions and many loops. We also learn all the ﬂags described in Section 3.1.
+
+large-function-insns,
+
+We learn more optimization parameters than in the GCC implementation: this is
+not related to the speed of the learning process or the speedups we obtain with or
+without them. It is only meant to show the ﬂexibility of our algorithm. In the GCC
+implementation we learn heuristics to make binary decisions about optimization ﬂags.
+Here, we also show the possibility to learn heuristics that evaluate to numerical results,
+both for direct use with PetaBricks optimizations or with optimization of underlying
+GCC.
+
+We choose not to integrate the long-term learning algorithm and the autotuner
+because autotuning aims not only at improving the performance of the program, but
+also at making it able to adapt to changing hardware without the need to recompile the
+software [Ansel et al. 2009]. Long-term learning only modiﬁes the program at compile
+time, though long-term learning could be used to automatically determine good default
+values for all autotunable parameters, enabling immediate execution without the need
+to autotune the programs.
+
+4. EXPERIMENTAL RESULTS
+In this section we will present the results of the tests we performed using the described
+experimental setup, ﬁrst for GCC, then for PetaBricks. Unfortunately, it is not possible
+to provide a direct comparison with other learning-based systems, since the main aim
+of long-term learning is to be able to ﬁnd out heuristics for compilers that have none,
+while other systems aim to improve the performance of the existing heuristics.
+
+4.1. GCC
+We performed multiple tests using GCC. We used both -O0 and -O3 as the default con-
+ﬁgurations. The ﬁrst conﬁguration allows us to verify the ability of long-term learning
+to automatically ﬁnd out good heuristics for a compiler with not even a default set of
+heuristics deﬁned yet (here, we aim at reaching the same performance as -O3 from -O0).
+The second conﬁguration enables most of GCC optimizations, and is used as a reference
+by most iterative compilation works. When using it as the default conﬁguration, we
+aim at learning heuristics able to improve over its performance.
+
+Figure 6 shows the results of long-term learning on Hardware Conﬁguration 1, using
+automotive susan c as the test program. The initial, unoptimized, execution time drops
+rapidly as soon as knowledge from the compilation of at least one other program has
+been acquired, because the system manages to ﬁnd out a set of heuristics enabling
+the optimizations that deliver the most speedup. Later, compiling more programs, the
+execution time continues to decrease slowly, as marginally better heuristics are found.
+The number of different conﬁgurations that are tested during one compilation with
+long-term learning is determined by parameter k of Algorithm 1. Figure 7 shows that,
+on Hardware Conﬁguration 1, using just 5 candidates per generation leads to a slowly
+declining learning curve, whereas using more than 6 candidates per generation does
+not provide signiﬁcantly faster learning, so we chose to set the default to 6. We also
+determined experimentally that our algorithm performs well with just 3 generations.
+Therefore, with less than 20 candidate conﬁgurations tested during each compilation
+we can obtain good results without the need for an initial training phase, whereas other
+iterative approaches need hundreds of them. It should be noted that using 6 candidates
+over 3 generations leads to better results than compiling 18 candidates in a single
+generation because when using a single generation all the candidates are randomly
+generated starting from the pre-existing knowledge of the compiler, whereas using
+
+ACM Transactions on Architecture and Code Optimization, Vol. 9, No. 4, Article 46, Publication date: January 2013.
+
+Continuous Learning of Compiler Heuristics
+
+46:17
+
+automotive_susan_c
+
+Fig. 6. Execution times of automotive susan c on Hardware Conﬁguration 1 after the compilation of an
+increasing number of other unrelated programs. The default conﬁguration is -O0.
+
+automotive_susan_c
+
+Fig. 7. Execution times of automotive susan c on Hardware Conﬁguration 1 for varying number of candi-
+dates used for each generation. The default conﬁguration is -O0.
+
+multiple generations the candidates of each generation are based upon the knowledge
+acquired during the previous one for the speciﬁc program being compiled.
+
+Figure 8 shows the execution times for the same test on Hardware Conﬁguration 2,
+using different training sets. Training set 1 is the same used for Figure 6. The training
+sets 2 and 3 include the same programs of training set 1, but in a different order. As
+can be seen, the behavior of the different training sets is comparable. The descending
+trend is analogous for the three sets. Training set 2 is included in the graph to show
+that even if the initial choice of heuristics is not optimal, the performance tends to
+improve and to converge to the minimum over time. Therefore, except for the very ﬁrst
+programs, the speciﬁc sequence of previously compiled programs is not very important
+in determining how well the next programs will be compiled.
+
+Figure 8 also shows us that long-term learning is able to devise heuristics that reach
+and surpass the performance of -O3. Unfortunately, though, this does not always hap-
+pen: Figure 9 shows an example of a test program where on average, long-term learning
+is able to optimize with respect to the provided default conﬁguration, but without reach-
+ing the performance of -O3. Nevertheless, given enough previously compiled programs,
+or a speciﬁc execution where the long-term learning algorithm explores the heuristics’
+search space in a particularly convenient way, it will eventually converge to the best
+possible solution, improving over -O3 where possible. If the aim is to actually improve
+the performance of -O3, the best approach is to set such level as the default conﬁgu-
+ration to compute the speedup against. This way, as described in Section 2.6, all the
+
+ACM Transactions on Architecture and Code Optimization, Vol. 9, No. 4, Article 46, Publication date: January 2013.
+
+46:18
+
+M. Tartara and S. Crespi Reghizzi
+
+Comparison of different training sets
+
+Fig. 8. Execution times of automotive susan c on Hardware Conﬁguration 2 after the compilation of an
+increasing number of other unrelated programs. The test is repeated using different training sets. Execution
+times improve both on gcc -O0 and on gcc -O3 for training sets 1 and 3. The default conﬁguration is -O0.
+
+consumer_lame
+
+Fig. 9. Execution times of consumer lame on Hardware Conﬁguration 2 after the compilation of an increasing
+number of other unrelated programs. The average execution times improve on gcc -O0 but not on gcc -O3,
+though they can be surpassed if the random generation of heuristics explores the right area of the candidate
+heuristics’ search space.
+
+conﬁgurations yielding an execution time higher than the default conﬁguration will
+be penalized: the algorithm selects heuristics actually improving over the default one,
+if they exist. Figure 10 provides an example of such an improvement. It shows how
+long-term learning is able to improve the performance of the telecom gsm benchmark
+over GCC -O3. It is worth noting that the improvement is not as stable as those over
+-O0. This is due to the fact that the execution times of good conﬁgurations are close to
+those of bad conﬁgurations. Therefore, the score assigned to good heuristics sets is only
+slightly higher than that of bad sets, making the choice of the best ones more tricky.
+
+It is interesting to inspect the behavior of long-term learning over a longer time
+span (90 programs in the training set instead of 30), shown in Figure 11. Here we can
+clearly identify three different phases. At the beginning (until 10 programs have been
+compiled) the learning process is really fast, since it is easy to learn optimizations that
+provide a huge speedup. Actually, some overﬁtting takes place: the ﬁrst 10 programs of
+this test contain some similarities with automotive susan c, therefore its performance
+improves very fast. Nevertheless, the aim of long-term learning is to optimize the com-
+piler to perform better on average, for all programs. The test program is not treated
+in a special way. Therefore, as the long-term learning-enabled GCC goes on compiling
+new programs from the training set (programs between 10 and 50), the performance
+of automotive susan c gets worse, but is unstable. After the ﬁrst 50 training programs
+
+ACM Transactions on Architecture and Code Optimization, Vol. 9, No. 4, Article 46, Publication date: January 2013.
+
+Continuous Learning of Compiler Heuristics
+
+46:19
+
+telecom_gsm
+
+Fig. 10. Execution times of telecom gsm on Hardware Conﬁguration 1 after the compilation of an increasing
+number of other unrelated programs.
+
+automotive_susan_c
+
+Fig. 11. Execution times of automotive susan c on Hardware Conﬁguration 1 after compiling an increasing
+number of other unrelated programs. The performance level improves while becoming more stable over time.
+
+have been compiled, enough knowledge has been gathered for the performance to be-
+come more stable and predictable. It is likely that, given even more training programs,
+after ﬁnding out an heuristic set that is good, on average, for all programs, the system
+would tend to converge to a heuristic set that is able to predict the best conﬁguration
+for every program, therefore further improving the performance again.
+
+Figure 12 shows the average and maximum speedup obtained by each of the test
+programs along the lifetime of the compiler over the default conﬁguration -O0 on
+Hardware Conﬁguration 2, and compares them with the speedup over GCC -O3. More
+precisely, let si be the speedup of the test program after compiling i training programs,
+and let n be the total number of training programs. The values plotted in the bar chart
+are computed as
+
+average speedup = (cid:6)n
+1 si
+n
+
+and maximum speedup = max({s1, . . . , sn}).
+
+The average speedup includes the small speedups obtained after compiling the ﬁrst
+few programs, so, obviously, it is worse than GCC -O3. But in the end, as by our aim,
+the algorithm is able to ﬁnd heuristics good enough to reach and surpass -O3, as shown
+by the maximum speedup.
+
+Figure 13 shows the speedups obtained over GCC -O3. As can be seen, the speedups
+obtained over -O3 are not too big, but still comparable to those of GCC proﬁle-driven
+optimization. This was expected. The main aim of the long-term learning algorithm is
+
+ACM Transactions on Architecture and Code Optimization, Vol. 9, No. 4, Article 46, Publication date: January 2013.
+
+46:20
+
+M. Tartara and S. Crespi Reghizzi
+
+Fig. 12. Speedup obtained by various programs with respect to gcc -O0 on Hardware Conﬁguration 2, and
+compared to gcc -O3. The average and maximum speedup are computed over all the values obtained by
+testing the program once after compiling each of the programs listed in Figure 5.
+
+Fig. 13. Speedup obtained by various programs with respect to gcc -O3 on Hardware Conﬁguration 1 (HC1)
+and 2 (HC2). We represent the average and maximum speedup computed over all the values obtained by
+testing the program once after compiling with long-term learning each of the programs listed in Figure 5. The
+speedups provided by GCC proﬁle-driven optimization are presented as a comparison. The last bar, geomean
+is the geometric mean of the measured speedups, computed for HC1, HC2 and HC2 with proﬁle-driven
+optimization.
+
+to ﬁnd a model of the target architecture, in the form of a good compilation heuristics
+set, without the need for human intervention in the process. The data we gathered show
+that the algorithm is able to reach the performance of GCC’s maximum optimization
+level without the need for any training phase. Ongoing work is trying to always ensure
+a sensible improvement over -O3.
+
+4.2. PetaBricks
+The amount of data we gathered about PetaBricks is smaller than that available for
+GCC, because the running time of the tests is longer, for various reasons. First of all,
+the number of tests contained in PetaBricks’s benchmark suite is bigger than that of
+cBench. Furthermore, every program compiled by PetaBricks needs to be tuned by the
+underlying autotuner that adapts runtime parameters exposed by each program to
+the system it is running on, using the algorithm described in Ansel et al. [2011]. It
+is a genetic algorithm, and as such it requires the program to be run multiple times
+
+ACM Transactions on Architecture and Code Optimization, Vol. 9, No. 4, Article 46, Publication date: January 2013.
+
+Continuous Learning of Compiler Heuristics
+
+46:21
+
+cholesky
+
+Fig. 14. Execution times of cholesky on Hardware Conﬁguration 1 after the compilation of an increas-
+ing number of other programs. The speedup is computed with respect to PetaBricks with no optimization
+knowledge at all (optimizations disabled) and from the default optimization level.
+
+cholesky
+
+Fig. 15. Execution times of cholesky on Hardware Conﬁguration 1 after the compilation of an increasing
+number of other programs. The speedup is computed with respect to PetaBricks default optimization level.
+
+to ﬁnd out the best conﬁguration. This implies that every program version generated
+by our long-term learning algorithm has to be tuned before being run to measure
+its execution time and determine its speedup. Since the tuning process requires at
+least some minutes, the added delay with respect to the GCC implementation is not
+negligible.
+
+PetaBricks programs are natively parallel, so they tend to occupy all the resources
+of the machine. In order to speed up the execution of the tests, we executed multiple
+tests in parallel using MapReduce as described in Tartara and Crespi Reghizzi [2012].
+We show the running times of a test computing the Cholesky decomposition of a
+square matrix of size 256 (Figure 14). The default compiler conﬁgurations used as
+reference for the long-term learning algorithm are: optimizations disabled (activated by
+the -O0 parameter in our modiﬁed PetaBricks version) and default (that is, maximum)
+PetaBricks optimization level (does not require any particular command line option).
+The spikes appearing in the graph are due to the underlying autotuner. Being based
+upon a genetic algorithm, it is not assured to always converge to the same solution.
+Therefore, it is possible that some conﬁgurations generated by long-term learning turn
+out to be harder to tune than most others. We can see that after an initial slow descent
+phase, long-term learning is able to ﬁnd a good conﬁguration. Moreover, the perfor-
+mance level reached is better than that of the default optimization level of PetaBricks.
+
+The same happens in Figure 15, when using a square matrix of size 1024.
+
+ACM Transactions on Architecture and Code Optimization, Vol. 9, No. 4, Article 46, Publication date: January 2013.
+
+46:22
+
+M. Tartara and S. Crespi Reghizzi
+
+cholesky
+
+Fig. 16. Execution times of cholesky on Hardware Conﬁguration 3 after the compilation of an increasing
+number of other programs. The speedup is computed with respect to PetaBricks default optimization level.
+
+Figure 16 shows that a comparable reduction of the running times can be obtained
+
+on a different hardware conﬁguration too.
+
+5. RELATED WORK
+Many researchers have worked towards building compilers without the need for com-
+piler programmers to manually deﬁne whether to apply each optimization algorithm.
+Agakov et al. [2006] show that it is possible to learn a model that predicts good
+optimizations based on the analysis of static program features. Experimental results
+from Cavazos et al. [2007] suggest that using performance counters instead of static
+features allows to further reduce the number of conﬁgurations to test.
+
+Another approach was proposed by Dubach et al. [2007]. Every time they need to
+compile a program, they build a model by compiling and testing a small number (as
+low as 8) of versions of the program. Then, they use this model to predict—without
+execution—the performance of 500 randomly generated points of the search space. Up
+to 100 of the best points from this set are executed to ﬁnd the actual best version. The
+problem with this approach is the need to build a program-speciﬁc model, and the fact
+that it does not reuse knowledge acquired from previous compilation.
+
+Thomson et al. [2009] try to reduce the training time by focusing it on the programs
+that best characterize the search space of the optimization sets. They ﬁrst gather
+the static features of all the programs in the training set, then apply unsupervised
+clustering in the program feature space. This way, a classiﬁcation of the programs
+according to the similarity of their features is obtained. The most typical program of
+each cluster is chosen, obtaining a subset of programs that is representative of the whole
+search space. Each of the programs of the reduced training set is then compiled and
+tested with 4000 different optimizations sets, using a supervised learning technique to
+learn the model. The model is then used to immediately provide the supposedly best
+conﬁguration, one-shot, without using iterative compilation.
+
+The workﬂow proposed by Long [2011] uses a reverse k-nearest neighbors classiﬁer
+to determine if the program being compiled is similar to a previously met one. If it
+is, the best conﬁguration that was recorded for the similar program is used. If the
+program is an outlier, iterative compilation with random search is used to search for
+good conﬁgurations. Information about all the tested candidate conﬁgurations is stored.
+This approach is similar to long-term learning because it does not need a training phase
+and reduces the number of times iterative compilation has to be used. On the other
+hand, when it is used, hundreds of executions are needed.
+
+The main differences between long-term learning and other approaches are as fol-
+lows. Most works just aim at improving the performance of the compiled programs.
+
+ACM Transactions on Architecture and Code Optimization, Vol. 9, No. 4, Article 46, Publication date: January 2013.
+
+Continuous Learning of Compiler Heuristics
+
+46:23
+
+Long-term learning, on the other hand, also aims at ﬁnding the best compiler heuris-
+tics expressed through human-readable formulas, that are easier to understand for
+compiler writers. To the best of our knowledge, the only other works with the same
+aim are those by Stephenson et al. [2003], using mathematical formulas, and Monsifrot
+et al. [2002], using decision trees. Furthermore, most works learn the single heuris-
+tics independently, whereas we also score sets as a whole, capturing the interactions
+between heuristics. Finally, most works just deal with changing command line ﬂags,
+whereas our approach is more integrated in the compiler and can change internal
+parameters of the algorithms as well, as shown with PetaBricks tiling algorithm.
+
+6. FUTURE WORK
+Various directions for improvements are possible, and we mention just a few.
+
+Sometimes, different compiler conﬁgurations applied to the same source ﬁle might
+lead to identical binaries [Kulkarni et al. 2004]. Moreover, since long-term learning is a
+multi-generation learning algorithm and uses elitism, it is likely that some candidates
+will be present, identical, in multiple generations. To prevent testing the same binary
+candidate more than once, we might compute a hash of the binary ﬁle, reusing previ-
+ously recorded execution times where available. The default settings of our long-term
+learning implementation test a total of 18 candidates (as explained in Section 4.1) dur-
+ing a compilation. The timing runs are the slowest step of our algorithm, so, avoiding
+even just one of them would sensibly speed up the compilation process.
+
+Currently, the selection of what program features to use in heuristic formulas is done
+randomly. A statistical approach computing the correlation between features used and
+the obtained speedup is likely to perform better. Also, adding the ability to compute
+more static program features, and the ability to use dynamic features derived from
+performance counters, might improve the quality of the heuristics.
+
+Currently, long-term learning always tests a ﬁxed number of candidate conﬁgura-
+tions. Although low, this number still might cause quite long compilation times. Using
+program features, we might determine whether many similar programs have been
+compiled before. We could then trust the current heuristics and just generate the best
+candidate accordingly (as in Long [2011]), or, if the program is completely different
+from anything known, the full set of 18 candidates should be tested. Intermediate con-
+ﬁgurations (for example with just 1 or 2 generations instead of 3) could also be used
+when only some data is available from previously compiled similar programs.
+
+For this article, we decided to use GCC because, being at the heart of PetaBricks,
+we could share part of the implementation effort for the two compilers. LLVM [Lattner
+and Adve 2004] could be another interesting compiler on which to implement long-
+term learning, as it provides a wide variety of optimization passes and the possibility
+to write a pass manager to decide which ones to execute using our algorithm.
+
+7. CONCLUSIONS
+This article presented long-term learning, a novel algorithm to determine the best set
+of heuristics that a compiler can use to make decisions about which optimizations to
+enable and what values to assign to parameters, without any human intervention.
+
+Experimental results on multiple architectures conﬁrm that, when implemented in
+the GCC and PetaBricks compilers, the algorithm is able to obtain good results starting
+from no knowledge at all about good optimizations, reaching and sometimes surpassing
+the performance of the respective maximum optimization levels.
+
+We also veriﬁed that when some initial knowledge is provided by the compiler writer,
+the algorithm is able to improve the performance, sometimes marginally, sometimes
+in a signiﬁcant way. By analyzing more static and dynamic features we could improve
+
+ACM Transactions on Architecture and Code Optimization, Vol. 9, No. 4, Article 46, Publication date: January 2013.
+
+46:24
+
+M. Tartara and S. Crespi Reghizzi
+
+the ability of the system to characterize the program being compiled, thus further
+increasing the quality of the result and the obtainable speedups.
+
+Long-term learning improves the compiler by using the information it gathers from
+the execution time of the compiled programs. In order to compute it, it needs input
+data for the programs to be provided. Therefore, the ideal use of a long-term learning
+compiler is probably inside a test-driven development workﬂow, where the test data are
+prepared before the program itself and are already available during the compilation.
+
+Long-term learning is meant to learn compiler heuristics, therefore, it is not strictly
+required for it to always be active. It allows the user to obtain compiler heuristics
+targeted at producing good programs for the architecture they will actually run on,
+not just good programs obtained by the iterations performed while the algorithm is
+active. Therefore, once satisfying heuristics have been learned, the long-term learning
+algorithm can be completely disabled, leaving a fast compiler producing optimized
+programs. Also, given two identical systems, the heuristics learned on one system can
+be ported on the other immediately giving good results on new programs.
+
+ACKNOWLEDGMENTS
+
+The authors would like to thank Jason Ansel, Professor Saman Amarasinghe and Professor Una-May
+O’Reilly, of MIT, and all the anonymous reviewers for their suggestions and valuable comments.
+
+REFERENCES
+
+AGAKOV, F. V., BONILLA, E. V., CAVAZOS, J., FRANKE, B., FURSIN, G., ET AL. 2006. Using machine learning to
+focus iterative optimization. In Proceedings of the International Symposium on Code Generation and
+Optimization. 295–305.
+
+ANSEL, J., CHAN, C. P., WONG, Y. L., OLSZEWSKI, M., ZHAQ, Q., ET AL. 2009. Petabricks: A language and compiler
+for algorithm choice. In Proceedings of the 2009 ACM SIGPLAN Conference on Programming Language
+Design and Implementation. 38–49.
+
+ANSEL, J., PACULA, M., AMARASINGHE, S. P., AND O’REILLY, U. -M. 2011. An efﬁcient evolutionary algorithm for
+solving incrementally structured problems. In Proceedings of the 13th Annual Conference on Genetic and
+Evolutionary Computation. 1699–1706.
+
+ARLANDINI, C. AND INVERNIZZI, A. 2008. Lagrange: Un nuovo server per il calcolo ad alte pretazioni. Bollettino
+
+del CILEA 0, 110.
+
+BLUM, A. 1996. On-Line algorithms in machine learning. In Proceedings of the Workshop on OnLine Algo-
+
+rithms. Springer, 306–325.
+
+BODIN, F., KISUKI, T., KNIJNENBURG, P., O’BOYLE, M., AND ROHOU, E. 1998. Iterative compilation in a non-linear
+optimization space. In Proceedings of the Workshop on Proﬁle and Feedback Directed Compilation in
+conjunction with the International Conference on Parallel Architectures and Compilation Techniques
+(PACT).
+
+CAVAZOS, J., FURSIN, G., AGAKOV, F. V., BONILLA, E. V., O’BOYLE, M. F. P., ET AL. 2007. Rapidly selecting good
+compiler optimizations using performance counters. In Proceedings of the 5th Annual International
+Symposium on Code Generation and Optimization. 185–197.
+
+DUBACH, C., CAVAZOS, J., FRANKE, B., FURSIN, G., O’BOYLE, M. F. P., ET AL. 2007. Fast compiler optimisation
+evaluation using code-feature based performance prediction. In Proceedings of the 4th International
+Conference on Computing Frontiers. 131–142.
+
+DUBACH, C., JONES T. M., BONILLA E. V., FURSIN, G., AND O’BOYLE, M. F. P. 2009 Portable compiler optimisation
+across embedded programs and microarchitectures using machine learning. In Proceedings of the 42nd
+Annual IEEE/ACM International Symposium on Microarchitecture. 78–88.
+FOGEL, G. 2000. What is evolutionary computation? IEEE Spectrum 37, 2, 26–32.
+FURSIN, G. 2010. Collective benchmark (cbench), a collection of open-source programs with multiple datasets
+assembled by the community to enable realistic benchmarking and research on program and architecture
+optimization. http://ctuning.org/cbench
+
+FURSIN, G., CAVAZOS, J., O’BOYLE, M. F. P., AND TEMAM, O. 2007 Midatasets: Creating the conditions for a more
+realistic evaluation of iterative optimization. In Proceedings of the International Conference on High
+Performance Embedded Architectures & Compilers. 245–260.
+
+ACM Transactions on Architecture and Code Optimization, Vol. 9, No. 4, Article 46, Publication date: January 2013.
+
+Continuous Learning of Compiler Heuristics
+
+46:25
+
+FURSIN, G., KASHNIKOV, Y., MEMON, A. W., CHAMSKI, Z., TEMAN, O., ET AL. 2011. Milepost gcc: Machine learning
+
+enabled self-tuning compiler. Int. J. Parallel Program 39, 3, 296–327.
+
+FURSIN, G., MIRANDA, C., TEMAM, O., NAMOLARU, M., YOM-TOV, E., ET AL. 2008. Milepost gcc: Machine learning
+
+based research compiler. In Proceedings of the GCC Developers Summit.
+
+FURSIN, G. AND TEMAM, O. 2010. Collective optimization: A practical collaborative approach. ACM Trans.
+
+Archit. Code Optim. 7, 4, 20.
+
+GUTHAUS, M. R., RINGENBERG, J. S., ERNST, D., AUSTIN, T. M., MUDGE, T., ET AL. 2001. Mibench: A free, commer-
+cially representative embedded benchmark suite. In Proceedings of the IEEE International Workshop on
+Workload Characterization (WWC’01). IEEE Computer Society, Los Alamitos, CA, 3–14.
+
+KAELBLING, L. P., LITTMAN, M. L., AND MOORE, A. W. 1996. Reinforcement learning: A survey. CoRR
+
+csAI/9605103.
+
+KISUKI, T., KNIJNENBURG, P., O’BOYLE, M., AND WIJSHOFF, H. A. G. 2000. Iterative compilation in program
+
+optimization. http://citeseerx.ist.psu.edu/viewdoc/summary?doi=10.1.1.36.3007
+
+KOHAVI, R. 1995. A study of cross- validation and bootstrap for accuracy estimation and model selection. In
+
+Proceedings of the 14th International Joint Conference on Artiﬁcial Intelligence. 1137–1145.
+
+KULKARNI, P. A., HINES, S., HISER, J., WHALLEY, D. B., DAVIDSON, J. W., ET AL. 2004. Fast searches for effective
+optimization phase sequences. In Proceedings of the ACM SIGPLAN 2004 Conference on Programming
+Language Design and Implementation. 171–182.
+
+LATTNER, C. AND ADVE, V. S. 2004. LLVM: A compilation framework for lifelong program analysis & transfor-
+
+mation. In Proceedings of the International Symposium on Code Generation and Optimization. 75–88.
+
+LEATHER, H. 2011. Machine learning in compilers. Ph.D thesis, Institute of Computing Systems Architecture,
+
+School of Information, University of Edinburgh.
+
+LEATHER, H., BONILLA, E. V., AND O’BOYLE, M. F. P. 2009. Automatic feature generation for machine learning
+based optimizing compilation. In Proceedings of the 7th Annual IEEE/ACM International Symposium
+on Code Generation and Optimization. 81–91.
+
+LONG, S. 2011. Sustainable learning-based optimization based on rknm outlier detection. In Proceedings
+of the 5th Workshop on Statistical and Machine Learning Approaches to Architecture and Compliation
+(SMART’11).
+
+MERRILL, J. 2003. GENERIC and GIMPLE: A new tree representation for entire functions. In Proceeedings
+
+of the GCC Summit. Red Hat Inc.
+
+MONSIFROT, A., BODIN, F., AND QUINIOU, R. 2002. A machine learning approach to automatic production of com-
+piler heuristics. In Proceedings of the 10th International Conference on Artiﬁcial Intelligence: Methodol-
+ogy, Systems, and Applications. 41–50.
+
+NAMOLARU, M., COHEN, A., FURSIN, G., ZAKS, A., AND FREUND, A. 2010. Practical aggregation of semantical pro-
+gram properties for machine learning based optimization. In Proceedings of the International Conference
+on Compilers, Architectures and Synthesis for Embedded Systems. 197–206.
+
+PARK, E., KULKARNI, S., AND CAVAZOS, J. 2011. An evaluation of different modeling techniques for iterative com-
+pilation. In Proceedings of the 14th International Conference on Compilers, Architectures and Synthesis
+for Embedded Systems. 65–74.
+
+RUSSELL, S. J. AND NORVIG, P. 2010. Artiﬁcial Intelligence – A Modern Approach 3rd ED. Pearson Education.
+STEPHENSON, M., AMARASINGHE, S. P., MARTIN, M. C., AND O’REILLY, U.-M. 2003. Meta optimization: Improving
+compiler heuristics with machine learning. In Proceedings of the ACM SIGPLAN 2003 Conference on
+Programming Language Design and Implementation. 77–90.
+
+TARTARA, M. AND CRESPI REGHIZZI, S. 2012. Parallel iterative compilation: Using MapReduce to speedup ma-
+chine learning in compilers. In Proceedings of the 3rd International Workshop on MapReduce and its
+Applications (MAPREDUCE’12).
+
+THOMSON, J., O’BOYLE, M. F. P., FURSIN, G., AND FRANKE, B. 2009. Reducing training time in a one-shot machine
+learning-based compiler. In Proceedings of the 22nd International Workshop on Languages and Compilers
+for Parallel Computing (LCPC’09). 399–407.
+
+Received June 2012; revised November 2012; accepted November 2012
+
+ACM Transactions on Architecture and Code Optimization, Vol. 9, No. 4, Article 46, Publication date: January 2013.
+
+

@@ -1,0 +1,3699 @@
+Exact and Approximate Algorithms for the Most
+Connected Vertex Problem
+
+Cheng Sheng1, Yufei Tao1,2, Jianzhong Li3
+
+1Chinese University of Hong Kong
+2Korea Advanced Institute of Science and Technology
+3Harbin Institute of Technology
+
+An (edge) hidden graph is a graph whose edges are not explicitly given. Detecting the presence of an edge requires
+an expensive edge-probing query. We consider the k most connected vertex (k-MCV) problem on hidden bipartite
+graphs. Given a bipartite graph G with independent vertex sets B and W , the goal is to ﬁnd the k vertices in B
+with the largest degrees using the minimum number of queries. This problem can be regarded as a top-k extension
+of semi-join, and is encountered in several applications in practice.
+
+If B and W have n and m vertices respectively, the number of queries needed to solve the problem is nm in
+the worst case. This, however, is a pessimistic estimate on how many queries are necessary on practical data. In
+fact, on some inputs, the problem may be settled with only km + n queries, which is signiﬁcantly lower than nm
+for k ≪ n. The huge difference between km + n and nm makes it interesting to design an adaptive algorithm
+that is guaranteed to achieve the best possible performance on every input G. For k ≤ n/2, we give an algorithm
+that is instance optimal among a broad class of solutions. This means that, for any G, our algorithm can perform
+more queries than the optimal solution (which is unknown) by only a constant factor, which can be shown to be
+at most 2.
+
+As a second step, we study an ǫ-approximate version of the k-MCV problem, where ǫ is a parameter satisfying
+0 < ǫ < 1. The goal is to return k black vertices b1, ..., bk such that the degree of bi (i ≤ k) can be smaller
+than ti by a factor of at most ǫ, where t1, ..., tk (in non-ascending order) are the degrees of the k most connected
+black vertices. We give an efﬁcient randomized algorithm that successfully ﬁnds the correct answer with high
+probability. In particular, for a ﬁxed ǫ and a ﬁxed success probability, our algorithm performs o(nm) queries in
+expectation for tk = ω(log n). In other words, whenever tk is greater than log n by more than a constant, our
+algorithm beats the Ω(nm) lower bound for solving the k-MCV problem exactly. All the proposed algorithms,
+despite the complication of their underlying theory, are simple enough for easy implementation in practice. Ex-
+tensive experiments have conﬁrmed that their performance in reality agrees with our theoretical ﬁndings very
+well.
+
+Categories and Subject Descriptors: F.2 [Analysis of Algorithms and Problem Complexity]: Miscellaneous
+
+General Terms: Theory
+
+Additional Key Words and Phrases: Maximum Degree, Bipartite Graph, Competitive Analysis
+
+Author’s address: C. Sheng (csheng@cse.cuhk.edu.hk), Department of Computer Science and Engineering, Chi-
+nese University of Hong Kong, Sha Tin, Hong Kong; Y. Tao (taoyf@cse.cuhk.edu.hk), Afﬁliation 1: Department
+of Computer Science and Engineering, Chinese University of Hong Kong, Sha Tin, Hong Kong; Afﬁliation 2:
+Division of Web Science and Technology, Korea Advanced Institute of Science and Technology, Korea; J. Li
+(lijzh@hit.edu.cn), School of Computer Science and Technology, Harbin Institute of Technology, China.
+Permission to make digital/hard copy of all or part of this material without fee for personal or classroom use
+provided that the copies are not made or distributed for proﬁt or commercial advantage, the ACM copyright/server
+notice, the title of the publication, and its date appear, and notice is given that copying is by permission of the
+ACM, Inc. To copy otherwise, to republish, to post on servers, or to redistribute to lists requires prior speciﬁc
+permission and/or a fee.
+c(cid:13) 20YY ACM 0000-0000/20YY/0000-0001 $5.00
+
+ACM Journal Name, Vol. V, No. N, Month 20YY, Pages 1–0??.
+
+2
+
+·
+
+b
+✁
+
+b
+✂
+
+b
+✄
+
+b
+☎
+
+w
+✁
+
+w
+✂
+
+w
+✄
+
+w
+☎
+
+w
+✆
+
+Fig. 1. The 1-MCV result is b2
+
+1.
+
+INTRODUCTION
+
+An (edge) hidden graph is a graph whose edges are not explicitly available. Detecting
+the presence of an edge between two vertices requires an edge-probing query, which is an
+operation that incurs expensive cost. In recent years, learning hidden graphs [Goldreich
+et al. 1998] has attracted considerable attention in the theory community [Alon and Shapira
+2008a; Angluin and Chen 2008; Bogdanov et al. 2002; Goldreich et al. 1998]. The main
+objective of the relevant research is to decide whether the graph has a certain property,
+by probing the least number of edges. The underneath rationale is that, learning only a
+property of the graph (e.g., whether it is bipartite) is easier than revealing the whole graph.
+Therefore, the number of edges that need to be probed may be signiﬁcantly smaller than
+the total number of edges that may exist.
+
+As will be reviewed in Section 2, the existing research on hidden graphs is mostly moti-
+vated by biological and chemical applications. This paper focuses on the database context.
+We consider the k most connected vertex (k-MCV) problem on hidden bipartite graphs.
+Speciﬁcally, given a bipartite graph G between two sets B and W of vertices, the objective
+is to ﬁnd the k vertices in B having the maximum degrees. In Figure 1, for example, B has
+vertices {b1, ..., b4}, and W is {w1, ..., w5}; the output of the 1-MCV problem is b2. The
+challenge is to minimize the number of edge-probing queries. Next, we discuss several
+applications of the k-MCV problem.
+
+1.1 Motivation
+
+Application 1 (semi-join aggregation with complex predicates). Consider B and W as
+relational tables, and a join predicate between B and W . An edge-probing query in this
+scenario examines whether a tuple of B can be joined with a tuple of W . The result of
+the k-MCV problem is the k tuples in B that can be joined with the most tuples in W , as
+described by the following pseudo-SQL statement:
+
+SELECT b
+FROM B b, W w
+WHERE [a join predicate about b and w]
+GROUP BY b
+HAVING count(∗) ≥ the size of the k-th largest group
+
+Notice that, if we remove the GROUP-BY and HAVING clauses, the statement becomes
+a standard semi-join. Hence, k-MCV can be regarded as a top-k extension of a semi-join,
+which returns the k tuples of table B having the strongest joining power with respect to
+table W . For example, suppose that B is a list of hotels, and W is a list of tour attractions.
+Setting an edge-probing query to check whether a hotel b and an attraction w are within 1
+
+ACM Journal Name, Vol. V, No. N, Month 20YY.
+
+·
+
+3
+
+mile, the above statement is essentially a top-k spatial join [Zhu et al. 2005], which ﬁnds
+the k hotels whose 1-mile vicinities cover the largest number of attractions.
+
+The join predicate can be rather unfriendly to relational query optimization. For ex-
+ample, the simple geometric condition given earlier (deciding whether b and w are within
+1 mile) is not well supported by a DBMS. This is especially true if the “1 mile” refers
+to the road network distance, in which case evaluating the join predicate may even need
+to perform a shortest-path search on a map. If effective optimization is impossible, the
+DBMS may execute the statement by ﬁrst performing a cartesian product between B and
+W , followed by a group-by and selection of the largest groups. Such a strategy may incur
+prohibitive cost.
+
+A remedy in the above situation is a fast algorithm for solving the k-MCV problem,
+which can improve efﬁciency dramatically by reducing the number of times that the join-
+predicate is evaluated (i.e., the number of edges probed). Note that, to be incorporated in a
+relational engine, such an algorithm must be general enough to tackle any join predicate,
+as opposed to only special queries. For this reason, the solutions of [Zhu et al. 2005] are
+not appropriate for DBMS incorporation.
+
+In fact, the concept of semi-join exists not only in relational databases, but is implicit in
+the applications of other environments. As detailed below, the k-MCV problem ﬁnds use
+in those applications as well.
+
+Application 2 (frequent patterns). Assume that each vertex b ∈ B represents a candidate
+pattern, and each vertex w ∈ W corresponds to a data item. Given a pattern b ∈ B
+and a data item w ∈ W , an edge-probing query detects whether b exists in w. In other
+words, there is an edge in G between b and w if b is observed in w. The k-MCV problem
+returns the k patterns in B that are most commonly found in the items of W . In some
+environments, detecting the presence of a pattern can be rather expensive, such that the
+overall computation time is dominated by the total cost of all queries.
+
+As an example, the pharmaceutical industry has established a novel methodology of
+discovering new drugs, called fragment-based drug discovery [Kapoor 2000]. This is mo-
+tivated by the frustration that “ﬁnding a new drug is like playing golf, where the target is
+the pin” [Kapoor 2000]. The new methodology relieves the frustration by initiating a drug-
+searching process from a fragment, which is a basic chemical compound in the molecular
+structures of drugs. Hence, an important problem is to identify the k fragments that are
+most frequently present in a set of drugs. This is a typical k-MCV problem, where B in-
+cludes all the fragments, and W is the set of drugs under screening. An edge-probing query
+checks whether a fragment b ∈ B exists in a drug w ∈ W . Since molecular structures are
+graphs, the query essentially carries out a subgraph isomorphism test [Garey and Johnson
+1979], which can be rather costly. Therefore, reducing the number of queries is the key to
+efﬁciency.
+
+In general, pattern detection is often achieved by evaluating the distance between a pat-
+tern and a data item: a pattern is considered to exist if the distance is sufﬁciently small.
+Some distance functions are expensive to evaluate, e.g., dynamic time warping [Keogh
+2002] and even ℓp norms in ultra-high dimensional spaces [Houle and Sakuma 2005]. In
+those cases, the cost of edge-probing queries may dominate the execution time, justifying
+the need to minimize such queries.
+
+Application 3 (querying by web service). Today, many websites provide convenient inter-
+faces to allow the public to query their backend databases. Such services have signiﬁcantly
+
+ACM Journal Name, Vol. V, No. N, Month 20YY.
+
+4
+
+·
+
+increased the amount of data that an ordinary user can access, by removing the need for the
+user to store gigantic datasets locally. For instance, at Cinema Freenet (www.cinfn.com),
+people can input the name of an actor/actress and the title of a movie; then the website
+will return, among other information, whether the actor/actress played a role in the movie.
+As another example, using the APIs of Google Map, a program is able to obtain the road-
+network distance between two addresses given in the text format, i.e., the coordinate infor-
+mation of neither address is necessary.
+
+These services can be leveraged to solve k-MCV problems in a way we call querying
+by web service. For example, assume that B is a set of actors and actresses, and W is a
+set of movies. Given an actor/actress b ∈ B and a movie w ∈ W , an edge-probing query
+contacts Cinema Freenet to verify whether b appeared in W . The k-MCV result is the k
+actors/actresses that participated in the largest number of movies. In a similar way, Google
+Map can be employed to solve the top-k spatial join problem mentioned in Application
+1, without knowing the coordinates of the hotels and tour attractions at all. Given a hotel
+b ∈ B and an attraction w ∈ W , a query connects to Google Map to check if the distance
+from b to w is within 1 mile. Then, the output of k-MCV is the k hotels that have the most
+attractions within their 1-mile neighborhoods. The performance bottleneck in the above
+environments is the total network latency of the queries issued. Once again, minimizing
+the number of queries should be the aim of a k-MCV algorithm.
+
+1.2 Our main results
+
+The ﬁrst objective of this work is to design a generic algorithm for the k-MCV problem that
+can be directly used as a black box in all the above applications. If the vertex sets B and
+W have sizes n and m respectively, in the worst case, solving the problem demands nm
+edge-probing queries. However, nm is a very pessimistic estimate on how many queries
+are needed on practical data. As we will see, on some inputs, the problem can be settled
+with only km + n queries, which is signiﬁcantly lower than nm for k ≪ n.
+
+The above discussion suggests that it is a wrong direction to design a worst-case opti-
+mal algorithm – virtually any correct algorithm is worst-case optimal. In fact, the wide
+spectrum between km + n (good case) and nm (worst case) indicates that we should aim
+at an adaptive algorithm, which is guaranteed to achieve the lowest cost on every input.
+Intuitively, the cost of the algorithm ought to be a function of the difﬁculty of the input.
+Namely, when the input is “easy”, the algorithm must perform far less than nm queries.
+As the input’s hardness increases, the cost of the algorithm is allowed to grow, but only to
+the extent enough to tackle the additional difﬁculty.
+
+This paper presents the ﬁrst study on the k-MCV problem. For k ≤ n/2, we propose
+an algorithm with the properties described earlier, and prove that it is instance optimal
+among a class of solutions (to be deﬁned in the next section). Instance optimality [Fagin
+et al. 2001] requires that, on any data input, our algorithm should be as fast as the optimal
+solution (which is unknown), up to only a constant factor. We are able to show that the
+constant is at most 2. In practice, k is usually very small (e.g., 10) compared to the size n
+of B, such that it can be regarded as a constant. In this case, we prove that our algorithm
+can be slower than the optimal solution by only a tiny factor of 1 + O(1/n).
+
+As a second step, we study an ǫ-approximate version of the k-MCV problem where ǫ
+is a constant satisfying 0 < ǫ < 1. Denote by t1, ..., tk (in non-ascending order) the
+degrees of the k most connected vertices in B. Then, the ǫ-approximate k-MCV problem
+returns k vertices where the i-th (i ≤ k) vertex has a degree at least ti(1 − ǫ), that is,
+
+ACM Journal Name, Vol. V, No. N, Month 20YY.
+
+·
+
+5
+
+nm
+tk
+
+log n
+
+the degree of this vertex can be lower than ti by no more than a factor of ǫ. We give
+a randomized algorithm that returns the correct answer with probability at least 1 − δ,
+and performs O( 1
+δ ) queries in expectation. Note that, for ﬁxed ǫ and δ, the
+ǫ2
+cost of our algorithm is bounded by O( nm
+log n), thus beating the lower bound Ω(nm)
+tk
+of the exact k-MCV problem whenever tk = ω(log n), namely, the degrees of all the
+result vertices are greater than log2 n by more than a constant. In practice, log2 n is a
+small value (e.g., for n being a million, log2 n is roughly 20). Hence, the ﬁnding suggests
+that approximate algorithms may have a performance advantage over exact solutions in
+the worst case. For example, our approximate algorithm is more superior in semi-join
+aggregation (Application 1 of Section 1.1), when at least k black tuples each match, say,
+at least 1% of the white vertices. In such a case, the approximate solution incurs only
+O(n log n) cost, as opposed to the O(nm) cost of the exact algorithm.
+
+The rest of the paper is organized as follows. The next section deﬁnes the problem and
+reviews the previous work related to ours. Then, Section 3 sets the stage for theoretical
+analysis by deﬁning the algorithm classes, and giving some basic probabilistic facts. Sec-
+tion 4 explains the details of the proposed algorithms for the exact k-MCV problem, whose
+performance is studied in Section 5. Section 6 is devoted to the ǫ-approximate k-MCV
+problem, by giving our algorithmic solutions and analyzing their performance. Section 7
+experimentally evaluates the efﬁciency of the proposed techniques. Finally, Section 8 con-
+cludes the paper with directions for future work.
+
+2. PROBLEM AND RELATED WORK
+
+We ﬁrst expand the discussion in Section 1 to formally deﬁne the k most-connected vertex
+(k-MCV) problem and its approximate version. Then, we review the existing research on
+the relevant problems.
+
+The k-MCV problem. Let G = (B, W, E) be a bipartite graph, where the set E of edges
+are between a set B of black vertices, and a set W of white vertices. G is a hidden graph,
+meaning that none of the edges in E is explicitly given. To ﬁnd out whether an edge
+exists between a vertex b ∈ B and a vertex w ∈ W , we must perform an edge-probing
+query q(b, w), which returns a boolean answer yes or no. The edges of G that have not
+been probed are said to be hidden. The goal of the k-MCV problem is to ﬁnd the k black
+vertices with the largest degrees, by minimizing the number of queries, or equivalently, the
+number of edges probed.
+
+Two black vertices may have the same degree, namely, a tie. For the sake of fairness,
+we adopt the policy that the vertices having a tie should receive the same treatment. That
+is, either they are all reported, or none of them is reported. This means that sometimes the
+result may have more than k vertices. Formally, denote by deg(b) the degree of a black
+vertex b ∈ B; the k-MCV result is the minimal set R of black vertices satisfying:
+
+(1) |R| ≥ k, and
+(2) deg(b) > deg(b′) for any b ∈ R and b′ ∈ B \ R
+
+where |R| denotes the size of R, and B \ R is the set difference between B and R.
+
+The above deﬁnition aims to retrieve vertices with large degrees, whereas a symmetric
+deﬁnition exists for extracting vertices with small degrees. Throughout the paper, we focus
+on the former version because our solutions can be directly applied to the latter version by
+working with the complement of G, i.e., a bipartite graph ¯G that has B and W as the vertex
+
+ACM Journal Name, Vol. V, No. N, Month 20YY.
+
+6
+
+·
+
+sets, and has an edge between b ∈ B and w ∈ W if and only if there is no edge between b
+and w in G.
+
+Denote by n and m the numbers of vertices in B and W , respectively (i.e., G can have
+between 0 and nm edges).
+Imagine that we have ranked all the vertices of B in non-
+ascending order of their degrees, breaking ties arbitrarily. We refer to the i-th (1 ≤ i ≤ n)
+vertex in the ranked list as the i-th most connected vertex in B.
+
+We consider that the value of k is an integer from 1 to n/2. In practice, users are usually
+interested in the top few (e.g., 10) black vertices with the maximum or minimum degrees.
+This implies that ideally a good solution to the k-MCV problem should be especially efﬁ-
+cient for k = O(1).
+
+The ǫ-approximate k-MCV problem. Besides the inputs in the exact version of problem,
+we are given an extra parameter ǫ satisfying 0 < ǫ < 1 to control the relative precision.
+Denote by t1, ..., tk the degrees of the k most connected black vertices in G. The ǫ-
+approximate k-MCV problem aims at returning k black vertices b1, ..., bk such that for any
+1 ≤ i ≤ k:
+
+deg(bi) ≥ ti(1 − ǫ)
+
+namely, the degree of bi is smaller than ti by at most a factor of ǫ.
+
+Related work. Although graph databases have been extensively studied (see [Angles
+and Guti´errez 2008] for a recent survey), we are not aware of any previous work dealing
+with the k-MCV problem on hidden graphs. Traditionally, the edges of a graph are given
+explicitly (e.g., in an adjacency matrix/list), so that accessing an edge incurs negligible
+cost. In that scenario, ﬁnding the k vertices with the largest degrees is a trivial task. A
+distinctive feature of our k-MCV problem is that detecting an edge is costly, such that the
+number of edge-probing queries determines the overall execution time.
+
+Learning hidden graphs, also known as graph testing, was ﬁrst studied by Goldreich et
+al. [1998]. At a high level, given a hidden graph G, the objective of learning is to either
+conﬁrm that G has a certain property, or deny the existence of the property in G. A fuzzy
+answer don’t-care is allowed when G is close to having such a property. For example, a
+property that has been widely studied [Alon and Krivelevich 2002; Bogdanov et al. 2002;
+Goldreich et al. 1998] is whether G is bipartite. A don’t-care answer is permitted when G
+can be converted to a bipartite graph by adding/removing only a small number of edges.
+The learning of other properties has also been investigated; see, for example, [Alon and
+Shapira 2008a; 2008b] for a summary.
+
+In the original setup of [Goldreich et al. 1998], an edge-probing query is assumed to
+detect an edge between only two vertices. In recent years, several authors [Alon et al. 2004;
+Angluin and Chen 2008; Biedl et al. 2004] have considered super queries, each of which
+detects whether at least an edge exists among a set of vertices in the underlying graph. This
+is motivated by biological and chemical applications. For example, consider a reaction
+graph, where each vertex is a chemical, and two vertices are connected if the corresponding
+chemicals react with each other. Then, a super query can be understood as an experiment
+of mixing several different chemicals, and observing if any reaction happens. If yes, it
+implies that at least two of the chemicals involved react with each other.
+
+Our k-MCV problem differs from the graph testing formulation of [Goldreich et al.
+1998]. Speciﬁcally, we are not attempting to verify any general property. Instead, we aim
+at identifying particular vertices in the given graph satisfying our degree requirements. This
+
+ACM Journal Name, Vol. V, No. N, Month 20YY.
+
+·
+
+7
+
+is analogous to retrieving the items of a dataset qualifying a query condition, as opposed to
+recognizing which distribution best describes the dataset. To our knowledge, the k-MCV
+problem has not been addressed in the literature of graph testing.
+
+Finding the vertex with the maximum degree is a basic operation in attacking several
+problems on bipartite graphs. Our algorithms can be applied as a building brick in those
+problems, under the circumstances where detecting the presence of edges is expensive. An
+important example is the minimum set cover (MSC) problem. In the context of a bipartite
+graph between two vertex sets B and W , the MSC problem is to compute the minimum
+subset B′ ⊆ B such that every vertex in W is connected to at least one vertex in B′.
+The problem is NP-hard but a good approximate solution can be found by a classic greedy
+algorithm [Cormen et al. 2001], which requires solving multiple 1-MCV problems. Our
+techniques can be immediately employed.
+
+The concept of instance optimality was introduced by Fagin et al. [2001]. An earlier,
+similar, concept is competitive analysis [Borodin and El-Yaniv 1998], whose differences
+from instance optimality are nicely explained in [Fagin et al. 2001].
+Instance optimal
+algorithms have been designed for many other problems, for example, manipulating binary
+search trees [Demaine et al. 2009], approximating the distance from a point to a curve
+[Baran and Demaine 2005], computing the union/intersection of sorted lists [Demaine et al.
+2000], ﬁnding the convex hull of polygons [Barbay and Chen 2008], to mention just a
+few. Recently, a generic framework has been developed in [Afshani et al. 2009] to design
+instance optimal algorithms for geometric problems.
+
+The k-MCV problem can be regarded as a variant of the top-k problem, which has been
+extensively studied in distributed systems [Fagin et al. 2001], relational databases [Ilyas
+et al. 2008], uncertain data [Soliman et al. 2008], and so on. However, the solutions in
+those works are speciﬁc to their own contexts, and cannot be adapted for k-MCV. Another
+related problem in relational databases is top-k join [Ilyas et al. 2003; Natsev et al. 2001;
+Schnaitter and Polyzotis 2008], which returns the top-k tuples from a join with the highest
+scores. The score of a (joined) tuple is calculated from a monotone function based on the
+tuple’s attributes. The ranking criteria in k-MCV, on the other hand, are not based on any
+attribute, but instead, depend on the joining power of a tuple in a participating relation (i.e.,
+it can be joined with how many tuples from the opposite relation).
+
+A preliminary version of this work was published in [Tao et al. 2010]. While that short
+version studies only the exact k-MCV problem, the current article also provides solutions
+with theoretical guarantees to the ǫ-approximate k-MCV problem (in Section 6), and ac-
+cordingly, includes the extra empirical results (Section 7).
+
+3. PRELIMINARIES
+
+This section will ﬁrst explain the classes of algorithms considered for the exact k-MCV
+problem. Then, we will elaborate the concept of instance optimality, based on the frame-
+work established by [Fagin et al. 2001]. Finally, we will review Chernoff bounds.
+
+Classes of exact algorithms. We aim at designing generic algorithms that do not as-
+sume any pre-knowledge of the underlying graph G. In other words, the algorithm obtains
+information about G only from the problem input (i.e., the vertex sets B and W ), and
+the results of the edge-probing queries already performed. To make our discussion more
+speciﬁc, Figure 2 describes a high-level framework to capture k-MCV algorithms. The
+framework describes two core operations performed repetitively by an algorithm:
+
+ACM Journal Name, Vol. V, No. N, Month 20YY.
+
+8
+
+·
+
+algorithm MCV
+input: a hidden bipartite graph
+output: the k-MCV result
+1. repeat
+2.
+3.
+4. until it is safe to return the result
+
+b = pick-black
+probe-next(b)
+
+Fig. 2. An algorithmic framework
+
+—pick-black, which returns the black vertex b on which the algorithm wants to probe a
+hidden edge, according to the current status of the algorithm’s execution. Different
+strategies can make a huge difference. This is the key of the algorithm design.
+
+—probe-next(b), which reveals an edge of b that is still hidden at this time. Speciﬁcally, it
+selects a white vertex w whose edge with b has not been probed, and performs a query
+q(b, w).
+
+It would be ideal if we could implement probe-next(b) in a way that can selectively probe
+an edge that is likely to be present or absent. This, however, implies that we must know
+at least something about G, such as the correlations among the edges. Since our objective
+is to propose a generic algorithm, it appears unjustiﬁed to favor a speciﬁc application by
+leveraging its properties, since this will inevitably disfavor another application that does
+not have such properties. Hence, we focus on two “neutral” versions of probe-next(b):
+
+—Randomized. A randomized probe-next(b), as shown in Figure 3, probes any hidden
+edge of b with the same probability. This is reasonable when the algorithm cannot
+predict the nature (i.e., present or not) of any hidden edge.
+
+—Deterministic. Assume that the m white vertices in W are arranged into a sequence
+(w1, w2, ..., wm). A deterministic probe-next(b), as shown in Figure 4, probes the next
+hidden edge of b according to the sequence. This is reasonable in scenarios where the
+white vertices must be accessed sequentially due to a limitation on access pattern in the
+underlying application. For example, in an air index described in [Imielinski et al. 1997],
+a server periodically broadcasts the data objects in a round robin fashion, whereas a
+client receives the objects in the order they appear in the broadcasting sequence. Another
+advantage of deterministic implementation is that it removes the need of remembering
+which edges have already been probed (such information must be maintained for the
+random version of probe-next(b)).
+
+Depending on which version of probe-next(b) is adopted, the algorithmic framework of
+Figure 2 is specialized into two algorithm classes: ARAN and ADET. Speciﬁcally, ARAN,
+referred to as the random-probe algorithm class, includes algorithms that apply the ran-
+domized version; ADET, the deterministic-probe algorithm class, contains algorithms that
+apply the deterministic version. In each class, the algorithms differ in their implementa-
+tions of pick-black.
+
+In the worst case, nm edge-probing queries are needed to solve
+Instance optimality.
+the k-MCV problem. To prove this, consider an input G with no edge at all, namely, no
+black vertex is connected to any white vertex. Any algorithm correctly solving the 1-MCV
+
+ACM Journal Name, Vol. V, No. N, Month 20YY.
+
+algorithm probe-next(b)
+/* for the random-probe class ARAN; an algorithm of this class probes the edges of a black vertex
+in random order */
+
+·
+
+9
+
+return NULL
+
+if b has no more hidden edge then
+
+1.
+2.
+3. w = a random vertex of W whose edge with b has not been probed.
+4. return q(b, w)
+
+Fig. 3. Randomized probe-next(b)
+
+algorithm probe-next(b)
+/* for the deterministic-probe class ADET; for every black vertex, an algorithm of this class probes
+its edges by the same sequence of white vertices (w1, w2, . . . , wm) */
+
+i = the number of edges of b that have been probed
+if i = m then return NULL
+
+1.
+2.
+3. return q(b, wi+1)
+
+Fig. 4. Deterministic probe-next(b)
+
+b*
+
+m
+
+Fig. 5. An easy input to 1-MCV
+
+problem on this graph must probe the edge between each pair of black and white vertices,
+before it can conclude that all black vertices have degree 0. Skipping any edge, say between
+b ∈ B and w ∈ W , leaves the risk that b may have a degree of 1.
+
+Worst case analysis often incurs the criticism of being over conservative in practice. In
+our problem, the previous paragraph indicates that the worst-case cost of solving k-MCV
+is nm anyway. So by this yardstick, it does not even make sense to study the problem,
+because all algorithms are equally bad. This, however, is a pessimistic judgment because
+it is possible to do much better than the worst case on many inputs. To make our argument
+solid, consider an input G where one vertex b⋆ in B has degree m (i.e., b⋆ has an edge with
+every vertex in W ), and all the other n − 1 vertices in B have degree 0 (see Figure 5). It
+is easy to see that the 1-MCV problem can be solved by issuing less than m + n queries.
+Speciﬁcally, we can probe all the edges of b⋆, and only one edge for every other black
+vertex b ∈ B, b 6= b⋆. The total number of queries is m + n − 1, but this is enough to
+ﬁnd out that b⋆ has degree m, and that any other black vertex b has degree at most m − 1.
+Therefore, b⋆ must be the only vertex in the result.
+
+ACM Journal Name, Vol. V, No. N, Month 20YY.
+
+10
+
+·
+
+Motivated by this, we turn our attention to designing an algorithm that guarantees the
+best performance on every input. Speciﬁcally, on difﬁcult inputs that require nm queries
+anyway, our algorithm does not achieve any improvement. However, on easier inputs, our
+algorithm incurs lower cost, actually so low that it is provably as fast as even the optimal
+algorithm (which remains unknown currently), up to a small factor.
+
+Next, we formalize the above discussion using the concept of instance optimality intro-
+duced by [Fagin et al. 2001]. This concept requires an algorithm to be optimal on every
+data input, and is thus stronger than worst-case optimality. In general, let A be a class of
+algorithms, and D a family of datasets. Denote by cost(A, D) the cost of algorithm A ∈ A
+on dataset D ∈ D. Then, an algorithm A⋆ ∈ A is instance optimal over A and D if there
+is a constant r satisfying
+
+cost(A⋆, D) ≤ r · cost(A, D)
+
+(1)
+
+for any A ∈ A and any D ∈ D.
+
+In our context, A is either ARAN or ADET, and D includes all the bipartite graphs. Note
+that while all the algorithms in ARAN must be randomized, those in ADET can be either
+randomized or deterministic, depending on their implementations of pick-black. In any
+case, we deﬁne cost(A, G) to be the expected cost of an algorithm A (in ARAN or ADET)
+on the input graph G ∈ D, where cost is measured by the number of edge-probing queries
+performed by A. This deﬁnition trivially applies to a deterministic A, whose cost(A, G) is
+simply its single-execution cost on G.
+
+Our objective is to ﬁnd an A⋆ in each algorithm class that makes (1) hold. Furthermore,
+it is important to keep the constant r as small as possible. In particular, a much stronger
+result is obtained if r can be shown to decrease with the size of the input. For example,
+if an algorithm achieves an r = 1 + 1/n, then the algorithm is not only instance optimal
+(notice that 1 + 1/n is at most 2), but is nearly optimal in the absolute sense for large n (in
+which case r is very close to 1).
+
+Chernoff bounds. The essence of Chernoff bounds is that the summation of independent
+random variables often does not deviate much from the summation of their respective ex-
+pectations. Actually, we need only a special case, where all those variables follow the
+Bernoulli distribution. Speciﬁcally, let X1, ..., Xs be independent Bernoulli variables, all
+with success probability p. In other words, Xi equals 1 with probability p, and 0 with
+probability 1 − p. Note that the sum of X1, ..., Xs equals sp in expectation. The standard
+Chernoff bounds [Hagerup and Rub 1990] state that, for any α > 0:
+
+Pr" s
+Xi=1
+
+Xi ≥ (1 + α)sp# ≤(cid:18)
+
+eα
+
+(1 + α)(1+α)(cid:19)sp
+
+and for α satisfying 0 < α < 1:
+
+Pr" s
+Xi=1
+
+Xi ≤ (1 − α)sp# ≤(cid:18)
+
+eα
+
+(1 + α)(1+α)(cid:19)sp
+
+(2)
+
+(3)
+
+The above inequalities are a bit complex, and may not be convenient to apply. The
+
+proposition below gives some simpler but weaker alternatives.
+
+PROPOSITION 1. Let X1, ..., Xs be s independent Bernoulli variables with success
+
+ACM Journal Name, Vol. V, No. N, Month 20YY.
+
+probability p. It holds that:
+
+Pr" s
+Xi=1
+Pr" s
+Xi=1
+Pr" s
+Xi=1
+Pr" s
+Xi=1
+
+Xi ≥ (1 + α)sp# ≤ exp(cid:18) −spα2
+3 (cid:19) ,
+Xi ≥ (1 + α)sp# ≤ exp(cid:18) −(1 + α)sp
+Xi ≥ (1 + α)sp# ≤(cid:18) e
+1 + α(cid:19)(1+α)sp
+Xi ≤ (1 − α)sp# ≤ exp(cid:18) −spα2
+3 (cid:19) ,
+
+6
+
+,
+
+·
+
+11
+
+(cid:19) ,
+
+when 0 < α < 1
+
+(4)
+
+when α ≥ 1
+
+(5)
+
+when α > 0
+
+(6)
+
+when 0 < α < 1
+
+(7)
+
+PROOF. The proofs of (4) and (7) can be found in [Hagerup and Rub 1990]. To prove
+
+(5) and (6), ﬁrst notice that
+
+(cid:18)
+
+eα
+
+(1 + α)(1+α)(cid:19)sp
+
+=(cid:18) eα/(1+α)
+1 + α (cid:19)
+
+(1+α)sp
+
+.
+
+Thus, (6) follows immediately from (2) and the fact that eα/(1+α) < e. Now, deﬁne:
+
+eα/(1+α)
+
+f (α) =
+
+1 + α
+which is monotonically decreasing, because d
+dα (ln f ) = (1 + α)−2 − (1 + α)−1 < 0. As
+a result, f (α) ≤ f (1) ≈ 0.824 < e−1/6 when α ≥ 1. This, together with (2), establishes
+(5).
+
+The inequalities of the above proposition are useful in establishing the theoretical guar-
+antees of the proposed solutions to the approximate k-MCV problem. As discussed in
+Section 6, our algorithms probe the edges of the input graph in a random fashion. As far as
+a black vertex is concerned, if we randomly pick one of its edges, the event that the edge
+is solid happens with a ﬁxed probability, namely, the event can be described by a Bernoulli
+random variable. The Chernoff bound will then be used to estimate the number of solid
+edges among its edges that have been probed.
+
+4. EXACT ALGORITHMS
+
+In this section, we give two algorithms for solving the (exact) k-MCV problem. The ﬁrst
+one, called sample-sort, is based on a simple sampling idea. It is included because, in
+general, it is good practice to disprove the efﬁciency of straightforward solutions, before
+moving to more complex methods. Indeed, we give an argument in the next section show-
+ing that sample-sort fails to be instance optimal. Our second algorithm, called switch-on-
+empty, is less intuitive, but turns out to be instance optimal.
+
+Notations and basic strategy. Let us ﬁrst introduce some key notations and explain a
+basic bounding strategy. Recall that, deg(b) denotes the degree of a black vertex b ∈ B.
+Let R ⊆ B be the set of black vertices that an algorithm A decides to return. As mentioned
+in Section 2, A must have evidence showing:
+
+for any b ∈ R and b′ /∈ R, deg(b) > deg(b′).
+
+ACM Journal Name, Vol. V, No. N, Month 20YY.
+
+12
+
+·
+
+algorithm sample-sort(s)
+/* for each b ∈ B, solid(b) and empty(b) are dynamically maintained throughout the
+algorithm */
+
+for each black vertex b
+
+1.
+2.
+3. sort all black vertices b by solid(b) in descending order, breaking ties randomly;
+
+call probe-next(b) s times
+
+let L be the sorted order
+
+for each black vertex b by the ordering in L
+
+4. maintain t = the k-th largest solid(b) of all b ∈ B in the rest of the algorithm
+5.
+6.
+7.
+8.
+9. return the k black vertices with the largest degrees (handle ties if necessary)
+
+until all edges of b have been probed or empty(b) ≥ m − t + 1
+
+repeat
+
+probe-next(b)
+
+Fig. 6. Algorithm sample-sort
+
+This, however, does not imply that the algorithm needs to have the exact deg(b) and
+deg(b′). It sufﬁces to show that a lower bound of deg(b) is greater than an upper bound of
+deg(b′).
+
+If b ∈ B does not have an edge with w ∈ W in G, we say that b has an empty edge
+with w; otherwise, b has a solid edge with w. Hence, deg(b) equals the number of solid
+edges of b. Moreover, the total number of empty and solid edges of b equals m (= |W |).
+Each time when an edge-probing query is performed, the outcome reveals that the edge is
+either empty or solid. Denote by empty(b) the number of empty edges of b that have been
+probed, and similarly, let solid(b) be the number of its solid edges probed. It immediately
+follows that:
+
+solid(b) ≤ deg(b) ≤ m − empty(b).
+
+(8)
+
+For each b ∈ B, algorithm A maintains, at all times, an upper bound m − empty(b) of
+deg(b), as well as a lower bound solid(b). It terminates as soon as it is able to conclude on
+the ﬁnal result R based on these bounds, in the way explained earlier.
+
+Algorithm sample-sort (SS). Next, we explain our ﬁrst algorithm. It aims at quickly dis-
+covering k black vertices with large degrees. After this is done, let x be the smallest degree
+of the vertices identiﬁed. Then, we can prune any black vertex b once m − x + 1 of its
+empty edges have been found. Apparently, a higher x gives stronger pruning power.
+
+But how do we know which vertices are likely to have large degrees? The idea of sam-
+pling naturally kicks in. Speciﬁcally, algorithm SS has two phases. The ﬁrst sampling
+phase randomly probes s edges of every black vertex, where s is a parameter of the algo-
+rithm. At the end of this phase, all the black vertices b are sorted in descending order of
+solid(b). Denote the sorted list as L. As m
+s solid(b) is an unbiased estimate of deg(b), L
+essentially ranks all black vertices in descending order of their estimated degrees.
+
+The second, reﬁnement phase, processes the black vertices by their sorted order in L.
+For each black vertex b, SS keeps probing its hidden edges until all of its edges have been
+probed (at which point, the exact deg(b) is available) or b can be pruned. To enable pruning,
+at all times, the algorithm maintains a threshold t, which equals the k-th largest solid(b′)
+of all b′ ∈ B (t may change continuously as more edges are probed). Thus, b is pruned
+
+ACM Journal Name, Vol. V, No. N, Month 20YY.
+
+·
+
+13
+
+once empty(b) ≥ m − t + 1.
+
+The overall algorithm is presented in Figure 6. Its main drawback is the reliance on
+parameter s, for which careful tuning is needed to obtain good efﬁciency. This motivates
+the next algorithm, which does not require any parameter.
+
+Algorithm switch-on-empty (SOE). The algorithm works in rounds, where each round
+ﬁnds exactly one empty edge for every black vertex. Rounds continue until the algorithm
+is able to conclude the result set R of black vertices. Each round works as follows. For
+every black vertex b, we keep probing its hidden edges, and stop (i) as soon as an empty
+edge of b is found, or (ii) when b has no more edge to probe. In either case, we switch to
+another black vertex (hence the name switch-on-empty), and repeat the same. The round
+ﬁnishes when all the black vertices in B have been processed like this.
+
+Before starting the next round, the algorithm checks whether some black vertices can be
+safely put into the result R and thus removed from B. Speciﬁcally, a vertex b ∈ B is added
+to R if it satisﬁes two conditions:
+
+(1) All its m edges have been probed.
+(2) empty(b) is the lowest among all the vertices still in B (remember that the vertices in
+
+R are already removed from B).
+
+To see why, note that Condition 1 implies that we have obtained the exact deg(b), and
+Condition 2 ensures that deg(b) = m − empty(b) ≥ m − empty(b′) ≥ deg(b′) for any
+b′ ∈ B, b′ 6= b, namely, b has the largest degree among all vertices in B.
+
+SOE terminates when (i) R has at least k vertices, and (ii) the remaining vertices in B
+deﬁnitely have lower degrees than those in R (namely, for each vertex b ∈ B, we have
+found at least m − t + 1 of its empty edges, where t is the smallest degree of the vertices
+in R). Figure 7 formally summarizes the algorithm.
+
+LEMMA 1. SOE returns the k-MCV result correctly.
+
+PROOF. As mentioned before, a black vertex enters R only if its exact degree is (i) al-
+ready known, and (ii) guaranteed to be the maximum among the remaining vertices in B.
+This ensures that vertices are added to R in non-ascending order of their degrees, and that
+the minimum degree in R is at least the maximum degree in B. Therefore, t becomes the
+the degree of the k-th most connected vertex in B at the moment |R| ﬁrst reaches k. After
+that, R is guaranteed to be a subset of the k-MCV result since no vertex with degree less
+than t can be appended to R. Finally, R is also a superset of the k-MCV result, because the
+terminating condition will be triggered only after all vertices with degrees at least t have
+been removed from B (equivalently, put into R).
+
+Example. We illustrate SOE using the input graph in Figure 8 where B and W have 2 and
+5 vertices, respectively. Assume that k = 1 and that the algorithm class considered is the
+random-probe class ARAN (the case of the deterministic-probe class ADET is similar). At
+the beginning, all the edges are hidden; so for each black vertex, SOE initializes an upper
+bound of |W | = 5 on its degree.
+
+Then, SOE executes its rounds, each of which keeps probing a black vertex’s hidden
+edges until encountering an empty edge or the vertex has no more hidden edge. In round
+1, for b1, suppose that SOE probes ﬁrst its edge with w2, which turns out to be solid.
+Hence, the algorithm probes another edge of b1, for example, its edge with w5. As the
+
+ACM Journal Name, Vol. V, No. N, Month 20YY.
+
+14
+
+·
+
+algorithm switch-on-empty
+/* for each b ∈ B, solid(b) and empty(b) are dynamically maintained throughout the
+algorithm */
+
+1. R = ∅ /* the result set */
+2. maintain t = the smallest degree of the vertices in R in the rest of the algorithm
+
+(t = −∞ if |R| < k)
+
+3. maintain emin = the smallest empty(b) of all vertices b still in B
+4. repeat
+5.
+6.
+7.
+8.
+9.
+
+perform-a-round /* see below */
+Bdone = {the vertices in B with no more hidden edge}
+Bmin = {the vertices in Bdone with degree m − emin}
+if Bmin 6= ∅ and m − emin ≥ t
+
+add Bmin to R, and remove Bmin from B
+/* this may change the values of t and emin */
+
+10. until all vertices still in B have a degree upper bound smaller than t,
+
+namely, m − emin ≤ t − 1
+
+11. return R
+
+for each b ∈ B
+
+algorithm perform-a-round
+1.
+2.
+3.
+4.
+
+until an empty edge is found or b has no more hidden edge
+
+repeat
+
+probe-next(b)
+
+Fig. 7. Algorithm switch-on-empty
+
+b
+ 
+
+b
+✝
+
+w
+ 
+
+w
+✝
+
+w
+✞
+
+w
+✟
+
+w
+✠
+
+Fig. 8. An example to illustrate SOE
+
+edge is empty, SOE is done with b1 in this round. For b2, suppose that SOE ﬁrst probes its
+edge with w3, (since it is solid) then its edge with w4, and (since an empty edge is found)
+stops. The ﬁrst round ﬁnishes at this point. No result can be conﬁrmed, because each
+black vertex still has hidden edges. Nevertheless, the algorithm knows that the degree of
+each black vertex can be at most 4 because one empty edge has been found for b1 and b2,
+respectively.
+
+In the second round, as all the hidden edges of b1 are solid, SOE probes all of them
+before processing the next black vertex. For b2, suppose that SOE probes (among its
+hidden edges) its edge with w1, which is empty. Thus, the algorithm ﬁnishes the second
+round. At this time, SOE sees that deg(b1) equals 4, and deg(b2) is at most 3 (as 2 empty
+edges of b2 have been identiﬁed). Therefore, it terminates by reporting b1 as the result.
+
+ACM Journal Name, Vol. V, No. N, Month 20YY.
+
+·
+
+15
+
+Remark. Algorithm SOE simultaneously belongs to both the random-probe algorithm
+class ARAN and the deterministic-probe algorithm class ADET, depending on which ver-
+sion of probe-next(b) (Figure 3 or 4) is plugged in. Although the same is true for algorithm
+SS, it is better suited for ARAN. The reason is that, in the context of ADET, the sampling
+phase can no longer guarantee probing a set of random edges for each black vertex, because
+the sequence of white vertices in Figure 4 may not be a random sequence.
+
+5. THEORETICAL ANALYSIS OF THE EXACT ALGORITHMS
+
+In this section, we analyze the performance of algorithms SS and SOE. Section 5.1 ﬁrst es-
+tablishes their theoretical guarantees in ARAN, and then, Section 5.2 extends the discussion
+to ADET.
+
+5.1 The randomized algorithm class
+
+Let us start with a property of all the algorithms A ∈ ARAN. Consider any black vertex
+b ∈ B. Assume, without loss of generality, that b has ml empty edges in the input graph G,
+where l is a value between 0 and 1. In other words, b is connected to m(1−l) white vertices
+in G. Let Q(u) be the expected number of edge-probing queries that A must perform for
+b, in order to ﬁnd u empty edges of b. We have:
+
+PROPOSITION 2. Q(u) = u(m + 1)/(ml + 1).
+
+PROOF. Consider a set of x balls, among which y are black. Keep randomly removing
+balls from the set without replacement until z ≤ y black balls have been removed. The
+total number of balls that are removed follows the negative hypergeometric distribution
+with expectation z(x + 1)/(y + 1) [Matuszewski 1962].
+
+Let X be the random variable that equals the number of queries that A must perform on
+b before seeing u empty edges of b. Then, x, y, z correspond to m, ml, u, respectively.
+Therefore, the expectation of X, namely Q(u), equals u(m + 1)/(ml + 1).
+
+Equipped with the proposition, next we discuss algorithms SS and SOE separately.
+
+Sample-sort. Recall that SS has a parameter s, which speciﬁes the number of edges to
+probe for each black vertex in the sampling phase. In general, s can be a function of n and
+m, that is, SS may decide s after obtaining the sizes of B and W .
+
+As shown in the experiments, with a suitable s, SS can be fairly efﬁcient, but such an
+s appears to heavily depend on the dataset. Because of this, we are interested in knowing
+whether there is a “universal” choice of s that makes SS instance optimal. A positive
+answer would allow us to get rid of this parameter. Unfortunately, we ended up proving:
+
+THEOREM 1. If s is already determined prior to running the ﬁrst query, SS cannot be
+
+instance optimal.
+
+PROOF. We will ﬁnd two families of bipartite graphs G1 and G2, such that (i) for any
+sufﬁciently large n and m satisfying n > m, there is a graph G1(n, m) in G1 and a graph
+G2(n, m) in G2, both of which have n (m) black (white) vertices, and (ii) they demand
+conﬂicting ways to set s so that algorithm SS can be instance optimal. Since (without
+probing any edge) SS cannot tell whether the input is from G1 or G2, it is not able to set
+s correctly, and thus, fails to be instance optimal. For the above purpose, we focus on
+k = 1. Given a pair of n and m, next we explain how to construct G1(n, m) and G2(n, m)
+respectively.
+
+ACM Journal Name, Vol. V, No. N, Month 20YY.
+
+16
+
+·
+
+G1(n, m) is exactly the graph illustrated in Figure 5, where a unique black vertex has
+degree m, and the other black vertices all have degree 0. In Section 4, we have shown that
+algorithm SOE solves the problem with n+m−1 = O(n) queries. As for SS, its sampling
+phase already probes O(sn) edges; so s must be O(1) if SS needs to be instance optimal.
+In the sequel, we assume s ≤ λ, where λ is a constant.
+
+m
+
+. . .
+
+cm
+
+ n/8
+
+. . .
+
+b*
+
+Fig. 9.
+
+Illustration of G2(n, m)
+
+G2(n, m) is such that one black vertex b⋆ has degree m, and the other black vertices all
+have degree cm, where constant c ∈ (0, 1) will be determined later. Figure 9 illustrates
+G2(n, m) by using the height of a column to represent a black vertex’s degree. Consider
+the sampling phase of SS on G2(n, m). Let S be the set of black vertices b ∈ B such that
+all the s edges of b probed by SS are solid (notice that b⋆ is deﬁnitely in S). The choice
+of c will make sure that |S| ≥ n/4 with probability at least 1/2 (later we will argue that
+such c always exists). Assuming |S| ≥ n/4, let us look at the reﬁnement phase of SS,
+where the black vertices b are processed in descending order of solid(b), i.e., how many
+solid edges of b were found in the sampling phase. Since all vertices in S have the same
+solid(b), their ordering is random. Hence, with probability at least 1/4, n/8 of the vertices
+in S rank before b⋆. For each such vertex b, SS needs to probe all of its m edges; hence, at
+least nm/8 edges are probed in total. Therefore, the expected cost on G2(n, m) is at least
+(1/4) · (nm/8) = Ω(nm).
+
+The 1-MCV problem on G2(n, m) can be solved by algorithm SOE with O(n) queries
+in expectation. Speciﬁcally, when SOE terminates, it has found exactly one empty edge
+of each b ∈ B, b 6= b⋆, plus all the m edges of b⋆. By Proposition 2, in expectation, SOE
+probes m+1
+m(1−c)+1 = O(1) edges of b. Hence, the expected cost of SOE is O(n − 1 + m) =
+O(n), meaning that SS is worse by a factor of Ω(m).
+It remains to show that the c we need always exists. Let X be a random variable that
+equals the size of S after SS ﬁnishes its sampling phase. X follows a Binomial distribution
+B(n − 1, p), where p is the probability that all the s edges probed for a b ∈ B, b 6= b⋆
+are solid. More precisely, p is the success probability of the following sampling-without-
+replacement operation: imagine a bag with m balls in which cm are red, and the others
+blue; we sample s balls from the bag without replacement, and call it a success if all of
+them are red. When m is large enough, p can be approximated with arbitrarily small error
+by the success probability cs of the corresponding sampling-with-replacement operation.
+So, conservatively, assume p ≥ cs − ǫ ≥ cλ − ǫ, where ǫ > 0 is an arbitrarily small
+constant. By Hoeffding’s inequality1, X ≥ (n − 1)/2 > n/4 with probability at least
+1 − exp(−2(n − 1)(p − 0.5)2), which is at least 0.5 if p ≥ ( ln √2
+n−1 )0.5 + 0.5. To ensure
+
+1In general, if X obeys B(n, p), then Pr[X ≤ x] ≤ exp(−2(np − x)2/n) for all x ≤ np.
+
+ACM Journal Name, Vol. V, No. N, Month 20YY.
+
+·
+
+17
+
+this, it sufﬁces to guarantee cλ ≥ ( ln √2
+0.61/λ.
+
+n−1 )0.5 + 0.5 + ǫ. Hence, for large n, we can set c to
+We have shown, for a speciﬁc λ, there is always a c that makes SS worse than SOE by
+a factor of Ω(m) on G2(n, m) (implying SS cannot be instance optimal). To break the
+argument, λ cannot exist which, by the deﬁnition of λ, means that s cannot be a constant.
+This, however, conﬂicts with the requirement of s on G1(n, m).
+
+The theorem indicates that, while sampling is a natural idea to attack the k-MCV prob-
+lem, it is non-trivial to decide the proper sample size. In particular, straightforward strate-
+gies such as “sample a certain percentage of the edges of each b ∈ B” does not work. In
+other words, the correct sample size needs to be chosen adaptively, based on the degree
+distributions of the black vertices. This is consistent with the design of algorithm SOE,
+since it proceeds by continuously monitoring the edges found on all the black vertices.
+
+Switch-on-empty. In the sequel, we denote by R the set of black vertices in the result. Let
+t⋆ be the lowest degree of the vertices in R, or formally:
+
+t⋆ = min
+b∈R
+
+deg(b)
+
+(9)
+
+Denote by Rtail ⊆ R the set of vertices in R having degree t⋆. Let k⋆ = |R|. Apparently,
+k⋆ ≥ k; furthermore, if k⋆ > k, then Rtail must contain at least k⋆ − k + 1 vertices.
+
+We ﬁrst point out two more properties of all algorithms A ∈ ARAN. The ﬁrst one con-
+cerns the status of A when it ﬁnishes. For each b ∈ B, let solidA(b) and emptyA(b) be the
+numbers of solid and empty edges that A has found on b at its termination, respectively. De-
+note by tA the minimum solidA(b) of all vertices b ∈ R, namely, tA = minb∈R solidA(b).
+We have:
+
+LEMMA 2. At termination, for each non-result black vertex b ∈ B \ R, it holds that
+
+emptyA(b) ≥ m − tA + 1.
+
+PROOF. Obvious because otherwise A cannot have concluded that b has a smaller de-
+
+gree than the vertices in R.
+
+The second property concerns the scenario where k⋆ > k:
+
+LEMMA 3. If k⋆ > k, at termination, A has probed all the m edges of at least k⋆−k+1
+
+black vertices in Rtail.
+
+PROOF. Let S ⊆ Rtail be the set of vertices in Rtail such that, for any black vertex in
+S, algorithm A did not probe all of its edges. Let g = |Rtail| − (k⋆ − k). Note that g is
+always positive because |Rtail| is at least k⋆ − k + 1, as mentioned earlier.
+
+A crucial observation is that |S| must be at most g. Otherwise, assume |S| ≥ g; then
+consider any g vertices, say b1, ..., bg, in S, and use S′ to denote the set of those vertices.
+Since each bi has at least 1 hidden edge, it is possible that all those g hidden edges (one
+for each bi) turn out to be solid, and at the same time, the black vertices in S \ S′ have no
+more hidden solid edge. In this case, Rtail \ S′ must be eliminated from the result, which
+contradicts the fact that A was able to terminate safely.
+
+Therefore, A must have probed all the m edges of at least |Rtail| − |S| ≥ |Rtail| − (g −
+
+1) = k⋆ − k + 1 vertices.
+
+The next lemma states a property of algorithm SOE:
+
+ACM Journal Name, Vol. V, No. N, Month 20YY.
+
+18
+
+·
+
+LEMMA 4. SOE probes all the m edges of each vertex in R. For each vertex b ∈ B \ R,
+it ﬁnds exactly m − t⋆ + 1 of its empty edges. Furthermore, the last edge of b probed by
+SOE is empty.
+
+PROOF. The lemma follows directly from the algorithm description in Figure 7.
+
+Let us label the n − k⋆ black vertices not in the result R as
+
+respectively (ordering unimportant). For each i ∈ [k⋆ + 1, n], let
+
+bk⋆+1, bk⋆+2, ..., bn,
+
+li = 1 − deg(bi)/m.
+
+Equivalently, mli is the number of empty edges of bi. Furthermore, deﬁne Qi(u) as the
+expected number of edges of bi that must be probed by an algorithm in ARAN, in order
+to ﬁnd u empty edges of bi. Qi(u) is calculated as in Proposition 2. By Lemma 4, the
+expected cost of SOE can be written as
+
+n
+
+cost(SOE, G) = mk⋆ +
+
+Qi(m − t⋆ + 1).
+
+(10)
+
+Xi=k⋆+1
+
+Denote by Aopt the fastest algorithm in ARAN for solving the k-MCV problem on the
+
+input graph G. Namely,
+
+Aopt = arg min
+A∈ARAN
+
+{cost(A, G)}.
+
+Next, we proceed to show that SOE is optimal up to a small factor 1 + k
+cases k⋆ = k and k⋆ > k separately. For k⋆ = k, we have:
+
+n−k , by discussing
+
+LEMMA 5. If k⋆ = k, cost(SOE, G)/cost(Aopt, G) ≤ 1 + k
+
+n−k .
+
+PROOF. Deﬁne a random variable:
+
+topt = min
+b∈R
+
+solidopt(b).
+
+(11)
+
+where, for each b ∈ R, solidopt(b) is the number of solid edges of b ∈ R found by Aopt at
+termination. In the sequel, we ﬁx an integer x, and focus on the event
+
+Ξx : topt = x,
+
+i.e., the event that Aopt terminates with topt = x. As solidopt(b) ≤ deg(b) for each b ∈ R,
+it holds that:
+
+x = min
+b∈R
+
+solidopt(b) ≤ min
+b∈R
+
+deg(b) = t⋆
+
+Deﬁne function C(x) to be the expected cost of Aopt conditioned on Ξx. The rest of the
+proof will show that r = cost(SOE, G)/C(x) ≤ 1 + k/(n − k) for any x. This, together
+
+with cost(Aopt, G) =Px C(x) · Pr[Ξx], will establish the lemma.
+
+By Lemma 2, Aopt needs to ﬁnd at least m − x + 1 empty edges of each black vertex bi
+(k⋆ + 1 ≤ i ≤ n), meaning that it is expected to perform Qi(m − x + 1) probes on bi. For
+every other black vertex, Aopt has to discover at least x solid edges. Therefore,
+
+C(x) ≥ xk +
+
+ACM Journal Name, Vol. V, No. N, Month 20YY.
+
+n
+
+Xi=k⋆+1
+
+Qi(m − x + 1).
+
+Combining the above with (10), we know
+
+r ≤
+
+r ≤
+
+r − 1 ≤
+
+i=k⋆+1 Qi(m − t⋆ + 1)
+i=k⋆+1 Qi(m − x + 1)
+i=k⋆+1 Qi(m − x + 1)
+i=k⋆+1 Qi(m − x + 1)
+(m − x)k⋆
+i=k⋆+1 Qi(m − x + 1)
+
+.
+
+mk⋆ +Pn
+xk +Pn
+mk⋆ +Pn
+xk +Pn
+xk⋆ +Pn
+
+⇒ (applying x ≤ t⋆)
+
+⇒
+
+By Proposition 2, Qi(m − x + 1) = (m − x + 1) m+1
+
+mli+1 . Hence:
+
+where
+
+r − 1 <
+
+(m − x)k⋆
+
+xk⋆ + a(m − x)
+
+a =
+
+n
+
+Xi=k⋆+1
+
+m + 1
+mli + 1
+
+.
+
+·
+
+19
+
+(12)
+
+If x = m, then r = 1, trivially satisfying r ≤ 1 + k/(n − k). For x < m, equipped with
+
+a ≥ n − k⋆ = n − k, we have
+
+r − 1 ≤
+
+(m − x)k
+
+(n − k)(m − x)
+
+=
+
+k
+
+n − k
+
+.
+
+This completes the proof.
+
+The following lemma covers the other case k⋆ > k:
+
+LEMMA 6. If k⋆ > k, cost(SOE, G)/cost(Aopt, G) ≤ 1 + k
+
+n−k .
+
+PROOF. According to Lemma 3, at termination, Aopt must have probed all the edges
+of at least k⋆ − k + 1 > 1 vertex in Rtail. Hence, topt, as deﬁned in (11), equals t⋆.
+Consequently, Aopt probes
+—Qi(m − t⋆ + 1) edges in expectation for each non-result vertex bi (k⋆ + 1 ≤ i ≤ n), by
+
+Lemma 2 and the deﬁnition of Qi;
+
+—all the m edges of k⋆ − k + 1 result vertices, by Lemma 3;
+—at least t⋆ solid edges for each of the remaining k − 1 result vertices, in order to conﬁrm
+
+that their degrees are at least t⋆.
+
+Therefore,
+
+cost(Aopt, G) ≥ t⋆(k − 1) + m(k⋆ − k + 1) +
+
+n
+
+Xi=k⋆+1
+
+Qi(m − t⋆ + 1)
+
+Set r = cost(SOE, G)/cost(Aopt, G). Combining the above formula with (10) gives:
+
+r ≤
+
+(as t⋆ ≤ m) ≤
+
+i=k⋆+1 Qi(m − t⋆ + 1)
+
+mk⋆ +Pn
+
+i=k⋆+1 Qi(m − t⋆ + 1)
+
+t⋆(k − 1) + m(k⋆ − k + 1) +Pn
+mk⋆ +Pn
+
+mk⋆ +Pn
+
+i=k⋆+1 Qi(m − t⋆ + 1)
+
+i=k⋆+1 Qi(m − t⋆ + 1) − k(m − t⋆)
+
+ACM Journal Name, Vol. V, No. N, Month 20YY.
+
+20
+
+·
+
+m
+
+m/2
+
+m/10
+
+b*
+
+b
+
+Fig. 10. Why SOE is not strictly optimal
+
+Hence, applying Proposition 2, we have:
+
+r − 1 ≤
+
+k(m − t⋆)
+
+mk⋆ + a(m − t⋆ + 1) − k(m − t⋆)
+
+where a is given in (12). Again, if t⋆ = m, then r = 1 < 1 + k/(n − k). Otherwise,
+knowing a ≥ n − k⋆, we derive:
+
+r − 1 ≤
+
+≤
+
+k(m − t⋆)
+
+mk⋆ + (n − k⋆)(m − t⋆) − k(m − t⋆)
+
+k(m − t⋆)
+
+n(m − t⋆) − k(m − t⋆)
+
+=
+
+k
+
+n − k
+
+.
+
+This establishes the lemma.
+
+Combining the above two lemmas, we have proved the following theorem:
+
+THEOREM 2. The expected cost of SOE is at most r·cost(Aopt, G), where r = 1+ k
+
+n−k .
+
+There are two interesting corollaries:
+
+—For any k ≤ n/2, the value of r is always lower than 2, that is, SOE is instance optimal.
+—When k = O(1), r = 1 + O(1/n), namely, SOE is nearly as fast as the optimal
+algorithm in ﬁnding the top few (e.g., 10) black vertices having the maximum degrees.
+
+We close the subsection with a note on why SOE is not strictly better than all other
+Imagine a simple G whose B has only 2 vertices b⋆ and b with
+algorithms in ARAN.
+degrees m/2 and m/10, respectively. Figure 10 illustrates this by using the height of a
+column to represent the degree of a node. Consider the 1-MCV problem on such G. By
+Lemma 4, SOE probes all m edges of b⋆, and enough edges of b until seeing 1 + m/2
+empty edges. Hence, by Proposition 2, the expected cost of SOE is m + (1 + 1
+2 m)(m +
+1)/( 9
+10 m + 1) ≈ 1.56m. An alternative solution is to probe all edges of b, and enough
+edges of b⋆ until seeing 1 + m/10 solid edges. This strategy’s expected cost is m + (1 +
+10 m)(m + 1)/(1 + 1
+1
+5.2 The deterministic algorithm class
+
+2 m) ≈ 1.2m.
+
+Next, we extend the analysis of the previous subsection to the algorithm class ADET.
+We focus on only SOE because the instance optimality of SS in ADET can be disproved
+using an argument similar to, but much simpler than, the proof of Theorem 1. For ADET,
+Proposition 2 obviously is not applicable; Lemmas 2-4, however, are still correct. Deﬁne
+
+ACM Journal Name, Vol. V, No. N, Month 20YY.
+
+·
+
+21
+
+Aopt as the fastest algorithm in ADET for solving the k-MCV problem on the input G.
+Namely:
+
+We ﬁrst give a theorem that is the counterpart of Theorem 2.
+
+Aopt = arg min
+A∈ADET
+
+{cost(A, G)}.
+
+THEOREM 3. The cost of SOE is at most (1 + k
+
+n−k ) · cost(Aopt, G).
+
+PROOF. The proof is similar to that of Theorem 2 (called the old proof in the sequel).
+Refer to the sequence (w1, w2, ..., wm) in Figure 3 as the probing sequence. Let k⋆, t⋆, bi
+(k⋆ + 1 ≤ i ≤ n) retain their meanings in the old proof.
+
+has an empty edge with bi. By Lemma 4, cost(SOE, G) = mk⋆ +Pn
+
+Let τi (k⋆ +1 ≤ i ≤ n) be the number of edges of bi that SOE has probed at termination.
+τi equals the position of the (m − t⋆ + 1)-th white vertex (in the probing sequence) that
+i=k⋆+1 τi. Deﬁne
+topt, solidopt(b), C(x) in the same way as in the old proof. Let τ ⋆
+i be the number of edges
+that Aopt probes for bi, conditioned on topt = x. Since x = topt ≤ t⋆, by Lemma 2, Aopt
+must have seen at least m − x + 1 ≥ m − t⋆ + 1 empty edges of bi. In other words, Aopt
+probes all the edges of bi that SOE needs to probe; hence:
+
+τi ≤ τ ⋆
+i .
+
+(13)
+
+Set r = cost(SOE, G)/C(x) and a = Pn
+
+at least m − x + 1 edges for each of bk⋆+1, ..., bn, indicating
+
+i=k⋆+1 τ ⋆
+
+i . As explained earlier, Aopt probes
+
+a ≥ (n − k⋆)(m − x + 1).
+
+(14)
+
+Next, we establish the counterpart of Lemma 5. When k⋆ = k, it holds that C(x) ≥
+
+i=k⋆+1 τ ⋆
+
+i . Hence
+
+xk⋆ +Pn
+
+r ≤
+
+mk⋆ +Pn
+xk⋆ +Pn
+
+i=k⋆+1 τi
+i=k⋆+1 τ ⋆
+i
+
+≤
+
+mk⋆ + a
+xk⋆ + a
+
+.
+
+where the last inequality used (13). If x = m, then r = 1, and the lemma is trivially true.
+For x < m:
+
+r − 1 ≤
+
+(m − x)k⋆
+xk⋆ + a
+
+≤
+
+(by (14)) ≤
+
+(m − x)k⋆
+
+a
+
+(m − x)k⋆
+
+(n − k⋆)(m − x)
+
+=
+
+k⋆
+
+n − k⋆ =
+
+k
+
+n − k
+
+.
+
+We now prove the counterpart of Lemma 6. When k⋆ > k, an argument similar to that
+
+of Lemma 6 shows C(x) ≥ t⋆(k − 1) + m(k⋆ − k + 1) +Pn
+mk⋆ +Pn
+
+r ≤
+
+i=k⋆+1 τi
+
+i=k⋆+1 τ ⋆
+
+i . Thus,
+
+t⋆(k − 1) + m(k⋆ − k + 1) +Pn
+
+mk⋆ + a
+
+⇒
+
+mk⋆ + a − k(m − t⋆)
+
+i=k⋆+1 τ ⋆
+i
+
+(by (13) and t∗ ≤ m) ≤
+
+r − 1 ≤
+
+k(m − t⋆)
+
+mk⋆ + a − k(m − t⋆)
+
+(15)
+
+ACM Journal Name, Vol. V, No. N, Month 20YY.
+
+22
+
+·
+
+m
+
+m/2
+
+
+
+b2
+(a) G3
+
+b1
+
+m
+
+
+
+b1
+
+m/2
+
+0
+
+b2
+(b) G4
+
+Fig. 11. No algorithm is strictly optimal in ADET
+
+If t⋆ = m, then r = 1, in which case the lemma is trivially true. For t⋆ < m, by (14) and
+(15), we have:
+
+r − 1 ≤
+
+≤
+
+k(m − t⋆)
+
+mk⋆ + (n − k⋆)(m − t⋆ + 1) − k(m − t⋆)
+
+k(m − t⋆)
+
+n(m − t⋆) − k(m − t⋆)
+
+=
+
+k
+
+n − k
+
+,
+
+which completes the proof.
+
+The same conclusions in ARAN can be drawn about SOE in ADET. Speciﬁcally, for
+k ≤ n/2, SOE is also instance optimal in ADET. Furthermore, when k = O(1), SOE can
+be more expensive than the optimal algorithm in ADET only by a factor of 1 + O(1/n).
+
+Absence of a strictly optimal algorithm. We conclude the section by proving that no
+algorithm in ADET can be strictly optimal. We will use two input graphs G3 and G4
+as illustrated in Figure 11. For G3, order the white vertices so that the ﬁrst two probe-
+next(b2) return empty and solid, respectively. Similarly, for G4, impose an ordering for the
+ﬁrst two probe-next(b1) to return solid and empty, respectively. Observe that, for each of
+G3 and G4, there is an algorithm that can settle the 1-MCV problem with m + 1 queries.
+Speciﬁcally, to achieve this for G3, the algorithm can probe a single edge of b2 and all the
+edges of b1, whereas the algorithm for G4 can probe a single edge of b1 and all the edges of
+b2. We will prove, however, that no algorithm can guarantee ﬁnishing with at most m + 1
+queries on both graphs, which essentially means that no algorithm is optimal in all cases.
+Following the notations before, given an algorithm A ∈ ADET and a graph G, we
+denote by solidA(b) the number of solid edges that A probes on a black vertex b of G, and
+by emptyA(b) the corresponding number on the empty edges of b. We have:
+
+LEMMA 7. For any algorithm A ∈ ADET, max{cost(A, G3), cost(A, G4)} > m + 1.
+
+PROOF. We will use an adversary argument, the rationale of which is not to permit A
+to distinguish between G3 and G4 until we are sure that it must probe at least m + 2
+edges. First, note that, to conclude on deg(b1) > deg(b2), A needs to show solidA(b1) >
+m − emptyA(b2), or equivalently:
+
+solidA(b1) + emptyA(b2) ≥ m + 1.
+
+(16)
+
+Hence, if the input is G3 (G4) and two edges of b2 (b1) have been probed, the cost of A
+must be at least m + 2. To see this for G3, recall that one of the ﬁrst two edges probed on
+b2 is solid. This edge is not counted by the left hand side of (16), thus making the total cost
+at least m + 2. The reason for G4 is similar.
+
+ACM Journal Name, Vol. V, No. N, Month 20YY.
+
+·
+
+23
+
+Next, we describe the strategy that the adversary follows to force A to probe at least
+m + 2 edges. Let bi be the ﬁrst vertex selected by pick-black. Since the ﬁrst probe-next of
+b1 (b2) must be solid (empty) no matter the input graph is G3 or G4, A cannot distinguish
+between the two graphs after the ﬁrst query. Denote by bj the vertex chosen by the second
+pick-black. We enumerate all the possible cases:
+
+—bi = bj = b1: We ﬁx the input to be G4. By the earlier discussion, A costs at least m + 2
+
+as it has probed two edges of b1.
+
+—bi = bj = b2: We ﬁx the input as G3. A costs at least m + 2 as it has probed two edges
+
+of b2.
+
+—bi 6= bj: In this case, one solid edge of b1 and one empty edge of b2 are found. The
+algorithm is still unable to decide whether the input graph is G3 or G4. We then ﬁx the
+input according to the vertex bz chosen by the third pick-black. If bz = b1, let the input
+be G4; if bz = b2, let the input be G3. In either case, (again, by our earlier discussion)
+A requires at least m + 2 queries.
+
+This establishes the lemma.
+
+6. APPROXIMATE ALGORITHMS AND THEIR ANALYSIS
+
+We proceed to study the ǫ-approximate version of the k-MCV problem. Section 6.1 ﬁrst
+presents an algorithm for solving the problem when k = 1, and establishes its performance
+guarantees. Then, Section 6.2 extends our solution and analysis to general k > 1. Given a
+constant δ ∈ (0, 1), our algorithms succeed with probability at least 1 − δ and guarantee
+good efﬁciency in expectation.
+
+6.1 1-MCV
+
+Algorithm. The basic component of our method is a procedure called naive-sampling
+(NS) which, as given in Figure 12, is similar to the SS algorithm in Section 4. NS is
+given a parameter p, which is used to determine the number s of edges probed for each
+black vertex (Line 1). Each of these edges is randomly sampled from all the possible
+edges of b. We perform the sampling in a with-replacement manner, namely, each edge
+is chosen independently of the previous edges probed. Occasionally, we may waste some
+work by probing the same edge more than once, but allowing such redundancy facilitates
+the analysis considerably, as will be clear later. NS returns the black vertex having the
+largest number of solid edges sampled.
+
+Our algorithm for k = 1, called AMCV (see Figure 12), invokes NS repetitively with
+doubly decreasing p. Speciﬁcally, the ﬁrst invocation uses p = 1, whereas every subse-
+quent invocation halves the previous p. Assume that, in the current invocation, NS returns
+a black vertex b. AMCV terminates with b as the result if solid(b) is large enough (see
+Line 3); otherwise, another invocation is performed.
+
+Analysis. Next, we analyze the behavior of AMCV, and by doing so, reveal the rationales
+behind its design. For each black vertex b, deﬁne:
+
+p(b) = deg(b)/m.
+
+(17)
+
+Denote by b⋆ the black vertex with the maximum degree. Set t⋆ = deg(b⋆) and p⋆ = p(b⋆).
+The next lemma shows that, if the input parameter p of NS is set to p⋆, then NS returns a
+correct answer with high probability:
+
+ACM Journal Name, Vol. V, No. N, Month 20YY.
+
+24
+
+·
+
+1
+
+ǫ2 ln 3n
+
+algorithm naive-sampling(p)
+1. s = 12
+p
+2.
+3.
+4.
+
+for each black vertex b
+
+δ
+
+sample with replacement s edges of b
+solid(b) = the number of solid edges of b sampled
+(counting the same edge once more each time it is sampled)
+
+5. return (bret, solid(bret)), where bret is the black vertex b with the largest solid(b)
+
+(breaking ties arbitrarily)
+
+algorithm AMCV
+
+1.
+2.
+3.
+
+for p = 1, 1/2, 1/4, 1/8, ...
+
+(b, solid(b)) = naive-sampling(p)
+if solid(b) ≥ 2ps then return b
+/* s is given at Line 1 of naive-sampling */
+
+Fig. 12. Algorithm for solving the ǫ-approximate 1-MCV problem
+
+LEMMA 8. When executed on p = p⋆, NS returns a correct answer for the ǫ-approximate
+
+1-MCV problem with probability at least 1 − δ/3.
+
+PROOF. Consider the following two conditions:
+
+(1) solid(b⋆) > (1 − ǫ/2)sp⋆.
+(2) for every b such that deg(b) < (1 − ǫ)t⋆ (that is, b cannot be used as an answer),
+
+solid(b) < (1 − ǫ/2)sp⋆.
+
+If both conditions are satisﬁed, NS returns a correct result (for the approximate 1-MCV
+problem) because for any vertex b that is an illegal result, it must hold that solid(b) <
+(1 − ǫ/2)sp⋆ < solid(b⋆), meaning that b cannot be selected by Line 5 of algorithm naive-
+sampling (Figure 12). Next, we show that the two conditions hold simultaneously with
+high probability.
+
+For any black vertex b, solid(b) follows a binomial distribution, measuring the number
+of successes in s trials, each of which succeeds with probability p(b). Hence, solid(b) has
+expectation sp(b). By setting α = ǫ/2 and p = p⋆ in (7), we know that the probability for
+Condition 1 to fail is bounded above by exp(−sp⋆ǫ2/12) which equals δ/(3n) given our
+choice of s.
+
+In the rest of the proof, consider b as a vertex described in Condition 2. Set α = p⋆
+
+p(b) (1−
+ǫ/2) − 1 to ensure (1 − ǫ/2)p⋆ = (1 + α)p(b). Thus, Pr[solid(b) ≥ (1 − ǫ/2)sp⋆] =
+Pr[solid(b) ≥ (1 + α)sp(b)]. We then distinguish two possibilities:
+
+—If α ≥ 1, apply (5) with p = p(b), which gives:
+
+Pr[solid(b) ≥ (1 + α)sp(b)] ≤ exp(−(1 − ǫ/2)sp⋆/6) < δ/(3n),
+
+where the last inequality used the fact that 1 − ǫ/2 > 1/2.
+
+—If α < 1, apply (4) with p = p(b), which gives:
+
+Pr[solid(b) ≥ (1 + α)sp(b)] ≤ exp(−sp(b)α2/3) = exp(−sp⋆β/3)
+
+(18)
+
+ACM Journal Name, Vol. V, No. N, Month 20YY.
+
+·
+
+25
+
+where β = (1 − ǫ/2)α2/(1 + α). Note that deg(b) < (1 − ǫ)t⋆ implies that
+
+α > (1 − ǫ/2)/(1 − ǫ) − 1 = ǫ/(2 − 2ǫ).
+
+As β monotonically increases with α when α > 0, it holds that
+
+β >
+
+(1 − ǫ/2)(ǫ/(2 − 2ǫ))2
+
+1 + ǫ/(2 − 2ǫ)
+
+=
+
+ǫ2
+
+4 − 4ǫ
+
+> ǫ2/4.
+
+Plugging this into (18) shows that Pr[solid(b) ≥ (1 + α)sp(b)] ≤ exp(−sp⋆ǫ2/12) =
+δ/(3n).
+
+As there can be at most n − 1 such vertices b, by the union bound (a.k.a., Boole’s inequal-
+ity), the probability that at least one such b satisﬁes solid(b) ≥ (1 − ǫ/2)sp⋆ is at most
+n−1
+n
+Again, by the union bound, the probability that either Condition 1 or 2 fails is bounded
+
+δ
+3 , which is also the probability for Condition 2 to fail.
+
+above by δ/3. Hence, they hold at the same time with probability at least 1 − δ/3.
+
+The previous lemma suggests that, if p⋆ was known in advance, we could easily settle
+the ǫ-approximation 1-MCV problem by NS. Of course, in reality p⋆ is not necessarily
+available. AMCV deals with this by using p to approach p⋆ gradually. Even without
+knowing p⋆, we still hope that AMCV can terminate with a correct answer when p has
+eventually fallen into the range [p⋆/8, p⋆]. The reasons are two-fold. First, using a p ≤ p⋆
+essentially tells NS to sample more edges than necessary, and hence, guarantees at least
+the same success probability as in Lemma 8. Second, ensuring that p is not much smaller
+than p⋆ (we choose p ≥ p⋆/8) prevents NS from sampling excessively, so that we can still
+control the overall cost to be at most O(1) times greater than the cost of running NS with
+p⋆. The next lemma shows that our hope as described earlier will come true with high
+probability.
+
+LEMMA 9. With probability at least 1 − δ, both of the following happen:
+
+(1) AMCV terminates with a correct answer for the ǫ-approximate 1-MCV problem;
+(2) at termination, p ∈ [p⋆/8, p⋆].
+
+PROOF. The proof considers n ≥ 2 because the lemma is trivially correct for n = 1. If
+either of the two conditions stated in the lemma is violated, exactly one of the following
+events must have occurred:
+
+—Premature: AMCV terminates when p > p⋆.
+—Overdue: AMCV does not terminate after invoking NS with a p < p⋆/4.
+—Wrong-result: AMCV terminates when p ∈ [p⋆/8, p⋆], but returns an incorrect result.
+
+We will show that with high probability, none of these events occurs. The same argument
+in the proof of Lemma 8 can be used to show that Wrong-result happens with probability
+at most δ/3. Notice that for p < p⋆, the value of s is even greater than that in the proof of
+Lemma 8, i.e., we are using more samples than needed to guarantee Conditions 1 and 2.
+Next, we show that the same is true for both Premature and Overdue, which will complete
+the proof with the union bound.
+
+Bounding the probability of Premature. Let us focus on a single invocation of NS. Denote
+by ν the ratio between the current p and p⋆, namely, ν = p/p⋆. Let bret be the vertex
+
+ACM Journal Name, Vol. V, No. N, Month 20YY.
+
+26
+
+·
+
+returned by NS, and solid(bret) the number of solid edges of bret found in this invocation.
+We will prove
+
+Pr[solid(bret) ≥ 2sp] ≤ (δ/3)/(2ν)
+
+(19)
+
+which is equivalent to saying that AMCV terminates after this invocation with probability
+at most (δ/3)/(2ν). We will give a stronger fact that, for each black vertex b, it holds that
+
+Pr[solid(b) ≥ 2sp] ≤ (δ/3)/(2nν)
+
+(20)
+
+which validates (19) with the union bound.
+
+To prove (20), set α = 2 p
+
+p(b) − 1, which makes (1 + α)p(b) = 2p. Applying (5) and (6)
+
+with this α yields, respectively:
+
+Pr[solid(b) ≥ 2sp] ≤ exp(−2sp/6)
+
+Pr[solid(b) ≥ 2sp] ≤(cid:18)
+
+e
+
+2p/p(b)(cid:19)2sp
+
+≤(cid:16) e
+
+2ν(cid:17)2sp
+
+where the last inequality used the fact that p/p(b) ≥ ν. Our choice of s leads to
+
+(21)
+
+(22)
+
+exp(−2sp/6) = ((δ/3)/n)4/ǫ2
+
+≤ (δ/3)/4n
+
+where the last inequality is true for any n ≥ 2. This, together with (21), proves (20) for
+ν ≤ 2. On the other hand,
+
+(e/2ν)2sp = (2/ν)2sp(e/4)2sp ≤ (2/ν)2sp exp(−2sp/6) ≤ (2/ν)((δ/3)/4n)
+
+where the ﬁrst inequality used the fact that e/4 < e−1/6. The above, when combined with
+(22), proves (20) for ν > 2.
+
+Now that we have (19), the probability of Premature can be bounded above by the sum
+of the (δ/3)/(2ν) of all p > p⋆ deployed by AMCV to invoke NS. Let pmin be the smallest
+of those p; and set νmin = pmin/p⋆. Thus, the probability of Premature is at most
+
+δ/3
+2νmin
+
++
+
+δ/3
+
+2νmin · 2
+
++
+
+δ/3
+
+2νmin · 4
+
++ ... ≤
+
+δ/3
+νmin
+
+≤ δ/3.
+
+Bounding the probability of Overdue. It sufﬁces to prove that, when invoked with a p <
+p⋆/4, NS fails to terminate with probability at most δ/3. In fact, if NS does not terminate,
+it must be that solid(b⋆) ≤ 2sp ≤ sp⋆/2 ≤ (1 − ǫ/2)sp⋆. The probability of Overdue
+does not exceed
+
+Pr[solid(b⋆) ≤ 2sp] ≤ Pr[solid(b⋆) ≤ (1 − ǫ/2)p⋆] ≤ (δ/3)/n
+
+where the last inequality has been established in the proof of Lemma 8.
+
+Now it remains to bound the running time of AMCV.
+
+LEMMA 10. AMCV probes O( 1
+ǫ2
+
+nm
+
+t⋆ log n
+
+δ ) edges in expectation.
+
+PROOF. It is easy to see that the cost of NS with input parameter p is O(sn) = O( n
+p
+
+1
+
+ǫ2 log n
+
+δ ).
+
+Note that this cost is proportional to 1/p. Starting from the second invocation of NS, p is
+half of the p of the previous invocation. Hence, the cost of an invocation doubles each
+
+ACM Journal Name, Vol. V, No. N, Month 20YY.
+
+·
+
+27
+
+1
+
+nm
+
+time. Until p drops below p⋆/8, the total cost spent on NS is bounded by that of the last
+invocation, which in turn is bounded above by O( n
+p⋆
+
+δ ) = O( 1
+ǫ2
+
+t⋆ log n
+
+ǫ2 log n
+
+We use the term late phase to refer to the execution of AMCV with p < p⋆/8. Let λ be
+the cost of the entire late phase. Next, we bound the expectation of λ. Let λi (i ≥ 1) be
+the cost of the i-th invocation of NS in the late phase. It follows that λ1 = O( n
+ǫ2 log n
+δ ),
+p⋆
+and λi = 2λi−1 for i ≥ 2. As shown in the proof of Lemma 9, the probability that AMCV
+needs to go into the late phase is at most δ/3 because an Overdue event must have occurred.
+Furthermore, if NS needs to be executed i times in the late phase, it means that the previous
+i − 1 invocations in the late phase have all generated an Overdue event, respectively. In
+other words, the i-th invocation of NS in the late phase occurs with probability at most
+(δ/3)i. It follows that:
+
+δ ).
+
+1
+
+E[λ] ≤ λ1
+
+δ
+3
+
+3(cid:19)2
++ λ2(cid:18) δ
+
+3(cid:19)3
++ λ3(cid:18) δ
+
++ ... = λ1
+
+δ
+
+3 1 +
+
+2δ
+3
+
+3 (cid:19)2
++(cid:18) 2δ
+
++ ...!
+
+which is bounded by O(λ1δ/3).
+
+So we conclude:
+
+THEOREM 4. For any δ ∈ (0, 1), there is an algorithm that solves the ǫ-approximate
+δ ) edges in ex-
+
+1-MCV problem with probability at least 1 − δ, and probes O( 1
+ǫ2
+pectation, where t⋆ is the maximum degree of the black vertices.
+
+t⋆ log n
+
+nm
+
+6.2 k-MCV
+
+Algorithm. The algorithm in Figure 12 can be easily modiﬁed to support k > 1:
+—In NS (naive-sampling), Line 1 sets s = 24
+p
+
+δ , namely, twice as large as the
+
+ǫ2 ln 3n
+
+1
+
+original value.
+
+—For each black vertex b, as before, let solid(b) be the number of solid edges of b found.
+NS returns the k vertices b having the greatest solid(b) (breaking ties arbitrarily), to-
+gether with their solid(b) values.
+
+—In AMCV, let b1, ..., bk be the vertices obtained from NS at Line 2, sorted in such a way
+that solid(bi) ≥ solid(bj) for 1 ≤ i < j ≤ k. At Line 3, AMCV returns these vertices
+if solid(bk) ≥ 2ps.
+
+In the sequel, all occurrences of NS and AMCV refer to the above adapted algorithms,
+
+which capture the ones in Figure 12 as special cases.
+
+Analysis. Denote by b⋆
+1, ..., b⋆
+k the k black vertices with the maximum degrees (ties broken
+i = deg(b⋆
+i ) ≥ deg(b⋆
+arbitrarily) such that deg(b⋆
+i )
+and p⋆
+i ), where function p(.) is as given in (17). The next two lemmas are the
+counterparts of Lemmas 8 and 9. As the new proofs are based on the ideas already clariﬁed
+in Section 6.1, we will focus on explaining only the differences.
+
+j ) for 1 ≤ i < j ≤ k. Deﬁne t⋆
+
+i = p(b⋆
+
+LEMMA 11. When executed on p = p⋆
+
+k, NS returns a correct answer for the ǫ-approximate
+
+k-MCV problem with probability at least 1 − δ/3.
+
+PROOF. Given an i ≤ k and a black vertex b, we say that b fails on i in either of the
+
+following cases:
+
+—deg(b) ≥ t⋆
+
+i whereas solid(b) ≤ (1 − ǫ/2)sp⋆
+i ;
+
+ACM Journal Name, Vol. V, No. N, Month 20YY.
+
+28
+
+·
+
+—deg(b) < (1 − ǫ)t⋆
+
+i whereas solid(b) ≥ (1 − ǫ/2)sp⋆
+i .
+
+Observe that NS returns a correct answer if no vertex fails on any i ≤ k.
+
+With an argument similar to the proof of Lemma 8, we can show that each vertex b fails
+on an i ≤ k with probability at most ((δ/3)/n)2. Here, the square comes from the fact
+that we are using an s twice larger than that in Figure 12. Hence, with probability at least
+1 − nk((δ/3)/n)2 > 1 − δ/3, no vertex fails on any i ≤ k.
+
+LEMMA 12. With probability at least 1 − δ, both of the following happen:
+
+(1) AMCV terminates with a correct answer for the ǫ-approximate k-MCV problem;
+(2) at termination, p ∈ [p⋆/8, p⋆].
+
+PROOF. Below we redeﬁne the three events in the proof of Lemma 9 (referred to as the
+
+old proof in the sequel) and bound their occurrence probabilities:
+—Premature: AMCV terminates when p > p⋆
+k. When p > p⋆
+
+proof shows that, with probability at least 1 − δ/3, no vertex b ∈ B \ {b⋆
+satisﬁes solid(b) ≥ 2sp. Hence, Premature occurs with probability at most δ/3.
+
+k, the argument in the old
+k−1}
+
+1, ..., b⋆
+
+—Overdue: AMCV does not terminate after invoking NS with a p < p⋆
+
+k/4. The argument
+
+in the old proof can be used to prove that, when p < p⋆
+
+Pr[solid(b⋆
+
+k/4,
+i ) ≤ 2sp] ≤ (δ/3)/n
+
+for all i ≤ k. As a result, the probability that solid(b⋆
+i ) > 2sp for all i ≤ k is at least
+1 − δ/3 by the union bound. In other words, Overdue occurs with probability at most
+δ/3.
+
+—Wrong-result: AMCV terminates when p ∈ [p⋆/8, p⋆], but returns an incorrect result.
+
+The occurrence probability of this event is bounded above by δ/3 due to Lemma 11.
+
+If either of the two conditions stated in the lemma is violated, one of these events must
+
+have occurred. Hence, with the union bound, the above discussion completes the proof.
+
+The proof of Lemma 10 applies to the adapted AMCV directly, after changing t⋆ to t⋆
+k.
+
+Therefore, we arrive at:
+
+THEOREM 5. For any δ ∈ (0, 1), there is an algorithm that solves the ǫ-approximate
+δ ) edges in ex-
+
+k-MCV problem with probability at least 1 − δ, and probes O( 1
+ǫ2
+pectation, where t⋆
+
+k is the degree of the k-th most connected black vertex.
+
+log n
+
+nm
+t⋆
+
+k
+
+Remark. For ﬁxed ǫ and δ, the cost of our AMCV algorithm beats the Ω(nm) lower bound
+of solving the exact k-MCV problem as long as t⋆
+k = ω(log n). As another interesting case,
+when t⋆
+
+k = Ω(m), AMCV probes only O(n log n) edges.
+
+7. EXPERIMENTS
+
+In the sequel, we experimentally evaluate the performance of the proposed algorithms.
+Section 7.1 describes the data employed in our experimentation, and Section 7.2 clariﬁes
+the alternative methods to be examined. Sections 7.3-7.5 present the results on the exact
+k-MCV problem. Speciﬁcally, Section 7.3 explores under which environments can the
+problem be settled much faster than the naive solution that simply probes all edges. Sec-
+tions 7.4 and 7.5 evaluate the proposed techniques in the random-probe and deterministic-
+probe algorithm classes, respectively. Finally, Section 7.6 is devoted to the approximate
+k-MCV problem.
+
+ACM Journal Name, Vol. V, No. N, Month 20YY.
+
+·
+
+29
+
+7.1 Datasets
+
+Our experiments are based on synthetic and real data which are explained in the sequel:
+
+Power-law graphs. This is a family of synthetic graphs where the degrees of black vertices
+follow a power law distribution. Each graph is generated as follows. It has 5000 black and
+white vertices, respectively (i.e., |B| = |W | = 5000). For each black vertex b ∈ B, its
+degree deg(b) equals d (0 ≤ d ≤ 5000) with probability
+
+c(d + 1)−γ
+
+(23)
+
+where γ is a parameter of the power law, and c is a normalizing constant chosen to make
+d=0 (d + 1)−γ). Once deg(b) is decided,
+
+P5000
+d=0 c(d + 1)−γ equivalent to 1 (i.e., c = 1/P5000
+
+the deg(b) white vertices connected to b are selected randomly.
+
+As will be clear in the next section, we often need to control the average degree deg of
+the black vertices in a power-law graph. Hence, we need to set the parameter γ to generate
+a graph with the desired deg. This is achieved by utilizing the fact that the expectation of
+the power law in (23) is:
+
+5000
+
+Therefore, we can solve γ by equating the above formula to deg.
+
+Xd=0(cid:0)cd(d + 1)−γ(cid:1)
+
+NBA. This is a real graph selected to assess the beneﬁts of the proposed algorithms when
+they are incorporated into the execution engine of a relational DBMS. The original data
+(from www.nba.com) consists of 16739 NBA players in history. For each player, the dataset
+contains his performance statistics in 13 aspects, such as the numbers of points scored,
+rebounds, assists, etc. We deﬁne a dominating relationship between players based on the
+concept of k-dominance [Chan et al. 2006]. Speciﬁcally, a player p1 7-dominates another
+player p2 if p1 has better statistics than p2 in at least 7 aspects (i.e., a majority of the total
+13 aspects). We want to ﬁnd the k players that 7-dominate the largest number of players,
+as given by the following pseudo-SQL statement2:
+
+FROM PLAYER p1, PLAYER p2
+
+SELECT p1
+WHERE p1 7-dominates p2
+GROUP BY p1
+HAVING count(∗) ≥ the size of the k-th largest group
+
+where PLAYER is a table with 13 attributes, and one row for each player. The entire table
+occupies less than 1 mega bytes, and can be comfortably kept in main memory. Therefore,
+the total overhead is determined by the number of times the join predicate is evaluated. As
+explained in Section 1.1, evaluating the above statement is a k-MCV problem on a bipartite
+graph G = (B, W, E), where each of the vertex sets B and W includes all the players, and
+the edge set E has an edge between two players b ∈ B and w ∈ W if b 7-dominates w.
+The optimization goal is to minimize the number of edges probed.
+
+2This statement is essentially a top-k dominating query, which has been studied in [Papadias et al. 2005; Yiu and
+Mamoulis 2009]. However, the solutions in [Papadias et al. 2005; Yiu and Mamoulis 2009] are designed for a
+different dominance deﬁnition, where an item p1 dominates another p2 if and only if p1 is better than p2 in all
+aspects. Those solutions heavily rely on transitivity, namely, the fact that p1 dominates p2 and p2 dominates p1
+implies that p1 dominates p3. As shown in [Chan et al. 2006], transitivity does not hold on k-dominance.
+
+ACM Journal Name, Vol. V, No. N, Month 20YY.
+
+30
+
+·
+
+Actor. This is a real graph chosen to evaluate our algorithms in a querying-by-web-service
+environment (introduced in Section 1.1). The underlying data, which is publicly available
+at IMDB (www.imdb.com), is a social network between a set of actors, where two actors
+have an edge if they collaborated in a movie before. We extracted the 10000 most “active”
+actors that have the largest number of collaborators, and focused on studying their 2-hop
+relationships. Speciﬁcally, an actor a1 has a 2-hop relationship with another actor a2 if
+either a1 is a collaborator of a2, or they have a common collaborator (i.e., a1 is at most two
+hops away from a2 in the social network). Note that 2-hop relationships are an important
+type of characteristics of a social network, as pointed out in [Singla and Richardson 2008].
+We aimed at ﬁnding the k actors that have the largest number of 2-hop relationships.
+This is a k-MCV problem on a graph G = (B, W, E), where each of B and W contains
+all the actors, and E has an edge between two actors b ∈ B and w ∈ W if b has a 2-hop
+relationship with w. Detecting a 2-hop relationship between b and w can be accomplished
+by submitting the names of b and w to the website Cinema Freenet (see Section 1.1) and
+obtaining its reply. The overall cost is dominated by the network latency, which in turn
+is decided by the total number of relationships checked (i.e., the number of edges in E
+probed).
+
+7.2 Methods
+
+Exact k-MCV. Since no previous solution is known for the k-MCV problem, we con-
+centrate on comparing the proposed algorithms sample-and-sort (SS) and switch-on-empty
+(SOE), both of which were presented in Section 4. The value of k will be varied from 1 to
+100. Since the black vertex set B in all our data graphs have at least n = 5000 vertices,
+the condition k ≤ n/2 always holds.
+
+The cost of an algorithm is measured in the number of edge-probing queries issued (if
+the algorithm is randomized, the cost reported is the average of 5 runs). Sometimes we
+will also give a theoretical lower bound (LB) of the cost of any algorithm on the same data
+input. The lower bound is derived using the fact that the cost of SOE can be greater than
+that of the optimal algorithm by a factor of at most 1 + k/(n − k) (see Theorems 2 and
+3 and apply k ≤ n/2). Therefore, if SOE needs to probe x edges, we will report a lower
+bound of
+
+x
+
+1+k/(n−k) .
+
+In Sections 7.3 and 7.4, we study the random-probe algorithm class ARAN, where an
+algorithm deploys the probe-next implementation in Figure 3. Section 7.5 investigates the
+deterministic-probe algorithm class ADET, where an algorithm applies the probe-next in
+Figure 4.
+
+Approximate k-MCV. We will focus on the AMCV algorithm proposed in Section 6,
+which is the sole known solution to the approximate k-MCV problem. As before, the cost
+of AMCV is gauged as the average number of probed edges in 5 runs, unless otherwise
+stated. Recall that, the building block of AMCV is the naive-sampling (NS) algorithm,
+where the number s of samples per black vertex is determined as s = 24
+(see
+p
+Figure 12 and the adaptations in Section 6.2). For convenience, we write s to be equivalent
+to ξtheory/p, where
+
+ǫ2 ln 3n
+
+1
+
+δ
+
+ξtheory =
+
+24
+ǫ2 ln
+
+3n
+δ
+
+(24)
+
+which remains ﬁxed in all the invocations of NS in AMCV. This parameter is crucial to the
+
+ACM Journal Name, Vol. V, No. N, Month 20YY.
+
+SOE
+
+LB
+
+·
+
+31
+
+ 0
+
+ 1000
+
+ 2000
+ 3000
+average degree
+
+ 4000
+
+ 5000
+
+)
+n
+o
+
+i
+l
+l
+i
+
+m
+
+(
+ 
+s
+e
+i
+r
+e
+u
+q
+
+ 
+f
+
+o
+
+ 
+r
+e
+b
+m
+u
+n
+
+ 32
+
+ 16
+
+ 8
+
+ 4
+
+ 2
+
+ 1
+
+ 0.5
+
+ 0.25
+
+Fig. 13.
+
+Impact of the average degree of black vertices
+
+efﬁciency of AMCV.
+
+As with most randomized algorithms, the theoretical analysis of AMCV is rather pes-
+simistic, which in our context means that the value of s as computed with ξtheory is typ-
+ically unnecessarily larger than what is needed in practice by a wide margin. The main
+cause is the extensive use of the union bound, which is known to be, albeit helpful for
+theoretical analysis, almost always excessively loose in reality. The implication is that,
+in practice, there is hope for utilizing a much smaller s to achieve the desired precision
+requirements.
+
+To give a simple heuristic of setting s for practical use, we aim at replacing ξtheory with
+a good, much lower, ξ so that we can calculate s to be ξ/p. With a tuning process to be
+presented in Section 7.6, we observed that
+
+ξheuristic = ξtheory/2000
+
+(25)
+
+turns out to be a nice choice. The resulting version of AMCV, which is the same as the
+theoretical version but applies the above equation to decide s, is referred to as AMCV-H
+(standing for heuristic AMCV).
+
+7.3 How pessimistic is the worst case?
+
+If B and W have n and m edges respectively, solving a k-MCV problem requires probing
+nm edges in the worst case. The objective of this subsection is to ﬁnd out when it is
+possible to achieve cost (much) lower than nm. For this purpose, we generated a series
+of power-law graphs whose deg (i.e., the average degree of black vertices) ranges from
+the minimum 0 to the maximum 5000. Then, we measured the performance of SOE (the
+version in ARAN) in settling the 10-MCV problem on each of these graphs.
+
+Figure 13 plots the cost of SOE and the lower bounds as a function of deg (notice that
+the vertical axis is in log scale). Recall that both n and m are 5000 in every power-law
+graph, so the value of nm equals 25 million. When deg is close to the extreme value 0 or
+5000, SOE needs to probe all the edges, and thus, incurs the worst-case cost. However, its
+efﬁciency improves dramatically soon after deg moves away from the extreme values. For
+example, when deg equals 250 (i.e., on average, a black vertex is connected to 5% of the
+white vertices), SOE probes around 2 million edges, which is smaller than the worst case
+by a factor over an order of magnitude. The minimum overhead of SOE is observed when
+
+ACM Journal Name, Vol. V, No. N, Month 20YY.
+
+32
+
+·
+
+number of queries (million)
+ 10.4
+ 10.3
+ 10.2
+ 10.1
+ 10
+ 9.9
+ 9.8
+ 9.7
+ 9.6
+
+1
+
+ 5  10  15  20  25  30  35  40  45  50
+
+number of queries (million)
+ 0.88
+ 0.86
+ 0.84
+ 0.82
+ 0.8
+ 0.78
+ 0.76
+ 0.74
+
+1
+
+ 5  10  15  20  25  30  35  40  45  50
+
+s
+
+s
+
+(a) Power law with deg = 50
+
+(b) Power law with deg = 3000
+
+number of queries (million)
+
+ 20
+ 18
+ 16
+ 14
+ 12
+ 10
+ 8
+ 6
+ 4
+
+1
+
+ 5  10  15  20  25  30  35  40  45  50
+
+s
+
+(c) NBA
+
+number of queries (million)
+ 11.2
+ 11
+ 10.8
+ 10.6
+ 10.4
+ 10.2
+ 10
+ 9.8
+ 9.6
+ 9.4
+ 9.2
+
+1
+
+ 5  10  15  20  25  30  35  40  45  50
+
+s
+
+(d) Actor
+
+Fig. 14. Tuning the parameter s of algorithm SS
+
+deg is close to the middle value 2500; in this case, SOE needs to probe only less than half
+million edges.
+
+It is clear that the worst-case cost can occur only in a highly sparse or dense graph. For
+other graphs, the cost can be substantially reduced. The efﬁciency of SOE is built exactly
+on this observation. In fact, as shown in Figure 13, the cost of SOE is very close to the
+lower bound.
+
+7.4 Performance of random-probe algorithms
+
+Tuning sample-and-sort. Recall that algorithm SS needs a parameter s, which is the
+number of edges that are probed for each black vertex in the sampling phase. The next
+set of experiments aims to decide a good value of s. Towards this, given a data graph
+G = (B, W, E), we measure the cost of SS when s is set to 1, 2, ..., 50, respectively. Fig-
+ure 14 shows the results when the input G is the power law graphs with deg = 50 and 3000
+respectively, and the real graphs NBA and Actor. Clearly, the best value of s (minimizing
+the overhead of SS) is different for each dataset. Nevertheless, a common pattern is that SS
+is expensive when s is too small. Overall, a good choice of s is around 20, which achieves
+reasonable efﬁciency in all cases. Therefore, we ﬁx s to 20 in the following experiments.
+
+Scalability with k. We proceed to compare SOE and SS in k-MCV computation by in-
+creasing k from 1 to 100. Figure 15 illustrates the results, as well as the lower bounds, on
+the same graphs in Figure 14. For benchmarking, remember that the worst-case cost is 25
+
+ACM Journal Name, Vol. V, No. N, Month 20YY.
+
+·
+
+33
+
+SS
+
+SOE
+
+LB
+
+number of queries (million)
+
+ 25
+
+number of queries (million)
+ 2.5
+
+ 20
+
+ 15
+
+ 10
+
+ 5
+
+ 0
+
+1
+
+ 10  20  30  40  50  60  70  80  90  100
+
+ 2
+
+ 1.5
+
+ 1
+
+ 0.5
+
+ 0
+
+1
+
+ 10  20  30  40  50  60  70  80  90  100
+
+k
+
+k
+
+(a) Power law with deg = 50
+
+(b) Power law with deg = 3000
+
+number of queries (million)
+
+number of queries (million)
+
+ 25
+
+ 20
+
+ 15
+
+ 10
+
+ 5
+
+ 0
+
+1
+
+ 10  20  30  40  50  60  70  80  90  100
+
+k
+
+(c) NBA
+
+ 20
+ 18
+ 16
+ 14
+ 12
+ 10
+ 8
+ 6
+ 4
+ 2
+ 0
+
+1
+
+ 10  20  30  40  50  60  70  80  90  100
+
+k
+
+(d) Actor
+
+Fig. 15. Performance vs. k (random-probe class)
+
+million for power-law graphs, 167392 > 280 million for NBA, and 100002 = 100 million
+for Actor.
+
+The overhead of SS and SOE is always signiﬁcantly lower than the worst case (often by
+orders of magnitude), especially for k ≤ 10. The only exception is in Figure 15a, when
+k approaches 100. This is expected because a graph with deg = 50 is very sparse (on
+average, a black vertex is connected to only 1% of the white vertices), so most of the edges
+must be probed to deal with a relatively large k. In all the experiments, SOE consistently
+outperforms SS, and its cost is only slightly higher than the lower bounds.
+
+7.5 Performance of deterministic-probe algorithms
+
+The previous experiments focused on the random-probe algorithm class ARAN. This sub-
+section evaluates SS and SOE when they are deployed as algorithms in the deterministic-
+probe class ADET. Recall that every algorithm in ADET probes the hidden edges of each
+black vertex in the same probing sequence (instead of a random order as in ARAN) that is
+prescribed by the underlying application (see Figure 4).
+
+The following experiments have two objectives. The ﬁrst one is to inspect the efﬁciency
+of SS and SOE in the deterministic scenario. The second, perhaps more interesting, objec-
+tive is to understand how their efﬁciency is affected by the ordering of the white vertices in
+the probing sequence. For this purpose, we considered a set of sequences that are controlled
+by a parameter called distortion d, which ranges from 0 to 1. Speciﬁcally, a sequence with
+
+ACM Journal Name, Vol. V, No. N, Month 20YY.
+
+34
+
+·
+
+dSS
+
+dSOE
+
+SS
+
+SOE
+
+LB
+
+number of queries (million)
+
+ 5
+
+number of queries (million)
+
+ 10
+
+ 4
+
+ 3
+
+ 2
+
+ 1
+
+ 0
+
+ 20
+
+ 40
+
+ 60
+
+ 80
+
+ 100
+
+distortion (percent)
+
+(a) NBA
+
+ 8
+
+ 6
+
+ 4
+
+ 2
+
+ 0
+
+ 0
+
+ 20
+
+ 40
+
+ 60
+
+ 80
+
+ 100
+
+distortion (percent)
+
+(b) Actor
+
+Fig. 16. Effects of distortion (deterministic-probe class)
+
+distortion 0 ranks the white vertices in ascending order of their degrees (or equivalently, in
+descending order of how many empty edges they have). On the other extreme, a sequence
+with distortion 1 is simply a random permutation of the white vertices. In general, in a se-
+quence with distortion d, the positions of dm white vertices are randomly permutated (the
+other white vertices remain in ascending order of their degrees), where m is the number of
+white vertices.
+
+To distinguish with the SS (SOE) in the random-probe class ARAN, we refer to the
+version of SS (SOE) in the deterministic-probe class ADET as dSS (dSOE). The parameter
+s of dSS is also set to 20, after a tuning process similar to Figure 14. Concerning 10-MCV
+computation on NBA, Figure 16a plots the performance of dSS and dSOE as a function
+of distortion, together with the theoretical lower bounds (which are calculated by dividing
+the cost of dSOE by 1 + 10
+n−10 , where n is the number of black vertices). For referencing,
+we also include the cost of SS and SOE so that comparison can be made between random-
+and deterministic-probe solutions. In the same fashion, Figure 16b presents the 10-MCV
+results on Actor.
+
+Clearly, dSS and dSOE beneﬁt signiﬁcantly from a sorted ordering. In particular, when
+distortion is 0 (i.e., completely sorted), the cost of dSOE is nearly 10 times lower than
+its cost when distortion is 1 (i.e., completely random). In general, the overhead of both
+dSS and dSOE grows with distortion, and eventually (i.e., at distortion 1) reaches the cost
+of SS and SOE. This phenomenon is not surprising at all. When the white vertices with
+more empty edges are probed ﬁrst, many empty edges can be discovered sooner for each
+black vertex. As a result, the upper bounds of the degrees of the black vertices drop faster,
+which enables earlier termination. The relative performance of dSS and dSOE is similar
+to the random-probe class reported in Figure 15. Also, dSOE is once again nearly optimal,
+leaving little room for further improvements. It is worth pointing out that, the above results
+do not imply the superiority of dSOE over SOE in all cases, which can be easily disproved
+by designing an adverse probing sequence that forces dSOE to discover, for each non-
+result vertex, many solid edges before empty edges. Consider the example in Figure 10,
+on which the expected cost of SOE is approximately 1.56m, as explained in Section 5.1.
+If the probing sequence is such that all the solid edges of b are probed before its empty
+edges, then dSOE needs to probe m/10 + 1 + m/2 = 0.6m + 1 edges of b, in order to ﬁnd
+1 + m/2 empty edges. As dSOE also checks all the m edges of b⋆, the total overhead of
+
+ACM Journal Name, Vol. V, No. N, Month 20YY.
+
+·
+
+35
+
+dSOE is 1.6m + 1 > 1.56m, i.e., more expensive than the expected cost of SOE.
+
+7.6 Performance of AMCV
+
+Having elaborated on the characteristics of our exact solutions, we now proceed to study
+the behavior of the proposed algorithm AMCV for the approximate k-MCV problem. As
+explained earlier, AMCV applies (24) to calculate the parameter s, which as will be shown
+shortly is much larger than necessary. Hence, the ﬁrst set of experiments below is designed
+to (i) measure how small s can be without violating the precision constraints, and (ii)
+examine the effectiveness of the heuristic in Section 7.2 that resorts to (25). As the second
+step, we compare the efﬁciency of AMCV to our fastest exact algorithm, namely, SOE.
+
+Behavior of AMCV in practice. Given a value of ξ, let us use [ξ]-AMCV to refer to the
+algorithm that differs from AMCV only in that the value of s is set to be ξ/p. In other
+words, AMCV is essentially [ξtheory]-AMCV, whereas AMCV-H is [ξheuristic]-AMCV,
+with ξtheory and ξheuristic given in (24) and (25), respectively. Lowering ξ reduces the
+execution cost of the algorithm, but on the other hand, increases the risk of being unable
+to meet the precision guarantees as mandated by ǫ and δ. Given a ﬁxed pair of ǫ and δ
+and a particular dataset, we deﬁne ξmin to be the minimum ξ such that [ξ]-AMCV is able
+to achieve the desired precision requirements on that dataset. Equivalently, the minimum
+value of s for attaining those requirements equals ξmin/p.
+
+To measure ξmin, we started with a large ξ and gradually decreased it. For each ξ, we
+ran algorithm [ξ]-AMCV (on the underlying dataset) 100 times, and recorded the number
+x of times the algorithm successfully returned a result that is legal under the deﬁnition of
+ǫ-approximate k-MCV. We say that the ξ is acceptable if x/100 ≥ 1 − δ. Then, ξmin took
+the value of the smallest acceptable ξ. The value of k was ﬁxed to 10 in all the following
+experiments, unless otherwise stated.
+
+To examine how ξmin scales with ǫ, we ﬁxed δ = 0.1 and measured ξmin as ǫ varied
+from 0.01 to 0.1. The results on the power-law graph with deg = 50 are presented in
+Figure 17a, where the corresponding ξtheory and ξheuristic are also given for comparison.
+The results of the same experiment the power-law graph with deg = 3000, NBA and Actor
+are illustrated in Figure 17b, 17c and 17d, respectively. It is clear that ξmin is always
+lower than ξtheory by orders of magnitudes, conﬁrming our earlier conjecture that ξtheory
+obtained from theoretical analysis is over pessimistic in practice. Furthermore, observe
+that ξheuristic presents itself as a nice ﬁtting line of ξmin.
+
+In a similar experiment, we inspected the behavior of ξmin with respect to δ, by ﬁxing
+ǫ to 0.05 while increasing δ from 0.05 to 0.5. Figure 18 demonstrates the results on the
+same datasets as in Figure 17. Once again, ξmin, closely approximated by ξheuristic, is
+signiﬁcantly smaller than its theoretical counterpart ξtheory.
+
+Efﬁciency of AMCV-H. Treating algorithm SOE as a benchmark, the subsequent experi-
+ments evaluate the performance of AMCV-H, i.e., the practical version of AMCV param-
+eterized by ξheuristic as discussed in Section 7.2. We start by assessing how the cost of
+the algorithms is affected by k. Figure 19 plots the cost as a function of k on different
+datasets, when ǫ and δ are set to 0.05 and 0.1, respectively. Recall that, due to its heuris-
+tic nature, AMCV-H may not achieve the theoretical guarantees prescribed by ǫ and δ.
+Whenever this happens, in the diagrams of Figure 19, we present a percentage ǫactual to
+indicate that the output by AMCV-H is an ǫactual-approximate k-MCV result according
+to the failure probability designated by δ. For example, in Figure 19a, the 6.2% means
+
+ACM Journal Name, Vol. V, No. N, Month 20YY.
+
+36
+
+·
+
+107
+
+106
+
+105
+
+104
+
+103
+
+102
+
+ξmin
+
+ξtheory
+
+ξheuristic
+
+107
+
+106
+
+105
+
+104
+
+103
+
+102
+
+101
+
+ 0.01  0.02  0.03  0.04  0.05  0.06  0.07  0.08  0.09  0.1
+
+101
+
+ 0.01  0.02  0.03  0.04  0.05  0.06  0.07  0.08  0.09  0.1
+
+ǫ
+
+ǫ
+
+(a) Power law with deg = 50
+
+(b) Power law with deg = 3000
+
+107
+
+106
+
+105
+
+104
+
+103
+
+102
+
+107
+
+106
+
+105
+
+104
+
+103
+
+102
+
+101
+
+ 0.01  0.02  0.03  0.04  0.05  0.06  0.07  0.08  0.09  0.1
+
+101
+
+ 0.01  0.02  0.03  0.04  0.05  0.06  0.07  0.08  0.09  0.1
+
+ǫ
+
+(c) NBA
+
+ǫ
+
+(d) Actor
+
+Fig. 17.
+
+ξmin, ξtheory, and ξheuristic vs. ǫ (δ = 0.1, k = 10)
+
+that, for k = 7, AMCV-H achieves the precision level of 0.062-approximate k-MCV with
+failure probability δ = 0.1.
+
+A general observation from Figure 19 is that AMCV-H signiﬁcantly outperforms SOE
+when the cost of SOE is large, i.e., the data input is “hard”. When the input is “easy”,
+both algorithms are very fast with AMCV-H sometimes being more expensive. This is
+consistent with the common understanding that probabilistic algorithms ﬁnd their values
+mainly in dealing with datasets that are costly to process with deterministic algorithms.
+Another key observation is that the cost of AMCV-H is insensitive to k, while that of SOE
+increases rapidly with this parameter. In fact, we can see that for k = 10, AMCV-H is
+always better than SOE except on the easiest input (i.e., the graph in Figure 19b).
+
+The next experiments inspect the inﬂuence of ǫ and δ, by ﬁxing k to 10. Setting δ = 0.1,
+Figure 20 presents the results when ǫ varies from 0.01 to 0.1, while setting ǫ = 0.05,
+Figure 21 presents the results when δ varies from 0.05 to 0.5. We annotate all diagrams
+with percentages that carry the same meanings as in Figure 19. The main observation in
+Figure 20 is that AMCV-H is expensive when ǫ is very low, i.e., an exceedingly small
+error is targeted, such that in this case we would be better off by simply running the exact
+algorithm SOE. However, AMCV-H quickly improves as ǫ increases, and outperforms SOE
+in all datasets starting from ǫ = 0.06. On the other hand, as shown in Figure 21, the cost
+of AMCV-H is insensitive to δ, which is expected because δ appears in a logarithm in the
+running time (see Theorem 5).
+
+ACM Journal Name, Vol. V, No. N, Month 20YY.
+
+δ
+
+δ
+
+100
+
+100
+
+δ
+
+δ
+
+ξmin
+
+ξtheory
+
+ξheuristic
+
+·
+
+37
+
+106
+
+105
+
+104
+
+103
+
+102
+
+101
+
+106
+
+105
+
+104
+
+103
+
+102
+
+101
+
+ 0.05  0.1  0.15  0.2  0.25  0.3  0.35  0.4  0.45  0.5
+
+ 0.05  0.1  0.15  0.2  0.25  0.3  0.35  0.4  0.45  0.5
+
+(a) Power law with deg = 50
+
+(b) Power law with deg = 3000
+
+106
+
+105
+
+104
+
+103
+
+102
+
+101
+
+106
+
+105
+
+104
+
+103
+
+102
+
+101
+
+100
+
+100
+
+ 0.05  0.1  0.15  0.2  0.25  0.3  0.35  0.4  0.45  0.5
+
+ 0.05  0.1  0.15  0.2  0.25  0.3  0.35  0.4  0.45  0.5
+
+(c) NBA
+
+(d) Actor
+
+Fig. 18.
+
+ξmin, ξtheory, and ξheuristic vs. δ (ǫ = 0.05, k = 10)
+
+In general, as long as ǫ is not excessively small, AMCV-H is efﬁcient regardless of
+the data input. This is a nice advantage over SOE, which can be as expensive as the naive
+solution when the input is hard, as is evident from Figure 13. Hence, AMCV-H is preferred
+in scenarios where ǫ-approximate results sufﬁce, and yet, the hardness of the dataset cannot
+be reliably estimated. In fact, AMCV-H can even be used as a pilot run that serves as a
+“hardness test”. Speciﬁcally, if the output of AMCV-H indicates that the degree of the k-th
+most connected black vertex is close to m (i.e., the number of white vertices), we can infer
+that the dataset is easy, and invoke SOE to ﬁnd the exact answers. On the other hand, if
+the degree of the k-th most connected black vertex is far from m, we know that the dataset
+is hard, in which case running SOE should be avoided because it may incur prohibitively
+expensive overhead.
+
+8. CONCLUSIONS
+
+This paper studied the k most connected vertex (k-MCV) problem on an n × m hidden
+bipartite graph such that k ≤ n/2. We presented an algorithm that is instance optimal in a
+class of randomized algorithms, and a class of deterministic algorithms. On any data input,
+our solution can be more expensive than the optimal algorithm of each class by a factor of
+at most 2. We also proved that no algorithm in the deterministic class can be optimal in all
+cases. Currently, it remains open whether an optimal algorithm exists in the randomized
+class.
+
+ACM Journal Name, Vol. V, No. N, Month 20YY.
+
+38
+
+·
+
+AMCV-H
+
+number of queries (million)
+ 10
+ 9
+ 8
+ 7
+ 6
+ 5
+ 4
+ 3
+ 2
+ 1
+ 0
+
+ 1
+
+ 2
+
+ 3
+
+ 4
+
+ 5
+
+11.1%
+
+6.2% 9.7% 10.4%
+
+ 6
+
+ 7
+
+ 8
+
+ 9
+
+ 10
+
+k
+
+SOE
+number of queries (million)
+ 0.8
+ 0.7
+ 0.6
+ 0.5
+ 0.4
+ 0.3
+ 0.2
+ 0.1
+ 0
+
+ 1
+
+ 2
+
+ 3
+
+ 4
+
+ 5
+
+ 6
+
+ 7
+
+ 8
+
+ 9
+
+ 10
+
+k
+
+(a) Power law with deg = 50
+
+(b) Power law with deg = 3000
+
+number of queries (million)
+ 4
+
+ 3
+
+ 2
+
+ 1
+
+ 0
+
+ 1
+
+ 2
+
+ 3
+
+ 4
+
+ 5
+
+ 6
+
+ 7
+
+ 8
+
+ 9
+
+ 10
+
+k
+
+(c) NBA
+
+number of queries (million)
+ 9
+ 8
+ 7
+ 6
+ 5
+ 4
+ 3
+ 2
+ 1
+ 0
+
+ 1
+
+ 2
+
+ 3
+
+ 4
+
+ 5
+
+ 6
+
+ 7
+
+ 8
+
+ 9
+
+ 10
+
+k
+
+(d) Actor
+
+Fig. 19. Performance vs. k (ǫ = 0.05, δ = 0.1)
+
+As a second step, we gave an algorithm for solving an ǫ-approximate version of the
+k-MCV problem with probabilistic quality bounds. While this paper has concentrated on
+bipartite graphs, our algorithm can be extended to work on general graphs, still ensuring
+all the theoretical guarantees.
+
+We believe that query processing in hidden graphs is a promising research direction. For
+future work, one may consider generalizing the k-MCV problem to multi-partite graphs,
+namely, the top-k version of t-ary semi-join with t > 2. It may also be interesting to re-visit
+conventional graph problems on hidden graphs. The existing algorithms may not regard
+edge-probing as a costly operation, and thus, can be prohibitively expensive if applied in a
+straightforward manner.
+
+Acknowledgements
+
+This work was (i) supported by WCU (World Class University) program under the National
+Research Foundation of Korea, and funded by the Ministry of Education, Science and
+Technology of Korea (Project No: R31-30007), (ii) supported by grants 4169/09, 4166/10,
+4165/11 from HKRGC, and (iii) supported by National Grant Fundamental Research 973
+Program of China (project No: 2012CB316200). We would like to thank the anonymous
+reviewers for their insightful comments.
+
+ACM Journal Name, Vol. V, No. N, Month 20YY.
+
+AMCV-H
+
+2.3%
+
+number of queries (million)
+ 40
+ 35
+ 30
+ 25
+ 20
+ 15
+ 10
+ 5
+ 0
+ 0.01  0.02  0.03  0.04  0.05  0.06  0.07  0.08  0.09  0.1
+
+5.1% 8.2% 12% 15% 17% 18% 21%
+
+4.0%
+
+24%
+
+·
+
+39
+
+SOE
+number of queries (million)
+14
+
+ 4
+
+ 3
+
+ 2
+
+ 1
+
+13%
+
+7.1% 9.1% 11%
+
+ 0
+ 0.01  0.02  0.03  0.04  0.05  0.06  0.07  0.08  0.09  0.1
+
+ǫ
+
+ǫ
+
+(a) Power law with deg = 50
+
+(b) Power law with deg = 3000
+
+number of queries (million)
+50
+
+number of queries (million)
+ 30
+
+ 14
+ 12
+ 10
+ 8
+ 6
+ 4
+ 2
+ 0
+ 0.01  0.02  0.03  0.04  0.05  0.06  0.07  0.08  0.09  0.1
+
+8.3% 11% 15%
+
+18%
+
+ 25
+
+ 20
+
+ 15
+
+ 10
+
+ 5
+
+16%
+
+ 0
+ 0.01  0.02  0.03  0.04  0.05  0.06  0.07  0.08  0.09  0.1
+
+7.2% 9.3% 13% 14%
+
+ǫ
+
+(c) NBA
+
+ǫ
+
+(d) Actor
+
+Fig. 20. Performance vs. ǫ (k = 10, δ = 0.1)
+
+REFERENCES
+
+AFSHANI, P., BARBAY, J., AND CHAN, T. M. 2009. Instance-optimal geometric algorithms. In Proceedings of
+
+Annual IEEE Symposium on Foundations of Computer Science (FOCS). 129–138.
+
+ALON, N., BEIGEL, R., KASIF, S., RUDICH, S., AND SUDAKOV, B. 2004. Learning a hidden matching. SIAM
+
+Journal of Computing 33, 2, 487–501.
+
+ALON, N. AND KRIVELEVICH, M. 2002. Testing k-colorability. SIAM Journal of Computing 15, 2, 211–227.
+
+ALON, N. AND SHAPIRA, A. 2008a. A characterization of the (natural) graph properties testable with one-sided
+
+error. SIAM Journal of Computing 37, 6, 1703–1727.
+
+ALON, N. AND SHAPIRA, A. 2008b. Every monotone graph property is testable. SIAM Journal of Comput-
+
+ing 38, 2, 505–522.
+
+ANGLES, R. AND GUTI ´ERREZ, C. 2008. Survey of graph database models. ACM Computing Surveys 40, 1.
+
+ANGLUIN, D. AND CHEN, J. 2008. Learning a hidden graph using O(logn) queries per edge. Journal of
+
+Computer and System Sciences (JCSS) 74, 4, 546–556.
+
+BARAN, I. AND DEMAINE, E. D. 2005. Optimal adaptive algorithms for ﬁnding the nearest and farthest point
+
+on a parametric black-box curve. Int. J. Comput. Geometry Appl. 15, 4, 327–350.
+
+BARBAY, J. AND CHEN, E. Y. 2008. Convex hull of the union of convex objects in the plane: an adaptive
+
+analysis. In Proceedings of the Canadian Conference on Computational Geometry (CCCG).
+
+BIEDL, T. C., BREJOV ´A, B., DEMAINE, E. D., HAMEL, A. M., L ´OPEZ-ORTIZ, A., AND VINAR, T. 2004.
+
+Finding hidden independent sets in interval graphs. Theor. Comput. Sci. 310, 1-3, 287–307.
+
+BOGDANOV, A., OBATA, K., AND TREVISAN, L. 2002. A lower bound for testing 3-colorability in bounded-
+In Proceedings of Annual IEEE Symposium on Foundations of Computer Science (FOCS).
+
+degree graphs.
+93–102.
+
+ACM Journal Name, Vol. V, No. N, Month 20YY.
+
+40
+
+·
+
+AMCV-H
+
+number of queries (million)
+ 10
+ 9
+ 8
+ 7
+ 6
+ 5
+ 4
+ 3
+ 2
+ 1
+ 0
+ 0.05  0.1  0.15  0.2  0.25  0.3  0.35  0.4  0.45  0.5
+
+12% 11% 11% 10% 10% 10% 9.7% 7.9%
+
+13%
+
+7.8%
+
+SOE
+number of queries (million)
+ 0.6
+
+ 0.5
+
+ 0.4
+
+ 0.3
+
+ 0.2
+
+ 0.1
+
+ 0
+ 0.05  0.1  0.15  0.2  0.25  0.3  0.35  0.4  0.45  0.5
+
+δ
+
+δ
+
+(a) Power law with deg = 50
+
+(b) Power law with deg = 3000
+
+number of queries (million)
+ 4
+ 3.5
+ 3
+ 2.5
+ 2
+ 1.5
+ 1
+ 0.5
+ 0
+ 0.05  0.1  0.15  0.2  0.25  0.3  0.35  0.4  0.45  0.5
+
+number of queries (million)
+ 9
+ 8
+ 7
+ 6
+ 5
+ 4
+ 3
+ 2
+ 1
+ 0
+ 0.05  0.1  0.15  0.2  0.25  0.3  0.35  0.4  0.45  0.5
+
+δ
+
+(c) NBA
+
+δ
+
+(d) Actor
+
+Fig. 21. Performance vs. δ (k = 10, ǫ = 0.05)
+
+BORODIN, A. AND EL-YANIV, R. 1998. Online Computation and Competitive Analysis. Cambridge University
+
+Press.
+
+CHAN, C. Y., JAGADISH, H. V., TAN, K.-L., TUNG, A. K. H., AND ZHANG, Z. 2006. Finding k-dominant
+
+skylines in high dimensional space. In Proceedings of ACM Management of Data (SIGMOD). 503–514.
+
+CORMEN, T. H., LEISERSON, C. E., RIVEST, R. L., AND STEIN, C. 2001. Introduction to Algorithms, Second
+
+Edition. The MIT Press.
+
+DEMAINE, E. D., HARMON, D., IACONO, J., KANE, D., AND P ˘ATRAS¸CU, M. 2009. The geometry of binary
+search trees. In Proceedings of the Annual ACM-SIAM Symposium on Discrete Algorithms (SODA). 496–505.
+
+DEMAINE, E. D., L ´OPEZ-ORTIZ, A., AND MUNRO, J. I. 2000. Adaptive set intersections, unions, and differ-
+
+ences. In Proceedings of the Annual ACM-SIAM Symposium on Discrete Algorithms (SODA). 743–752.
+
+FAGIN, R., LOTEM, A., AND NAOR, M. 2001. Optimal aggregation algorithms for middleware. In Proceedings
+
+of ACM Symposium on Principles of Database Systems (PODS).
+
+GAREY, M. R. AND JOHNSON, D. S. 1979. Computers and Intractability: A Guide to the Theory of NP-
+
+Completeness. W. H. Freeman.
+
+GOLDREICH, O., GOLDWASSER, S., AND RON, D. 1998. Property testing and its connection to learning and
+
+approximation. Journal of the ACM (JACM) 45, 4, 653–750.
+
+HAGERUP, T. AND RUB, C. 1990. A guided tour of chernoff bounds. Information Processing Letters (IPL) 33, 6,
+
+305–308.
+
+HOULE, M. E. AND SAKUMA, J. 2005. Fast approximate similarity search in extremely high-dimensional data
+
+sets. In Proceedings of International Conference on Data Engineering (ICDE). 619–630.
+
+ILYAS, I. F., AREF, W. G., AND ELMAGARMID, A. K. 2003. Supporting top-k join queries in relational
+
+databases. In Proceedings of Very Large Data Bases (VLDB). 754–765.
+
+ACM Journal Name, Vol. V, No. N, Month 20YY.
+
+·
+
+41
+
+ILYAS, I. F., BESKALES, G., AND SOLIMAN, M. A. 2008. A survey of top-k query processing techniques in
+
+relational database systems. ACM Computing Surveys 40, 4.
+
+IMIELINSKI, T., VISWANATHAN, S., AND BADRINATH, B. R. 1997. Data on air: Organization and access.
+
+IEEE Transactions on Knowledge and Data Engineering (TKDE) 9, 3, 353–372.
+
+KAPOOR, S. 2000. Dynamic maintenance of maxima of 2-d point sets. SIAM Journal of Computing 29, 6,
+
+1858–1877.
+
+KEOGH, E. J. 2002. Exact indexing of dynamic time warping. In Proceedings of Very Large Data Bases (VLDB).
+
+406–417.
+
+MATUSZEWSKI, T. I. 1962. Some properties of pascal distribution for ﬁnite population. Journal of the American
+
+Statistical Association 57, 297, 172–174.
+
+NATSEV, A., CHANG, Y.-C., SMITH, J. R., LI, C.-S., AND VITTER, J. S. 2001. Supporting incremental join
+
+queries on ranked inputs. In Proceedings of Very Large Data Bases (VLDB). 281–290.
+
+PAPADIAS, D., TAO, Y., FU, G., AND SEEGER, B. 2005. Progressive skyline computation in database systems.
+
+ACM Transactions on Database Systems (TODS) 30, 1, 41–82.
+
+SCHNAITTER, K. AND POLYZOTIS, N. 2008. Evaluating rank joins with optimal cost. In Proceedings of ACM
+
+Symposium on Principles of Database Systems (PODS). 43–52.
+
+SINGLA, P. AND RICHARDSON, M. 2008. Yes, there is a correlation: - from social networks to personal behavior
+
+on the web. In Proceedings of International World Wide Web Conferences (WWW). 655–664.
+
+SOLIMAN, M. A., ILYAS, I. F., AND CHANG, K. C.-C. 2008. Probabilistic top-k and ranking-aggregate queries.
+
+ACM Transactions on Database Systems (TODS) 33, 3.
+
+TAO, Y., SHENG, C., AND LI, J. 2010. Finding maximum degrees in hidden bipartite graphs. In Proceedings of
+
+ACM Management of Data (SIGMOD). 891–902.
+
+YIU, M. L. AND MAMOULIS, N. 2009. Multi-dimensional top- dominating queries. The VLDB Journal 18, 3,
+
+695–718.
+
+ZHU, M., PAPADIAS, D., ZHANG, J., AND LEE, D. L. 2005. Top-k spatial joins.
+
+IEEE Transactions on
+
+Knowledge and Data Engineering (TKDE) 17, 4, 567–579.
+
+ACM Journal Name, Vol. V, No. N, Month 20YY.
+
+

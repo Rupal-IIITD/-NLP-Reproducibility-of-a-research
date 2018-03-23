@@ -1,0 +1,3652 @@
+Stochastic Skylines
+
+WENJIE ZHANG, The University of New South Wales
+XUEMIN LIN, East China Normal University and The University of New South Wales
+YING ZHANG and MUHAMMAD AAMIR CHEEMA, The University of New South Wales
+QING ZHANG, The Australian EHealth Research Centre, CSIRO
+
+In many applications involving multiple criteria optimal decision making, users may often want to make a
+personal trade-off among all optimal solutions for selecting one object that ﬁts best their personal needs.
+As a key feature, the skyline in a multidimensional space provides the minimum set of candidates for
+such purposes by removing all points not preferred by any (monotonic) utility/scoring functions; that is, the
+skyline removes all objects not preferred by any user no matter how their preferences vary. Driven by many
+recent applications with uncertain data, the probabilistic skyline model is proposed to retrieve uncertain
+objects based on skyline probabilities. Nevertheless, skyline probabilities cannot capture the preferences of
+monotonic utility functions. Motivated by this, in this article we propose a novel skyline operator, namely
+stochastic skylines. In the light of the expected utility principle, stochastic skylines guarantee to provide
+the minimum set of candidates to optimal solutions over a family of utility functions. We ﬁrst propose
+the lskyline operator based on the lower orthant orders. lskyline guarantees to provide the minimum set of
+candidates to the optimal solutions for the family of monotonic multiplicative utility functions. While lskyline
+works very effectively for the family of multiplicative functions, it may miss optimal solutions for other
+utility /scoring functions (e.g., linear functions). To resolve this, we also propose a general stochastic skyline
+operator, gskyline, based on the usual orders. gskyline provides the minimum candidate set to the optimal
+solutions for all monotonic functions. For the ﬁrst time regarding the existing literature, we investigate the
+complexities of determining a stochastic order between two uncertain objects whose probability distributions
+are described discretely. We ﬁrstly show that determining the lower orthant order is NP-complete with
+respect to the dimensionality; consequently the problem of computing lskyline is NP-complete. We also show
+an interesting result as follows. While the usual order involves more complicated geometric forms than
+the lower orthant order, the usual order may be determined in polynomial time regarding all the inputs,
+including the dimensionality; this implies that gskyline can be computed in polynomial time. A general
+framework is developed for efﬁciently and effectively retrieving lskyline and gskyline from a set of uncertain
+objects, respectively, together with efﬁcient and effective ﬁltering techniques. Novel and efﬁcient veriﬁcation
+algorithms are developed to efﬁciently compute lskyline over multidimensional uncertain data, which run
+in polynomial time if the dimensionality is ﬁxed, and to efﬁciently compute gskyline in polynomial time
+regarding all inputs. We also show, by theoretical analysis and experiments, that the sizes of lskyline and
+gskyline are both quite similar to that of conventional skyline over certain data. Comprehensive experiments
+demonstrate that our techniques are efﬁcient and scalable regarding both CPU and IO costs.
+
+W. Zhang was partially supported by ARC DE120102144 and DP120104168. X. Lin was partially supported
+by ARC DP0987557, ARC DP110102937, ARC DP120104168, and NSFC61021004. Y. Zhang was partially
+supported by DP110104880 and UNSW ECR grant PSE1799.
+Authors’ addresses: W. Zhang, School of Computer Science and Engineering, The University of New South
+Wales, Australia; email: zhangw@cse.unsw.edu.au; X. Lin (corresponding author), East China Normal Uni-
+versity, China and the University of New South Wales, Australia; Y. Zhang and M. A. Cheema, School of
+Computer Science and Engineering, The University of New South Wales, Australia; Q. Zhang, The Australian
+EHealth Research Centre, CSIRO, Australia.
+Permission to make digital or hard copies of part or all of this work for personal or classroom use is granted
+without fee provided that copies are not made or distributed for proﬁt or commercial advantage and that
+copies show this notice on the ﬁrst page or initial screen of a display along with the full citation. Copyrights for
+components of this work owned by others than ACM must be honored. Abstracting with credit is permitted.
+To copy otherwise, to republish, to post on servers, to redistribute to lists, or to use any component of this
+work in other works requires prior speciﬁc permission and/or a fee. Permissions may be requested from
+Publications Dept., ACM, Inc., 2 Penn Plaza, Suite 701, New York, NY 10121-0701 USA, fax +1 (212)
+869-0481, or permissions@acm.org.
+c(cid:2) 2012 ACM 0362-5915/2012/05-ART14 $10.00
+DOI 10.1145/2188349.2188356 http://doi.acm.org/10.1145/2188349.2188356
+
+ACM Transactions on Database Systems, Vol. 37, No. 2, Article 14, Publication date: May 2012.
+
+14
+
+14:2
+
+W. Zhang et al.
+
+Categories and Subject Descriptors: H.3.3 [Information Storage and Retrieval]: Information Search and
+Retrieval—Search process; clustering
+
+General Terms: Algorithms, Performance
+
+Additional Key Words and Phrases: Skyline, uncertain data, stochastic order
+
+ACM Reference Format:
+Zhang, W., Lin, X., Zhang, Y., Cheema, M. A., and Zhang, Q. 2012. Stochastic skylines. ACM Trans. Datab.
+Syst. 37, 2, Article 14 (May 2012), 34 pages.
+DOI = 10.1145/2188349.2188356 http://doi.acm.org/10.1145/2188349.2188356
+
+1. INTRODUCTION
+In a d-dimensional space Rd, the skyline is deﬁned over given preferences of coordinate
+values on each dimension (i.e., either smaller or larger coordinate values are preferred).
+Without loss of generality, in the rest of the article we assume that smaller coordinate
+values are preferred on each dimension and all points are in Rd
++ (i.e., coordinate values
+are nonnegative). Given two points x and y in Rd
++, x dominates y if x is not greater than
+y on each dimension and is smaller than y on one dimension. Given a set D of objects
+(points) in Rd
++, the skyline of D consists of the points in D which are not dominated by
+any other points in D.
+
+When users want to select a top object (point) from a set D of objects (points) in
+Rd
++ based on their preference of smaller values on each dimension, a point in D that
+dominates every other point in D would be the best choice. Nevertheless, D may not
+always contain such a point. Therefore, scoring functions are often required to rank
+the points in D to generate-optimal solution. To capture the preference of smaller
+values on each dimension and make the optimal solution with the maximum score, a
+scoring function required to rank objects in D should be decreasing (see Section 2.2
+for the precise deﬁnition). Clearly, a single scoring function on a point may be easily
+affected by an outlier coordinate value of the point. Consequently, users may not be
+content with the optimal solution based on a single decreasing scoring function and
+may highly anticipate to make a personal trade-off to select one object which may best
+ﬁt their personal needs among the set S of points with the property that for each point
+y ∈ D − S, there is a point x ∈ S such that f (x) ≥ f (y) for any decreasing function;
+we call such an S a superior set of D. Clearly, a superior set S in D contains the
+(score-based) optimal solutions over all possible decreasing scoring functions.
+
+It is well-known [B¨orzs¨onyi et al. 2001; Steuer 1995] that x dominates y if and only
+if for any decreasing function f , f (x) ≥ f (y); this is formally stated in page 266 of
+Shaked and Shanthikumar [2007] if a point is regarded as an uncertain object with
+only one instance that has the occurrence probability 1. Consequently, the skyline S
+of D provides the superior set of D with the minimum size for users to make their
+personal trade-offs. Such a personal trade-off is very effective especially when the
+number of skyline points is small. For this reason, skyline computation over certain
+data has received signiﬁcant research attention in the last decade (e.g., B¨orzs¨onyi et al.
+[2001], Kossmann et al. [2002], Papadias et al. [2003], Tan et al. [2001], and Zhang
+et al. [2009]).
+
+Expected Utility Principle. Ranking uncertain objects against multiple criteria has
+a long history in economics, ﬁnance, and mathematics; see Levy [1992], Shaked and
+Shanthikumar [2007], and Kijima and Ohnishi [1999] for example. The expected utility
+principle is the most popular model [Levy 1992; Kijima and Ohnishi 1999] to select
+the optimal uncertain object against multiple criteria. In the light of the expected
+utility principle, given a function f , an uncertain object U with the maximum expected
+utility is the optimal solution; that is, select U to maximize E [ f (U )] for a given utility
+function f .
+
+ACM Transactions on Database Systems, Vol. 37, No. 2, Article 14, Publication date: May 2012.
+
+Stochastic Skylines
+
+14:3
+
+h
+
+5
+
+4
+
+3
+
+2
+
+1
+
+b 1
+
+a 1
+
+c 2
+
+a 2
+
+b 2
+
+A
+
+B
+
+C
+
+c 1
+
+t
+
+5 
+
+1 
+
+3  4 
+
+2 
+( a ) 
+
+h
+
+5
+
+4
+
+3
+
+2
+
+1
+
+b 1
+
+a 1
+
+x
+
+c 2
+
+a 2
+
+b 2
+
+c 1
+
+t
+
+5 
+
+1 
+
+3  4 
+
+2 
+( b ) 
+
+Fig. 1. Motivating example for lskyline.
+
+While the expected utility principle is widely believed the best scoring model when
+the the world is rational, a single utility function to score an uncertain object U may
+also be easily affected by outliers, including the outliers in the probability distributions
+of U . To resolve this, in this article we propose to investigate the problem of efﬁciently
+computing the stochastic-order-based skyline, following the aforesaid motivation of
+skyline.
+
+Stochastic Order. Stochastic orders have been effectively used in many real-life ap-
+plications [Levy 1992; Shaked and Shanthikumar 2007; Kijima and Ohnishi 1999],
+including economics, ﬁnance, and multicriteria statistic decision making to facilitate
+the expected utility principle. Generally, a stochastic order may be deﬁned over any
+family F of functions as follows. Given a family F of utility (scoring) functions from all
+users, an uncertain object (random variable) U stochastically dominates V regarding
+F, denoted by U ≺F V if and only if E [ f (U )] ≥ E [ f (V )] for each f ∈ F (see Kijima
+and Ohnishi [1999]); that is, all users prefer U to V according to the expected utility
+principle.
+
+Stochastic Skylines. Given a set U of uncertain objects, the stochastic-order-based
+skyline, namely stochastic skylines regarding F, is the subset of U such that each
+object U in the stochastic skylines is not stochastically dominated by any other object
+in U regarding F. Based on the preceding deﬁnition of stochastic orders, it is immediate
+that the stochastic skylines regarding F provide the minimum set of candidates to the
+optimal solutions (maximum values) for all functions in F by removing the objects not
+preferred by any function in F. Therefore, stochastic skylines provide the superior set
+of objects in U, regarding F and the expected utility principle, with the minimum size
+for users to make a personal trade-off to choose an object which ﬁts best their individual
+needs; thus, stochastic skylines regrading F are robust regarding outliers.
+
+Several stochastic orders have been deﬁned and their mathematical properties have
+been well studied in the statistics literature [Shaked and Shanthikumar 2007; Kijima
+and Ohnishi 1999]. Multiplicative nonnegative decreasing functions are a very popular
+family F of scoring functions to rank an object in Rd
+i=1 fi(xi)} where
+each fi (for 1 ≤ i ≤ d) is nonnegative decreasing. In this article, we ﬁrst investigate
+the problem of efﬁciently computing the stochastic skylines regarding lower orthant
+order [Shaked and Shanthikumar 2007], namely lskyline. Intuitively, an uncertain
+object U stochastically dominates V regarding the lower orthant order if and only if the
+probability mass of U is not smaller than the probability mass of V in any rectangular
+region with the origin as the lower corner (e.g., the shaded region in Figure 1(b) and
+Figure 2(a)). It is shown [Shaked and Shanthikumar 2007] that the lower orthant
+order ≺F is the stochastic order deﬁned over the family F of multiplicative decreasing
+functions (see Section 2 for details); consequently, lskyline gives the superior set of
+
++, that is, F = {(cid:2)d
+
+ACM Transactions on Database Systems, Vol. 37, No. 2, Article 14, Publication date: May 2012.
+
+14:4
+
+W. Zhang et al.
+
+b 1
+a 1
+
+l
+5
+
+4
+
+3
+
+2
+
+1
+
+c 3
+
+b 2
+
+a 3
+c 2
+
+c 1
+a 2
+
+A
+
+B
+
+C
+
+r
+
+b 1
+a 1
+
+l
+5
+
+4
+
+3
+
+2
+
+1
+
+c 3
+b 2
+
+a 3
+c 2
+
+c 1
+
+a 2
+
+r
+
+1 
+
+2 
+( a ) 
+
+3 
+
+4 
+
+1 
+
+2 
+( b ) 
+
+3 
+
+4 
+
+Fig. 2. Motivating example for gskyline.
+
+objects in a set U of uncertain objects, regarding the family of all negative multiplicative
+decreasing functions and the expected utility principle, with the minimum size.
+
+While lskyline works effectively for the family of multiplicative functions, it may miss
+optimal solutions for other utility/scoring functions (say, linear functions). Motivated
+by this, in this article we also study the problem of efﬁciently computing the stochastic
+skyline based on the usual order [Shaked and Shanthikumar 2007], called “general
+stochastic skyline” (gskyline). Intuitively, U dominates V regarding the usual order if
+and only if the probability mass of U is not smaller than the probability mass of V
+in any (possibly inﬁnite) combination of the rectangular regions with the origin as the
+lower corner (e.g., the shaded regions in Figure 2(a) and (b)). As shown in Shaked and
+Shanthikumar [2007] and Section 2.2, the usual order is the stochastic order over the
+family of all decreasing functions. Therefore, gskyline gives the superior set of objects
+in a set U of uncertain objects, regarding the family of all decreasing functions and the
+expected utility principle, with the minimum size.
+
+pskyline vs lskyline. Driven by many recent applications involving uncertain data
+(e.g., environment surveillance, market analysis, WWW, and sensor networks), re-
+search in uncertain data management has drawn considerable attention from the
+database community. The skyline analysis over uncertain data has been ﬁrstly pro-
+posed in Pei et al. [2007] where the possible world semantics is adopted to calculate the
+probabilities, namely skyline probabilities, of uncertain objects not being dominated
+by other uncertain objects. In Pei et al. [2007], efﬁcient techniques are developed to
+retrieve uncertain objects with skyline probabilities greater than a given threshold,
+namely, pskyline, while Atallah et al. [2011] provides efﬁcient techniques to compute
+skyline probabilities for all objects. While effectively capturing the possible dominance
+relationships among uncertain objects, skyline probabilities do not provide the candi-
+dature of optimal solutions regarding the expected utility principle; this is illustrated
+by the following example.
+
+Assume that a head coach wants to select the best high-jump athlete from all athletes
+in her team to attend an international game and decides to evaluate the athletes
+against their game performances in the recent years, say the last 3 years, where the
+performance of each athlete in a game is recorded by the ﬁnal height h and the total
+number t of failed trials over all attempted heights before successfully passing the
+ﬁnal height (h, t). To conform with the preference of smaller values, assume that h is
+recorded into 5 bands instead of actual value: band 1: within a reach of smashing the
+current world record, band 2: world leading heights, band 3: good, band 4: fair, band
+5: poor. The coach wants to select a player who is very stable (i.e., t is minimized)
+and jumps high (i.e., h is minimized). Clearly, these two criteria might conﬂict with
+each other. Consequently, a utility function f = f1(h) × f2(t) may be employed by
+the coach to evaluate the overall performance of a player in a game, where f1 and
+
+ACM Transactions on Database Systems, Vol. 37, No. 2, Article 14, Publication date: May 2012.
+
+Stochastic Skylines
+
+14:5
+
+f2 are nonnegative decreasing functions, mapping [1, 5] to [0, 1] and [0, ∞) to [0, 1],
+respectively, with f1(1) = 1 and f2(0) = 1. The coach selects the athlete with the
+maximum value of ( f1(h) × f2(t)). Nevertheless, the game performance of an athlete
+may ﬂuctuate from game to game due to various reasons. Therefore, it is important
+to evaluate players against their game performance statistic distributions. For this
+purpose, an athlete U may be treated as an uncertain object and her performance
+in each past game may be treated as an instance in a 2-dimensional space with the
+same probability to occur if no other information is available. The coach could select a
+player U such that E( f (U )) is maximized. Figure 1 gives a small-scale example where
+3 players are involved.
+
+100 and 99
+
+As depicted in Figure 1(a), suppose that A, B, and C have 2 instances, respectively.
+Each instance in objects A and B has the occurrence probability 1
+2 . The occurrence
+probabilities of c1 and c2 are 1
+100 , respectively, assuming that the player C
+has the same performance c2 for 99 games out of 100. While choosing an object U
+from A, B, and C to maximize E [ f (U )] in the light of the expected utility principle,
+E [ f ( A)] = 1
+2 f1(3) f2(4), and E [ f (C)] =
+100 f1(1) f2(5) + 99
+1
+100 f1(4) f2(3). Note that nonnegative decreasing utility functions f1 and
+f2 could be in any form depending on what kind of risks and trade-offs the coach wants
+to take; for instance, f1 and f2 could be in exponential forms such as f1(h) = ea(1−h) and
+f2(t) = e−bt where a > 0 and b > 0 may personally weigh the importance of h and t.
+
+2 f1(2) f2(3), E [ f (B)] = 1
+
+2 f1(5) f2(2)+ 1
+
+2 f1(4) f2(1)+ 1
+
+Nevertheless, Ais always preferred to B since E [ f ( A)] ≥ E [ f (B)] for any nonnegative
+decreasing functions f1 and f2, respectively. Suppose that f (h, t) = f1(h) f2(t) where
+f1(h) = e1−h and f2(t) = e−t. It can be immediately veriﬁed that E [ f ( A)] > E [ f (C)].
+If the coach is taking more risks and only wants to select the athlete with a chance
+to smash the world record, another nonnegative multiplicative decreasing function
+f ′(h, t) = f ′
+1(1) = 1 and
+2 still uses e−t. If f ′ is used, then C is the optimal solution since
+f ′
+1(h) = 0 if h > 1 and f ′
+E [ f ′( A)] and E [ f ′(B)] are 0. The example shows that A is preferred to B by any users
+(i.e., by any such multiplicative decreasing utility functions) and should be excluded as
+a candidate to any optimal solutions, while A and C should be kept as candidates. It is
+immediate that lskyline serves for this purpose; that is, lskyline contains A and C but
+excludes B.
+
+2(t) may be chosen such that f1 can be deﬁned such that f ′
+
+1(h) f ′
+
+While very useful in applications to determine probabilistic dominance relation-
+ships, skyline probabilities cannot capture the preferences of utility (scoring) functions
+regarding the expected utility principle. Regarding the example in Figure 1(a), it can
+be immediately veriﬁed that the skyline probability of A is 1, the skyline probability
+of B is 1
+100 . Clearly, if we choose atheteses based
+on skyline probability values, then B is always preferred to C; that is, there is no
+chance to exclude B without excluding the object C. This is an inherent limitation of
+the probabilistic skyline model.
+
+2 , and the skyline probability of C is 1
+
+Why gskyline? In what follows we show by an example that lskyline may miss the
+
+optimal solutions for other utility/scoring functions (say, linear functions).
+
+Assume the head coach in another team wants to select the best high-jump athlete
+against game performance regarding the ﬁnal rank r of an athlete in a game and
+the rank l of the game; that is, each game performance of an athlete is recorded by
+(r, l) where the lowest r and l values are 1 (the lower values, the better). Clearly, it is
+desirable to select an athlete who always has the best performance in a top tournament;
+that is, prefer lowest r and l. Similarly, r and l might often conﬂict with each other;
+thus, a utility function f (r, l) may be employed to evaluate the overall performance of
+an athlete in a game where f is nonnegative decreasing, mapping [1, ∞) × [1, ∞) to
+
+ACM Transactions on Database Systems, Vol. 37, No. 2, Article 14, Publication date: May 2012.
+
+14:6
+
+W. Zhang et al.
+
+[0, 1] with f (1, 1) = 1. For the same reason as before, an athlete may be treated as an
+uncertain object U and her each game performance is treated as an instance in R2
++
+with the same occurrence probability if there is no speciﬁc information. The coach may
+select an athlete U with the maximal value of E [ f (U )] based on the expected utility
+principle. Figure 2(a) gives a small-scale example with 3 athletes A, B, and C.
+
+2 , 1
+
+7 , 5
+
+8 , and 3
+
+7 f (2, 1) + 5
+
+In Figure 2, assume that A has 3 instances a1, a2, and a3 with the occurrence prob-
+abilities 1
+14 , respectively, assuming the game performance a1 occurs 7 times, a2
+occurs 2 times, and a3 occurs 5 times. Suppose that B has 2 instances b1 and b2 with
+2 and 1
+the occurrence probabilities 1
+2 , respectively; and C has 3 instances c1, c2, and c3
+with the occurrence probabilities 1
+8 , 1
+4 respectively. Immediately, the expected
+utility of A regarding a utility function f is E [ f ( A)] = 1
+14 f (a3) =
+2 f (1, 4) + 1
+1
+
+7 f (a2) + 5
+14 f (3, 2). Similarly, we can present E [ f (B)] and E [ f (C)].
+
+A nonnegative decreasing utility function f may be in any form subject to the levels
+of risks and trade-offs that the coach wants to take. For example, if the coach wants to
+focus on the top 3 performances in ranks 1, 2, and 3 tournaments, f may be deﬁned
+as f (r, l) = 1
+4−l
+3 when r ≤ 3 and l ≤ 3 (the shaded area in Figure 2(a)) and 0
+2
+otherwise. It can be immediately veriﬁed that E [ f ( A)] = 25
+84 is the maximum among the
+3 objects; that is, A is optimal. If the coach wants to only count the top 3 performances
+in rank 1 tournaments and the top 2 performances in rank 2 and 3 tournaments, f may
+be deﬁned as f (r, l) = 1
+4−l
+3 in the shaded area of Figure 2(b) and 0 otherwise; in
+2
+this case C is optimal since E [ f (C)] = 1
+
+2 f (a1) + 1
+
+4−r
+
+3 + 1
+
+2
+
+4−r
+
+3 + 1
+
+2
+
+6 is the maximum.
+
+The example shows that A and C should be kept as candidates for users to make
+a personal trade-off since A and C will be the optimal solutions for some nonnegative
+decreasing utility functions, respectively, regarding the expected utility principle. It
+can be immediately veriﬁed that for any nonnegative decreasing function f , E [ f ( A)] ≥
+E [ f (B)]; that is, A is always preferred to (better than) B. Consequently, B should be
+excluded as a candidate for users to make a personal trade-off. These can be exactly
+captured by gskyline.
+
+Moreover, it can be immediately veriﬁed that the probability mass of A is not smaller
+than the probability mass of C in any rectangular region with the origin as the lower
+corner (e.g., the shaded region in Figure 2(a)); that is, A dominates C regarding the
+lower orthant order. Thus, lskyline excludes C, and lskyline may miss the optimal
+solutions for some utility/scoring functions. It can also be immediately veriﬁed that
+the skyline probabilities of A, B, and C are 51
+14 , respectively. Clearly, B is
+always preferred to C based on the skyline probability values; that is, it is impossible
+to exclude the object B without excluding the object C based on skyline probabilities;
+this demonstrates again that skyline probabilities do not guarantee candidatures of
+optimal solutions regarding the expected utility principle.
+
+16 , and 3
+
+56 , 7
+
+Challenges and Contributions. While the two small-scale examples given earlier il-
+lustrate the beneﬁts of computing stochastic skylines, lskyline and gskyline are useful
+tools in any application requiring to rank uncertain objects in the light of expected
+utility principle. They also demonstrate that lskyline suits for the applications where
+only nonnegative decreasing multiplicative ranking functions are involved, and gsky-
+line suits for the applications where all monotonic ranking functions are involved.
+Motivated by these, in the article we study the problem of efﬁciently computing both
+lskyline and gskyline. Consider that in many applications, the probability distribution
+of an uncertain object is described by a set of instances and their occurrence probabil-
+ities (i.e., discrete cases). In the article, our investigation focuses on discrete cases of
+the probability distributions of objects.
+
+ACM Transactions on Database Systems, Vol. 37, No. 2, Article 14, Publication date: May 2012.
+
+Stochastic Skylines
+
+14:7
+
+The main challenge for computing stochastic skylines is to efﬁciently check the
+stochastic dominance relationship between two uncertain objects U and V regard-
+ing the lower orthant order and usual order, respectively. A naive way to check the
+stochastic dominance relationship between two uncertain objects U and V regarding
+the lower orthant order is to enumerate all rectangular regions with the origin as the
+lower corner to determine the lower orthant order between two objects; this involves
+testing an inﬁnite number of regions. Enumerating all the combinations of such rect-
+angular regions to determine usual order only incurs more costs. While testing the
+stochastic dominance relationship between two uncertain objects U and V regarding
+the lower orthant order and usual order, respectively, can be easily reduced to the ﬁnite
+computation, trivially conducting such computation may involve exponential time. To
+the best of our knowledge, this is the ﬁrst attempt to introduce the stochastic skylines
+model over uncertain data. Our principal contributions can be summarized as follows.
+
+—We introduce a novel stochastic skyline model on uncertain data with the aim to
+provide a minimum set of candidates to the optimal solutions for users to make their
+personal trade-offs over the family of multiplicative decreasing scoring functions and
+the family of general decreasing scoring functions, respectively.
+
+—We are the ﬁrst to show that the problem of determining the lower orthant order
+between two objects is NP-complete regarding the dimensionality. A novel, efﬁcient
+algorithm is developed to verify if an uncertain object is stochastically dominated by
+another object based on the lower orthant order. The algorithm runs in polynomial
+time if the dimensionality is ﬁxed.
+
+—We are the ﬁrst to show that the problem of testing the usual order can be solved
+in polynomial time regarding all inputs, including the dimensionality, though it
+involves more complex geometric forms in the deﬁnition than that in the deﬁnition
+of the lower orthant order. We convert the problem to the max-ﬂow problem, and
+then propose novel techniques to effectively reduce the size of auxiliary networks to
+signiﬁcantly speed up the testing.
+
+—To efﬁciently compute stochastic skylines among a large number of objects, following
+the ﬁltering veriﬁcation paradigm we develop novel spatial- and statistics-based
+ﬁltering techniques to efﬁciently and effectively eliminate nonpromising uncertain
+objects. Our ﬁltering techniques are based on an R-Tree.
+
+—We show, by a theoretical analysis and experiments, that the expected sizes of lskyline
+and gskyline are bounded by that of skyline over certain data. Our experiments also
+show that the sizes of lskyline and gskyline are similar, though in the worst case,
+the size of gskyline could be much larger than that of lskyline. These guarantee that
+stochastic skylines can be used as effectively as conventional skyline for personal
+trade-offs.
+
+Besides the theoretical results, our extensive experiments on real and synthetic data
+are conducted to demonstrate the efﬁciency of our techniques.
+
+The rest of the article is organized as follows. In Section 2, we formally deﬁne the
+problem and present preliminaries including a size estimation of stochastic skylines.
+In Section 3, we show that the problem of determining the lower orthant order between
+two objects is NP-complete regarding the dimensionality, and then present an efﬁcient
+veriﬁcation algorithm that runs in polynomial time if d is ﬁxed. Section 4 shows the
+problem of testing the usual order can be conducted in polynomial time and presents
+a novel paradigm to speed up the testing algorithm. In Section 5, we present our
+framework, and novel ﬁltering techniques. Experiment results are presented in Section
+6. Section 7 provides the related work and Section 8 concludes the work. Note that to
+enhance the readability, we put some lengthy proofs in the Appendix.
+
+ACM Transactions on Database Systems, Vol. 37, No. 2, Article 14, Publication date: May 2012.
+
+14:8
+
+W. Zhang et al.
+
+Notation
+stochastic skylines
+lskyline
+gskyline
+U, V
+u, v (x, y)
+n
+Umbb
+Umax (Umin)
+R(x, y)
+Rx
+U.cdf
+μi(U )
+σ 2
+i (U )
+U ≺lo V
+U ≺uo V
+
+Table I. The Summary of Notations
+
+Deﬁnition
+
+stochastic skylines (e.g., lskyline and gskyline)
+stochastic skyline based on lower orthant order
+stochastic skyline based on usual order
+uncertain objects in Rd
++
+instances (points) of uncertain objects in Rd
++
+number of uncertain objects
+the MBB of U
+upper (lower) corner of the Umbb
+rectangular region with x (y) as lower (upper) corner
+rectangular region with the origin and x as lower and upper corners
+the cumulative distribution function of U
+the mean of U on the i-th dimension
+the variance of U on the i-th dimension
+U stochastically dominates V regarding lower orthant orders
+U stochastically dominates V regarding usual orders
+
+2. BACKGROUND INFORMATION
+Table I summarizes the mathematical notations used throughout this article.
+
+2.1. Problem Deﬁnition
+We use Rd
+of generality, in the article we only consider the Rd
+in the article, by default, is in Rd
++.
+
++ to denote the points in Rd with nonnegative coordinate values. Without loss
++ space. A point (instance) x referred
+
+Let the ith coordinate value of x be denoted by xi. Given two points x and y, x
+dominates y (denoted by x ≺ y) if xi ≤ yi for 1 ≤ i ≤ d and there is a j ∈ [1, d] such that
+x j < yj. We use x (cid:8) y to denote the case that either x equals y on each dimension or
+x dominates y, and use R(x, y) to denote a rectangular region in Rd
++ where x and y are
+lower and upper corners, respectively.
+
+An uncertain object can be described either continuously or discretely. As discussed
++. That is, an
++ where for
+i=1 pui = 1.
+
+earlier, in this article we focus on discrete cases and objects are on Rd
+uncertain object U consists of a set {u1, . . . , um} of instances (points) in Rd
++ and occurs with the probability pui ( pui > 0), and (cid:3)m
+1 ≤ i ≤ m, ui is in Rd
+For a point x ∈ Rd
++, the probability mass U.cdf (x) of U is the sum of the probabilities of
+the instances in R((0, . . ., 0), x) where (0, 0, . . ., 0) is the origin in Rd; that is, U.cdf (x) =
+(cid:3)u(cid:8)x,u∈U pu.
+
+Example 1. Suppose the instances of each object in Figure 1(b) have the appearance
+probabilities as described in the example depicted in Figure 1(a). Then, A.cdf (x) = 1
+2 ,
+B.cdf (x) = 1
+
+2 and C.cdf (x) = 1
+
+100 .
+
+Given a set S ⊆ Rd
+
++, U.cdf (S) denotes the probability mass of U restricted to S; that
+
+is, U.cdf (S) = (cid:3)u∈S∩U pu.
+
+Example 2. As depicted by Figure 2, there are 3 objects A, B, and C. Regarding
+2 , and C.cdf (S1) = 1
+4 ,
+7 , B.cdf (S2) = 0, and
+
+2 , B.cdf (S1) = 1
+the shaded area S1 in Figure 2(a), A.cdf (S1) = 1
+while regarding the shaded area S2 in Figure 2(b), A.cdf (S2) = 1
+C.cdf (S2) = 1
+4 .
+
+The minimal bounding box Umbb of U is the minimal rectangular region S such that
+U.cdf (S) = 1. For presentation simplicity, the lower (upper) corner of Umbb is denoted
+by Umin (Umax) where the lower (upper) corner of Umbb is the point in Umbb with the
+
+ACM Transactions on Database Systems, Vol. 37, No. 2, Article 14, Publication date: May 2012.
+
+Stochastic Skylines
+
+14:9
+
+minimum (maximum) coordinate value on each dimension, and uncertain objects are
+sometimes abbreviated to “objects”.
+
+Lower Orthant Order and lskyline. We ﬁrst present lower orthant orders [Shaked
+
+and Shanthikumar 2007].
+
+Deﬁnition 1 (Lower Orthant Order). Given two uncertain objects U and V , U
+stochastically dominates V regarding the lower orthant order, denoted by U ≺lo V , if
+U.cdf (x) ≥ V .cdf (x) for each point x ∈ Rd
++ such that U.cdf (y) > V .cdf (y).
+Deﬁnition 2 (lskyline). Given a set of uncertain objects U, U ∈ U is a lskyline object
+if there is no object V ∈ U such that V ≺lo U . The set of all lskyline objects of U is the
+lskyline of U.
+
++ and ∃y ∈ Rd
+
+Regarding the example in Figure 1, it can be immediately veriﬁed that A ≺lo B,
+B (cid:12)≺lo C, C (cid:12)≺lo B, C (cid:12)≺lo A, and A (cid:12)≺lo C. lskyline consists of A and C. Regarding the
+example in Figure 2, lskyline consists of only one object A.
+
+Usual Order and gskyline. For the ease of a comparison with the lower orthant order,
+we deﬁne the usual stochastic order [Shaked and Shanthikumar 2007] (usual order for
+short) on lower sets.
+
+Deﬁnition 3 (Lower Set). A set S of points in Rd
+
++ is a lower set if for each pair of
+
+points x (cid:8) y in Rd
+
++, y ∈ S implies x ∈ S.
+
+Example 3. The shaded areas in Figure 2(a) and (b) are lower sets, respectively.
+
+Deﬁnition 4 (Usual Order). Given two uncertain objects U and V , U stochastically
+dominates an object V regarding the usual order, denoted by U ≺uo V , if U.cdf (S) ≥
++ and U.cdf (S′) > V .cdf (S′) for a lower set S′ ⊆ Rd
+V .cdf (S) for each lower set S ⊆ Rd
++.
+Example 4. Regarding the depicted lower set S1 (shaded area) in Figure 2(a), since
+4 , C.cdf (S1) < A.cdf (S1); thus, C (cid:12)≺uo A. Regarding the
+7 and C.cdf (S2) =
+
+A.cdf (S1) = 1
+depicted lower set S2 (shaded area) in Figure 2(b), since A.cdf (S2) = 1
+1
+4 , A.cdf (S2) < C.cdf (S2); thus, A (cid:12)≺uo C.
+
+2 and C.cdf (S1) = 1
+
+Note that the usual order in Shaked and Shanthikumar [2007] is deﬁned over upper
+sets; that is, in Deﬁnition 4, lower sets are replaced by upper sets, and ≥ and > are
+replaced by ≤ and <, respectively. It is well-known (see wikipedia for example) that
+the complement of any lower set is an upper set, and vice versa. Consequently, it is
+immediate that Deﬁnition 4 is equivalent to the usual order deﬁnition in Shaked and
+Shanthikumar [2007].
+
+Deﬁnition 5 (gskyline). In a set U of uncertain objects, U ∈ U is a gskyline object if
+there is no object V ∈ U such that V ≺uo U . The set of all gskyline objects of U is the
+gskyline of U.
+
+Problem Statement. In this article we investigate the problem of efﬁciently computing
+
+lskyline and gskyline of a set of uncertain objects, respectively.
+
+2.2. Preliminary
+We say that U stochastically equals V regarding the lower orthant order, denoted by
+U =lo V , if U.cdf (x) = V .cdf (x) for any point x ∈ Rd
++. Similarly, U stochastically equals
+V regarding the usual order, denoted by U =uo V , if U.cdf (S) = V .cdf (S) for any lower
+set S in Rd
++. Given two objects U and V , we deﬁne U = V if there is a one to one
+mapping h from U to V such that for each instance u of U , u = h(u) and pu = ph(u);
+that is, h preserves the locations and probabilities. The following lemma states that =lo
+
+ACM Transactions on Database Systems, Vol. 37, No. 2, Article 14, Publication date: May 2012.
+
+14:10
+
+W. Zhang et al.
+
+(=uo) is equivalent to = between two uncertain objects; it can be immediately veriﬁed
+based on the deﬁnition of U.cdf and V .cdf .
+
+LEMMA 1. Given two (uncertain) objects U and V , U =lo V (U =uo V ) if and only if
+
+U = V .
+
+LEMMA 2. Given two objects U and V where U (cid:12)= V , U ≺lo V (U ≺uo V ) if and only
+
+if for any x (lower set S) in Rd
+
++, U.cdf (x) ≥ V .cdf (x) (U.cdf (S) ≥ V .cdf (S)).
+
+Lemma 2 states that when U (cid:12)= V , we can remove the condition “ ∃y ∈ Rd
+
++ such
+that U.cdf (y) > V .cdf (y)” from Deﬁnition 1, and “U.cdf (S′) > V .cdf (S′) for a lower set
+S′ ⊆ Rd
+
++” from Deﬁnition 4, respectively.
+
+Minimality of Stochastic Skylines. A function f in Rd
+
++, x (cid:8) y
+implies f (x) ≥ f (y). The following theorems are proved in Shaked and Shanthikumar
+[2007, pages 309 and 266, respectively].
+
++ is decreasing if ∀x, y ∈ Rd
+
+THEOREM 1. Let U = (U1, . . ., Ud) and V = (V1, . . ., Vd) be two d-dimensional inde-
+pendent random vectors to describe objects U and V , respectively, where Ui and Vi are
+subvariables of U and V on ith-dimension. Assuming U (cid:12)= V , then U ≺lo V if and
+only if E [(cid:2)d
+i=1 fi(Vi)] for every collection { fi | 1 ≤ i ≤ d} of univariate
+nonnegative decreasing functions where expectations exist.
+
+i=1 fi(Ui)] ≥ E [(cid:2)d
+
+Theorem 1 implies that the lower orthant order is the stochastic order over the family
+of all nonnegative multiplicative decreasing functions. Consequently, lskyline provides
+the superior set of objects in a set U of uncertain objects, regarding the expected utility
+principle and all nonnegative multiplicative decreasing functions, with the minimum
+size.
+
+THEOREM 2. Let U and V be two d-dimensional independent random vectors to de-
+scribe objects U and V , respectively. Assuming U (cid:12)= V , then U ≺uo V if and only if
+E [ f (U )] ≥ E [ f (V )] for any f in the family of nonnegative decreasing functions where
+expectations exist.
+
+Theorem 2 implies that the usual order is the stochastic order over the family of all
+decreasing functions. Consequently, gskyline provides the superior set of objects in a
+set U of uncertain objects, regarding the expected utility principle and all decreasing
+functions, with the minimum size.
+
+gskyline, lskyline, and pskyline. Recall that for an x ∈ Rd
+
++, Rx denotes the rectangular
+region in Rd
++ where the origin (0, 0, . . ., 0) and x are lower and upper corners, respec-
+tively (e.g., the shaded region in Figure 2(a)). Clearly, Rx is one type of lower sets. Thus,
+U (cid:12)≺lo V implies U (cid:12)≺uo V . Therefore, lskyline is a subset of gskyline. Note that the
+two examples in Section 1 show that a threshold-based probabilistic skyline (pskyline)
+model [Atallah et al. 2011; Pei et al. 2007] is orthogonal to gskyline and lskyline mod-
+els, respectively; that is, while precisely providing the skyline probabilities, pskyline
+is not modeled to provide the candidature of optimal solutions regarding the expected
+utility principle. Figure 3 summarizes the relationships among lskyline, gskyline, and
+a threshold-based pskyline [Pei et al. 2007].
+
+While lskyline provides the minimum candidate set to the optimal solutions of all
+monotonic (decreasing) multiplicative functions, lskyline may fail to cover the optimal
+solutions of some monotonic (decreasing) functions in other forms (e.g., linear functions)
+as shown by the example in Section 1. Table II summarizes all the situations towards
+whether gskyline (GS), lskyline (LS), and a threshold-based pskyline (PS) may serve
+as a candidate set to the family of all monotonic functions (general F) and the family
+of all monotonic multiplicative functions (m.p F), respectively.
+
+ACM Transactions on Database Systems, Vol. 37, No. 2, Article 14, Publication date: May 2012.
+
+Stochastic Skylines
+
+14:11
+
+g s k y l i n e 
+
+l s k y l i n e 
+
+p s k y l i n e 
+
+Fig. 3. Relationship among 3 skylines.
+
+Table II. Candidature of Different Skyline Models
+
+GS
+
+general F
+m.p F
+
+yes & minimum
+
+yes
+
+LS
+no
+
+PS
+N/A
+yes & minimum N/A
+
+Size Estimation. It tends to be quite complicated to estimate the size of lskyline (gsky-
+line) of U when each object is described by discrete cases. Below, we show that if each ob-
+ject U ∈ U follows a continuous distribution with the uniform assumption, the expected
+number of lskyline (gskyline) objects is bounded by lnd(n)/(d + 1)!, where lnd(n)/(d + 1)!
+is the expected size of conventional skyline in (d + 1) dimensional space [Chaudhuri
+et al. 2006], and n is the number of objects in U.
+
+THEOREM 3. Given a set of objects U , assume that MBBs of all objects are hyper-cubes.
+We assume that the pdf of an object is continuous with the uniform distribution (i.e., a
+constant in its MBB), and the lengths of the MBBs and lower corners of the MBBs on
+each dimension are independent and follow the same distribution. Then the expected
+sizes of lskyline and gskyline are both bounded by lnd(n)/(d + 1)!.
+
+PROOF. ∀U ∈ U, let l(U ) denote the length of the hyper-cubes respectively. Clearly,
+(Umin, l(U )) is a point in (d+1)-dimensional space. Since the pdf of each object follows the
+uniform distribution, it can be immediately veriﬁed that if (Umin, l(U )) ≺ (Vmin, l(V )),
+then U stochastically dominates V . Consequently, the number of objects on gsky-
+line of U is not greater than the size of skyline of {(Umin, l(U ))|U ∈ U }. Since
+{(Umin, l(U ))|U ∈ U } is a set of points on a (d + 1)-dimensional space such that ev-
+ery coordinate is independent and follows the same distribution, the expected skyline
+size of {(Umin, l(U ))|U ∈ U } is bounded by lnd(n)/(d + 1)! [Chaudhuri et al. 2006].
+
+Immediately, the same argument also holds for gskyline. Thus, the expected size of
+
+gskyline is also bounded by lnd(n)/(d + 1)!.
+
+Note that in the worst case, the ratio of the size of gskyline over the size of lskyline
+could be as bad as n, where n is the number of uncertain objects. Shortly we give such an
+example by Figure 4; there are four objects and each object has two instances with the
+same occurrence probability (0.5). According to the deﬁnition of lskyline and gskyline,
+A is the only lskyline object and all objects ( A,B,C,D) are gskyline objects. Following
+the similar rationale, we can come up with the examples with n objects in which A
+is the only lskyline object and all n objects are not dominated (general order) by any
+other object if their coordinate values (except A) are in reverse order in dimension x
+and dimension y.
+
+Nevertheless, the empirical study in Section 6 shows that the size of lskyline and the
+size of gskyline in a d-dimension space are very close in practice, and are most likely
+bounded by the size of conventional skyline in a (d + 1)-dimensional space.
+
+ACM Transactions on Database Systems, Vol. 37, No. 2, Article 14, Publication date: May 2012.
+
+14:12
+
+W. Zhang et al.
+
+y
+
+5
+
+4
+
+3
+
+2
+
+1
+
+d 1
+
+c 1
+
+b 1
+
+a 1
+
+A
+
+B
+
+C
+
+D
+
+a 2
+
+d 2
+
+c 2
+
+b 2
+
+x
+
+1 
+
+2 
+
+3 
+
+4 
+
+5 
+
+Fig. 4. #gskyline VS #lskyline.
+
+2.3. Framework
+Our techniques for computing the lskyline (gskyline) of a set U of objects follow the
+standard two-phase framework: pruning and veriﬁcation. In the pruning phase, ef-
+ﬁcient and effective techniques are developed to prune nonpromising objects. In the
+veriﬁcation phase, we present novel and efﬁcient algorithms to test if U ≺lo V and
+U ≺uo V , respectively, for two uncertain objects U and V . The algorithm to test if
+U ≺lo V runs in polynomial time regarding the number of instances in U and V when
+the dimensionality is ﬁxed; and the algorithm to test if U ≺uo V between two uncer-
+tain objects runs in polynomial time regarding the dimensionality, and the number of
+instances in U and V .
+
+3. TESTING LOWER ORTHANT ORDER
+According to Lemma 1, testing if U =lo V is equivalent to testing if U = V ; thus it can be
+conducted in O(dmlog m) if instances are ﬁrstly sorted according to the lexicographic
+order where m is the number of instances in U (V ). Given two objects U and V , in
+this section we present an efﬁcient algorithm to determine whether U stochastically
+dominates V if U (cid:12)= V .
+
+3.1. Testing Finite Number of Points Only
+Naively following Deﬁnition 1 to compute U.cdf (x) and V .cdf (x) for every point x in
+Rd
++ is computationally infeasible since an inﬁnite number of check points is involved.
+A point x ∈ Rd
++ is a violation point regarding U (cid:8)lo V if U.cdf (x) < V .cdf (x).
+Assuming that U (cid:12)= V , it immediately follows from Deﬁnition 1 and Lemma 2 that
+U does not stochastically dominate V regarding the lower orthant order if and only if
+there is a violation point regarding U ≺lo V . Consequently, determining if U ≺lo V is
+converted to determining if there is a violation point regarding U ≺lo V , given U (cid:12)= V .
+An intuitive way by checking every instance v in V to ﬁnd a violation point does
+not work. As depicted in Figure 5, U consists of two instances u1 and u2 with pu1 =
+pu2 = 1
+3 , and v3 is
+placed at the same position of u2. It can be immediately veriﬁed that for 1 ≤ i ≤ 3,
+U.cdf (vi) ≥ V .cdf (vi). Nevertheless, we cannot conclude that U ≺lo V since x in Figure
+5 is a violation point regarding U ≺lo V ; that is, V .cdf (x) > U.cdf (x).
+
+2 , V consists of 3 instances v1, v2, and v3 with pv1 = pv2 = pv3 = 1
+
+For an object V in Rd
+
++, we use Di(V ) (1 ≤ i ≤ d) to denote the set of all distinct ith
+coordinate values of the instances of V . Then, (cid:2)d
+i=1 Di(V ) forms a grid; see Figure 6(a)
+as an example. Theorem 4 next states that we only need to check every (grid) point in
+(cid:2)d
+
+i=1 Di(V ) to determine if there is a violation point regarding U ≺lo V .
+
+ACM Transactions on Database Systems, Vol. 37, No. 2, Article 14, Publication date: May 2012.
+
+Stochastic Skylines
+
+14:13
+
+u 2
+v 3
+
+x
+
+U
+
+V
+
+v 1
+
+v 2
+
+5
+
+4
+
+3
+
+2
+
+1
+
+u 1
+
+1 
+
+2 
+
+3 
+
+4 
+
+5 
+
+Fig. 5. An example.
+
+i n s t a n c e s   o f V
+
+i n s t a n c e s   o f U
+
+x ' 
+
+x ' 
+
+x
+
+( a ) 
+
+x ' 
+
+x
+
+x
+
+( b ) 
+
+Fig. 6. Grid points.
+
+THEOREM 4. Suppose that U (cid:12)= V . Then, V is not stochastically dominated by U
+i=1 Di(V )
+
+regarding the lower orthant orders if and only if there is a (grid) point x ∈ (cid:2)d
+that is a violation point regarding U ≺lo V (i.e., V .cdf (x) − U.cdf (x) > 0).
+
+PROOF. The “if” part is immediate according to Deﬁnition 1. Next we prove the “only
+
+if” part.
+
+Suppose that V is not stochastically dominated by U regarding the lower orthant
+orders. Then, based on Deﬁnition 1 and Lemma 2 there is a violation point regarding
+U ≺lo V . It can be immediately veriﬁed that if there is a violation point regarding
+U ≺lo V then there must be a violation point x in Vmbb. Let x′ be the lower corner
+of the grid cell in (cid:2)d
+i=1 Di(V ) which contains x; see Figure 6(a) for example. It is
+immediate that V .cdf (x′) = V .cdf (x) and U.cdf (x′) ≤ U.cdf (x). Since U.cdf (x) <
+V .cdf (x), U.cdf (x′) < V .cdf (x′).
+
+Naive Algorithm. A naive algorithm is to check every grid point to calculate its U.cdf
+and V .cdf ; it terminates when we ﬁnd a violation point or all grid points are exhausted.
+It is a correct algorithm, if U (cid:12)= V , based on Theorem 4. Note that there are at most
+md grid points in (cid:2)d
+i=1 Di(V ) where m is the number of instances in V . Consequently,
+the naive algorithm needs to check O(md) grid points for computing U.cdf and V .cdf .
+
+3.2. NP-Completeness
+In fact we can show that the exponential time complexity regarding d is unavoidable
+by Theorem 5 given shortly. The proof of Theorem 5 is lengthy and nontrivial which
+
+ACM Transactions on Database Systems, Vol. 37, No. 2, Article 14, Publication date: May 2012.
+
+14:14
+
+W. Zhang et al.
+
+will be presented in Appendix A.1. The basic idea is to convert the minimum set
+cover problem (decision version) [Garey and Johnson 1990] to a special case of testing
+whether U (cid:12)≺lo V .
+
+THEOREM 5. Given two objects U and V , assume that U (cid:12)= V . Then, the problem of
+
+determining whether U (cid:12)≺lo V is NP-complete regarding the dimensionality d.
+
+3.3. Efﬁcient Testing Algorithm
+The NP-completeness implies that the exponential time complexity regarding d in the
+worst case cannot be improved. In this section, we present two techniques that may
+potentially reduce the number of grid points to be tested in practice.
+
+Switching Distinct Values Only. For 1 ≤ i ≤ d, let the set of distinct values of V
+on ith dimension, Di(V ) = {a1, a2, . . ., al}, be sorted increasingly; that is, ai < ai+1 for
+1 ≤ i ≤ l − 1. aj (1 ≤ j ≤ l) is a switching distinct value regarding U if there is at
+least one value in Di(U ) that is in [aj , aj+1] when j < l or in [al, ∞) when j = l. Let
+Ds
+i (V ) denote the set of switching distinct values of Di(V ) regarding U . The following
+theorem implies that only the (grid) points in (cid:2)d
+i=1 Di(V ), need
+to be checked. For example, the grid framed by the solid lines in Figure 6(b) depicts
+(cid:2)d
+i (V ) ⊆ Di(V ); consequently, we may signiﬁcantly reduce the
+number of grid points for testing.
+
+i (V ), instead of (cid:2)d
+
+i (V ). Clearly, D s
+
+i=1 D s
+
+i=1 D s
+
+THEOREM 6. Assume that U (cid:12)= V . Then, V is not stochastically dominated by U
+i (V )
+
+regarding the lower orthant orders if and only if there is a (grid) point x ∈ (cid:2)d
+such that V .cdf (x) − U.cdf (x) > 0.
+
+i=1 D s
+
+i=1 D s
+
+i (V ) ⊆ (cid:2)d
+
+PROOF. Note that (cid:2)d
+
+i=1 Di(V ). It can be immediately veriﬁed that
+for each grid point x ∈ (cid:2)d
+i (V ), there is a grid point x′ in
+(cid:2)d
+i (V ) such that x ≺ x′ and the instances of U falling in R((0, . . ., 0), x) are the
+same as those of U falling in R((0, . . ., 0), x′); see such two pairs in Figure 6(b) for an
+example. Therefore, U.cdf (x′) = U.cdf (x) and V .cdf (x′) ≥ V .cdf (x). Thus, this theorem
+immediately follows from Theorem 4.
+
+i=1 Di(V ) but not in (cid:2)d
+
+i=1 D s
+
+i=1 D s
+
+Discarding a Rectangular Region. Let R(x, y) denote a rectangular region in Rd
++
+where the lower and upper corners are x and y, respectively. R(x, y) is valid regarding
+U ≺lo V if each point in R(x, y) is valid regarding U ≺lo V . Theorem 7 provides a
+sufﬁcient condition for R(x, y) to be valid. Consequently, R(x, y) can be discarded from
+the procedure of ﬁnding a violation point.
+
+THEOREM 7. Given an R(x, y) ∈ Rd
+
++, suppose that U.cdf (x) ≥ V .cdf (y). Then, for every
+
+point z in R(x, y) (i.e., x (cid:8) z (cid:8) y), U.cdf (z) ≥ V .cdf (z).
+
+PROOF. Since x (cid:8) z (cid:8) y, U.cdf (z) ≥ U.cdf (x) and V .cdf (y) ≥ V .cdf (z). Thus, the
+
+theorem holds.
+
+To facilitate the observation in Theorem 7, our algorithm is partitioning-based, which
+iteratively divides rectangular regions into disjoint subrectangular regions. We use a
+queue Q to maintain a set of disjoint rectangular regions that cannot be discarded by
+Theorem 7 (i.e., not yet valid regarding U ≺lo V ). Then, for each rectangular region
+R(x, y) ∈ Q the algorithm checks if one of the latest generated corner points of R(x, y)
+is a violation point regarding U ≺lo V . If none of them is a violation point, then the
+algorithm checks if R(x, y) should be discarded or should be split into two disjoint
+subrectangular regions to be put into Q. Note that the corner points of a R(x, y) are
+the points (z1, z2, . . ., zd) such that for 1 ≤ i ≤ d, zi is xi or yi where x = (x1, . . ., xd)
+
+ACM Transactions on Database Systems, Vol. 37, No. 2, Article 14, Publication date: May 2012.
+
+Stochastic Skylines
+
+14:15
+
+ALGORITHM 1: Veriﬁcation( U ≺lo V )
+
+Input
+Output : if U ≺lo V (i.e., true or f alse)
+
+: objects U and V
+
+1 for i = 1 to d do
+2
+
+D s
+
+i (V ) := getSwitchingDistinct(V , U );
+
+3 if Initial Check (U ≺lo V ) returns false then
+4
+
+return false
+
+5 mark each corner point of Vmbb as new; Q := {Vmbb};
+6 while Q (cid:12)= ∅ do
+7
+
+r := Q.deque();
+calculate V .cdf (x) and U.cdf (x) for each new corner point x of r;
+if a new corner of r is a violation point then
+
+return false ;
+
+if r cannot be discarded and r is not an atom then
+
+Q := Q ∪ Split(r);
+
+8
+
+9
+
+10
+
+11
+
+12
+
+13 return true
+
+and y = (y1, y2, . . ., yd). The algorithm terminates if a violation point is found or Q is ∅.
+Algorithm 1 shortly presents our partitioning-based testing techniques. The algorithm
+outputs “true” if U ≺lo V and “false” otherwise.
+In Algorithm 1, line 2 is to get the set D s
+
+i (V ) of switching distinct values of V
+regarding U on each dimension i. Line 3 conducts a quick check on each dimension
+i as follows. Let U = (U1, . . ., Ud) and V = (V1, . . ., Vd) where Ui and Vi (1 ≤ i ≤ d)
+are ith subvariables of U and V , respectively. For each distinct value aj in D s
+i (V ) (1 ≤
+i ≤ d), Initial Check (U ≺lo V ) calculates the total probability, denoted by V .cdf (Vi ≤
+aj), of the instances of V with its ith-coordinate value not greater than aj; similarly,
+U.cdf (Ui ≤ aj) is also calculated for U . If V .cdf (Vi ≤ aj) > U.cdf (Ui ≤ aj) regarding
+the currently encountered aj, then U (cid:12)≺lo V and Initial Check (U ≺lo V ) returns false.
+The correctness of Initial Check (U ≺lo V ) immediately follows from Deﬁnition 1.
+
+Line 8 calculates V .cdf (x) and U.cdf (x) for a new corner x of r. Line 9 checks whether
+one of the new corners (grid points) is a violation point and then removes their “new”
+marks afterwards. In line 11, the algorithm checks whether r is valid regarding U ≺lo V
+(i.e., the condition in Theorem 7) and thus can be discarded. r is an atom if it cannot
+be further split to generate new grid points; that is, on each dimension i, r contains at
+most 2 values from D s
+
+i (V ). Firstly, a dimension i is chosen such that |r ∩ D s
+
+Split(r) in line 12 splits r into two subregions as follows. Note that for each dimension
+i (1 ≤ i ≤ d), the values in D s
+i (V ) contained by r must be consecutive and are denoted
+by r ∩ D s
+i (V )| is maximized. Then,
+the two median values l1 < l2 in r ∩ D s
+i (V ) are chosen to split r into r1 and r2; that is,
+the points in r with the ith coordinate value not greater than l1 belong to r1, and the
+others in r belong to r2. The two median values are used for splitting since we want
+to “maximize” the number of grid points to be discarded in case if one of r1 and r2 is
+valid regarding U ≺lo V . Moreover, Split(r) also marks the newly generated corners
+of r1 and r2; that is, the corners of r1 and r2 are not the corners of r. Note that there
+is an extreme case; while splitting on the ith dimension, if r contains only 3 values in
+D s
+i (V ), then splitting r into r1 and r2 on the ith dimension leads to that one of r1 and r2
+degenerates into a rectangular region in a (d − 1) space.
+
+i (V ).
+
+Example 5. As depicted in Figure 7(a), assume that V has 5 switching distinct
+values in each dimension. Algorithm 1 splits Vmbb into r1 and r2 in Figure 7(b). Suppose
+
+ACM Transactions on Database Systems, Vol. 37, No. 2, Article 14, Publication date: May 2012.
+
+14:16
+
+W. Zhang et al.
+
+r1
+
+r2
+
+( a ) 
+
+( b ) 
+
+r4
+
+r3
+
+( c ) 
+
+r6
+r5
+
+( d ) 
+
+Fig. 7. An example for splitting.
+
+that r1 is discarded by line 11. Algorithm 1 further splits r2 into r3 and r4 in Figure 7(c).
+Again, assume that r3 is discarded. r4 is split into r5 and r6 by the algorithm where r6
+is a line segment containing 3 grid points. Any further splitting on r6 will be conducted
+on the line segment. In this example, at each iteration, solid points in Figure 7 indicate
+the newly generated grid points.
+
+Based on the correctness of Initial Check (U ≺lo V ), Theorems 4, 6, and 7, Algorithm
+
+1 is correct when U (cid:12)= V .
+
+Time Complexity. Algorithm 1 intensively involves the computation of cumulative
+probabilities of U and V over a rectangular region. To speed up such computation,
+the instances of each object U are organized by an in-memory aggregate R-tree, called
+local aggregate R-tree of U , where each entry records the sum of the probabilities
+of instances contained. Then, the window aggregate techniques in Tao and Papadias
+[2012] are employed in our algorithm to calculate various U.cdf and V .cdf .
+
+getSwitchingDistinct(V , U ) is conducted as follows. Note that Di(V ) is sorted in-
+creasingly (1 ≤ i ≤ d). Let Di(V ) = {a1, . . ., al}. Since the occurrence probability of each
+instance is positive, based on the deﬁnition of switching distinct values it is immediate
+that aj ( j < l) is a switching distinct value if and only if U.cdf (Ui < aj) < U.cdf (Ui ≤
+aj+1); here, we calculate U.cdf (Ui ≤ aj) and U.cdf (Ui < aj) by the window aggre-
+gate techniques in Tao and Papadias [2012]. We also calculate V .cdf (Vi ≤ aj) for each
+aj ∈ D s
+i (V ) to conduct Initial Check (U ≺lo V ). Clearly, lines 1–4 totally run in time
+O(dmlog m+ dm(T (Uartree) + T (Vartree))) where T (Uartree) and T (Vartree) are the costs to
+conduct window aggregates over the local aggregate R-trees of U and V , respectively,
+m is the number of instances in V , and O(mlog m) is the time complexity to get each
+Di(V ).
+
+i=1 D s
+
+Assuming that D s
+
+i (V ) is stored in an array. Since it is sorted, it takes constant
+time to ﬁnd the two splitting values in Split(r) along a dimension. Since Algorithm
+1 calculates U.cdf (x) and V .cdf (x) only once at each grid point x in (cid:2)d
+i (V ), the
+total time spent in calculating U.cdf and V .cdf at all grid points is O((T (Uartree) +
+T (Vartree)) (cid:2)d
+i (V )|. Clearly, checking if r is valid regarding U ≺lo V
+is only invoked when one new grid point (corner) is generated; consequently, the total
+time for such a check is O((cid:2)d
+i=1 ki). Thus, the time complexity from line 5 to the end
+is O((T (Uartree) + T (Vartree)) (cid:2)d
+i=1 ki). The following theorem is immediate based on the
+preceding discussions.
+
+i=1 ki) where ki = |D s
+
+THEOREM 8. Algorithm 1 runs in time O(dmlog m+ md(T (Uartree) + T (Vartree))) where
+
+m is the number of instances in V .
+
+The naive algorithm in Section 4.1 can also employ the window aggregate techniques
+in Tao and Papadias [2012] to calculate U.cdf and V .cdf . Although the time complexity
+of Algorithm 1 is similar to that of the naive algorithm in the worst case, our experiment
+
+ACM Transactions on Database Systems, Vol. 37, No. 2, Article 14, Publication date: May 2012.
+
+Stochastic Skylines
+
+14:17
+
+ ) a (
+
+ ) b (
+
+Fig. 8. Lower sets.
+
+in Section 6 demonstrates that the naive algorithm is impractical, while Algorithm 1
+is very efﬁcient in practice.
+
+4. TESTING USUAL ORDER
+In this section, we investigate the problem of efﬁciently testing if U ≺uo V . Based on
+the deﬁnitions of the lower orthant order and the usual order, when U ≺lo V , it could
+be either U ≺uo V or U (cid:12)≺uo V as shown by the example in Figure 2. Therefore, the
+testing techniques for the lower orthant order are not applicable to testing the usual
+order.
+
+In fact, the usual order involves more complicated geometric terms than the lower
+orthant order as discussed in Section 1. It can be immediately veriﬁed that any combi-
+nation of the rectangles with the origin as the lower corner is a lower set and vice versa.
+As shown in Figure 8, a lower set can be as simple as one rectangle in Figure 8(a) and
+as complex as the combination of an arbitrary (possibly inﬁnite) number of rectangles
+in Figure 8 (b), while the lower orthant order always involves a simple lower set: one
+rectangle (e.g. the one in Figure 8(a)).
+
+The techniques developed in the last section are based on ﬁnding a violation point;
+that is, ﬁnding one rectangle with the origin as the lower corner and the violation point
+as the upper corner that violates Deﬁnition 1. Nevertheless, trivially ﬁnding a lower
+set that violates Deﬁnition 4 is computationally infeasible since even one lower set
+could involve a combination of inﬁnite number of rectangles as shown in Figure 8(b).
+Shortly we show for the ﬁrst time regarding the existing literature that testing if
+U ≺uo V can be conducted in polynomial time, regarding the dimensionality and the
+number of instances in U and V , in contrast to the complexity of testing U ≺lo V
+which is shown NP-complete regarding the dimensionality. Without loss of generality,
+we assume U (cid:12)= V since testing U = V can be conducted in O(dmlog m) time by
+ﬁrstly sorting instances according to the lexicographic order where m is the number of
+instances in U and V .
+
+4.1. Finite Computation
+Naively following Deﬁnition 4 to determine if U ≺uo V involves enumerating an inﬁnite
+number of lower sets and each lower set may involve a combination of inﬁnite number
+of rectangles. Theorem 9 next shows that only a ﬁnite number of rectangles with the
+origin as the lower corner should be involved.
+
+THEOREM 9. Suppose that U (cid:12)= V . U ≺uo V if and only if for each subset X of V ,
+
+U.cdf (∪x∈X Rx) ≥ V .cdf (∪x∈X Rx).
+
+ACM Transactions on Database Systems, Vol. 37, No. 2, Article 14, Publication date: May 2012.
+
+14:18
+
+W. Zhang et al.
+
+PROOF. Recall that Rx is the rectangular region with the origin and x as lower and
+upper corners, respectively. Since ∪x∈X Rx is a lower set, the “only if” part immediately
+follows from Deﬁnition 4.
+
+Suppose that S is a lower set. Let LS = ∪x∈V ∩S Rx. Immediately, LS ⊆ S and
+V .cdf (LS) = V .cdf (S). Since LS ⊆ S, U.cdf (S) ≥ U.cdf (LS). Since V ∩ S ⊆ V ,
+U.cdf (LS) ≥ V .cdf (LS) based on the “if” condition in this theorem. Thus, U.cdf (S) ≥
+V .cdf (S). Hence, the “if” part holds.
+
+Although Theorem 9 states that the testing may be conducted in ﬁnite time, enu-
+
+merating all subsets of V requires exponential time.
+
+4.2. Reduction to Max-Flow
+We convert the problem of testing if U ≺uo V to the max-ﬂow problem. The max-ﬂow
+problem is to ﬁnd a feasible ﬂow through a single-source, single-sink network that is
+maximized. It is formally deﬁned as follows. Let G = (N, A) be a network with s, t ∈ N
+being the source and sink, respectively, where N is the set of nodes and A is the set of
+arcs. The capacity of an arc (cid:16)u, v(cid:17) is a nonnegative value w(u, v). A feasible ﬂow f of G
+maps each arc in A to a nonnegative value with the following constraints:
+
+—Capacity Constraint: ∀(cid:16)u, v(cid:17) ∈ A, f (u, v) ≤ w(u, v).
+—Flow conservation: ∀u ∈ N − {s, t}, (cid:3)(cid:16)v,u(cid:17)∈ A f (v, u) = (cid:3)(cid:16)u,v(cid:17)∈ A f (u, v).
+
+The value of a feasible ﬂow f is | f | = (cid:3)(cid:16)s,v(cid:17)∈ A f (s, v). The max-ﬂow of G is a feasible
+ﬂow f such that | f | is maximized. It is well-known that the max-ﬂow can be computed
+in polynomial time (e.g., Hochbaum [2008]).
+
+Reduction to Max-Flow. Next we convert testing if U ≺uo V to the problem of deter-
+mining if an auxiliary network GU,V has a max-ﬂow f with | f | = 1. We construct the
+auxiliary network GU,V = (N, A) from U and V as follows.
+—Each instance u ∈ U corresponds to the two nodes u1 and u2, and an arc (cid:16)u1, u2(cid:17) with
+
+—Each instance v ∈ V corresponds to the two nodes v1 and v2, and an arc (cid:16)v1, v2(cid:17) with
+
+the capacity w(u1, u2) = pu in GU,V .
+
+the capacity w(v1, v2) = pv in GU,V .
+
+—For each pair of vertices u ∈ U and v ∈ V , if u (cid:8) v, there is an arc (cid:16)v2, u1(cid:17) in GU,V
+
+with the capacity w(v2, u1) = 2.
+
+—In GU,V , we make the source s connect to each v1 by an arc (cid:16)s, v1(cid:17) with the capacity
+w(s, v1) = 2, and make each u2 connect to the sink t by an arc (cid:16)u2, t(cid:17) with the capacity
+w(u2, t) = 2.
+
+Example 6. The two objects U and V are shown in Figure 9(a) where the 4 instances
+(u1, u2, u3, and u4) of U have the same probability 1
+4 , and the 3 instances (v1, v2, and
+v3) of V have the same probability 1
+3 . Figure 9(b) shows the corresponding auxiliary
+network GU,V together with the arc capacities labeled; note that the arcs without
+capacity labeled in Figure 9(b) have the capacity 2.
+
+The Theorem 10 shortly shows that determining if U ≺uo V is equivalent to testing
+if the auxiliary network GU,V has a max-ﬂow with the ﬂow value 1. The detailed proof
+of Theorem 10 will be presented in Appendix A.2.
+
+THEOREM 10. Suppose that U (cid:12)= V . U ≺uo V if and only if GU,V has a max-ﬂow f
+
+with | f | = 1.
+
+Note that in the reduction to the max-ﬂow problem, it is not necessary to split an
+instance into two vertices. We present the reduction based on splitting instances for
+
+ACM Transactions on Database Systems, Vol. 37, No. 2, Article 14, Publication date: May 2012.
+
+Stochastic Skylines
+
+14:19
+
+v 3
+
+u 4
+
+v 1
+
+u 3
+
+u 1
+
+v 2
+
+u 2
+
+( a ) 
+
+U
+
+V
+
+v
+
+1
+1
+
+v
+
+2
+1
+
+1
+3
+
+u
+
+1
+1
+
+u
+
+2
+1
+
+1
+4
+
+u
+
+1
+2
+
+u
+
+2
+2
+
+v
+
+1
+3
+
+v
+
+2
+3
+
+1
+3
+
+s
+
+v
+
+1
+2
+
+v
+
+2
+2
+
+1
+3
+
+u
+
+1
+3
+
+u
+
+1
+4
+
+u
+
+2
+4
+
+1
+4
+
+1
+4
+
+1
+4
+
+u
+
+2
+3
+
+t
+
+( b ) G U ,   V 
+
+Fig. 9. Reduction to max-ﬂow.
+
+ALGORITHM 2: BasicV ( U ≺uo V )
+Input
+Output : if U ≺uo V (i.e., true or f alse)
+
+: objects U and V
+
+. if Umin (cid:8) Vmin & Umax (cid:8) Vmax then
+. Step 1: Construct GU,V .
+. Step 2: Run max-ﬂow algorithm [Hochbaum 2008] on GU,V to generate max-ﬂow f . If
+| f | = 1 then return true; otherwise, return f alse.
+. else return f alse.
+
+the ease of presenting our speedup technique in Section 4.4 and also because it does not
+cause much extra costs according to the existing techniques to determine the max-ﬂow.
+
+4.3. Basic Veriﬁcation Algorithm
+Recall that Umin and Umax are lower and upper corners of Umbb; and Rx is the rectangular
+region with the origin as the lower corner and x as the upper corner. We have the
+following theorem.
+
+THEOREM 11. Suppose that Umin (cid:12)(cid:8) Vmin or Umax (cid:12)(cid:8) Vmax. Then U (cid:12)≺uo V .
+
+PROOF. Note that U (cid:12)= V . If Umax (cid:12)(cid:8) Vmax, then ∃u ∈ U such that u (cid:12)∈ RVmax ; con-
+sequently, U.cdf (RVmax ) < 1. As V .cdf (RVmax ) = 1, U.cdf (RVmax ) < V .cdf (RVmax ). Thus,
+U (cid:12)≺uo V as RVmax is a lower set.
+
+If Umin (cid:12)(cid:8) Vmin, then ∃v ∈ V such that Umin (cid:12)(cid:8) v. Thus, Rv ∩U = ∅; that is, U.cdf (Rv) =
+
+0. Since V .cdf (Rv) ≥ pv > 0, U.cdf (Rv) < V .cdf (Rv); this means U (cid:12)≺uo V .
+
+Based on Theorems 10 and 11, a basic version of our veriﬁcation algorithm, Algo-
+
+rithm 2, is outlined next. It outputs “true” if U ≺uo V and “false” otherwise.
+
+The open source-code of the state-of-art max-ﬂow algorithm in Hochbaum [2008] is
+used in step 2 to compute the max-ﬂow f of GU,V in Algorithm 2. It runs in O(nmlog m)
+where n is the number of nodes and m is the number of arcs in GU,V . Therefore,
+Algorithm 2 runs in time O(tG + nmlog n) where tG is the time to construct GU,V . Note
+that the costs of determining the (cid:8) relationship for every pair of instances in U × V
+are dominant in constructing GU,V . Shortly, we present a popular R-tree-based level-
+by-level paradigm [Brinkhoff et al. 1993] to determine the (cid:8) relationship for every pair
+of instances in U × V instead of naively enumerating every pair in U × V .
+
+ACM Transactions on Database Systems, Vol. 37, No. 2, Article 14, Publication date: May 2012.
+
+14:20
+
+W. Zhang et al.
+
+v 3
+
+v 2
+
+V1
+
+v 1
+u3
+
+U 1
+
+u1
+
+u2
+
+V2
+
+v 6
+
+v 5
+
+v 4
+u6
+u5
+
+U 2
+
+u4
+
+Fig. 10. Level-by-level.
+
+ALGORITHM 3: Determining ( F Q )
+
+Input
+Output : F Q
+
+: TU (R-tree of U ), TV (R-tree of V )
+
+1 (Umbb, Vmbb) → P Q;
+2 while P Q (cid:12)= ∅ do
+3
+
+dequeue (P Q) → (EU , EV ) ;
+for each child E of EU do
+
+4
+
+5
+
+6
+
+7
+
+8
+
+9
+
+for child entry E′ of EV do
+
+if E fully dominates E′ then
+
+(E, E′) → F Q ;
+else
+
+if E partially dominates E′ then (E, E′) → P Q ;
+
+Level-by-Level. In our algorithm, the instances in every object U are organized by an
+in-memory R-tree TU . As depicted in Figure 10, TU has two intermediate entries U1
+and U2, and TV has two intermediate entries V1 and V2. As none of the instances in
+U2 dominates any instances in V1, the enumeration of pairs in U2 × V1 can be avoided;
+the level-by-level paradigm can achieve this.
+
+The notation that follows is needed. Given two entries in R-trees (i.e., rectangular
+regions) E and E′, E fully dominates E′ if Emax (cid:8) E′
+min; E partially dominates E′ if
+Emin (cid:8) E′
+max. Here, Emin (Emax)
+is the lower (upper) corner of E. Note that if both E and E′ degrade to points, then
+there is no partial domination, and that E fully dominates E′ is equivalent to the (cid:8)
+relationship between two points as deﬁned in Section 2.
+
+min; E does not dominate E′ if Emin (cid:12)(cid:8) E′
+
+max but Emax (cid:12)(cid:8) E′
+
+Example 7. Regarding Figure 10, U1 fully dominates V1, and partially dominates
+
+V2; U2 does not dominate V1.
+
+The level-by-level computation is outlined next in Algorithm 3. At each level, we
+maintain a queue P Q to store pairs of entries (EU , EV ) such that EU (∈ TU ) partially
+dominates EV (∈ TV ). We also maintain a queue F Q to store pairs of entries (EU , EV )
+such that EU (∈ TU ) fully dominates EV (∈ TV ). Algorithm 3 dequeues every pair in
+PQ for a further exploration. Once P Q is exhausted, F Q stores all the information of
+u (cid:8) v in U × V to be used to construct GU,V .
+
+Example 8. Regarding U and V in Figure 10, P Q is initialized into {(Umbb, Vmbb)}
+by Algorithm 3. Then, line 3 dequeues P Q to get (Umbb, Vmbb). P Q becomes {(U1, V2)}
+and F Q becomes {(U1, V1), (U2, V2)} after the ﬁrst iteration (executing line 4 to line 9).
+
+ACM Transactions on Database Systems, Vol. 37, No. 2, Article 14, Publication date: May 2012.
+
+Stochastic Skylines
+
+14:21
+
+In the next iteration, line 3 dequeues P Q to get (U1, V2). Then the execution of line 4
+to line 9 gives P Q = ∅ and updates F Q to {(U1, V1), (U2, V2), (u1, v6), (u2, v6)}. Algorithm
+3 thus terminates since P Q = ∅.
+
+Note that in Algorithm 3, a child entry of a leaf is the leaf itself. That is, if one of
+TU and TV ﬁrst reaches the leaf level then it stays at the leaf level while the other
+continues to go down. The Pruning Rule 1 in Section 5.2 and Algorithm 2 ensure that
+Umbb partially dominates Vmbb if U and V enter into step 1.
+
+Theorem 12 can be immediately veriﬁed; it states that F Q generated by Algorithm 3
+exactly captures all u (cid:8) v relationships. Consequently, GU,V can be constructed based
+on the (cid:8) relationships captured by F Q. While Algorithm 3 runs in time O(d|U ||V |), it
+is well-known that it can avoid the complexity (d|U ||V |) in many cases in practice.
+
+THEOREM 12. ∀u ∈ U and ∀v ∈ V , u (cid:8) v if and only if there is a pair (EU , EV ) ∈ F Q
+
+such that u ∈ EU and v ∈ EV .
+
+4.4. Simplifying Network for Quick Testing
+Having a large number of arcs in an auxiliary network of U and V not only increases the
+construction costs but also increases costs of computing the max-ﬂow. While Algorithm
+3 can avoid enumerating every pair of instances in EU × EV when EU does not dominate
+EV , it still has to enumerate every pair of instances in EU × EV for each (EU , EV ) ∈ F Q.
+Regarding Example 8, F Q leads to total 20 such pairs, including 9 from U1 × V1 and 9
+by U2 × V2. The 20 pairs are converted to 20 arcs in GU,V . This is unavoidable due to
+the requirement of constructing GU,V .
+
+Shortly we propose a simpliﬁed auxiliary network G s
+
+EV as another unit for each (EU , EV ) ∈ F Q while constructing G s
+U ≺uo V if and only if G s
+will lead to only 4 arcs in G s
+by (u2, v6).
+
+U,V by treating EU as a unit and
+U,V . Then we prove
+U,V has a max-ﬂow f with | f | = 1. Regarding Example 8, F Q
+U,V , one by (U1, V1), one by (U2, V2), one by (u1, v6), and one
+
+To construct G s
+
+U,V , we treat each in-memory R tree TU as a network GU as follows.
+
+—Each entry E ∈ TU , from the root to leafs, corresponds to the two nodes E1 and E2,
+
+and an arc (cid:16)E1, E2(cid:17) with the capacity w(E1, E2) = pE where pE = (cid:3)u∈E pu.
+
+—Each link from a parent entry E1 to a child entry E2 corresponds to an arc (cid:16)E2
+
+1 , E1
+2 (cid:17)
+
+in GU with the capacity w(E2
+
+1 , E1
+
+2) = 2.
+
+Example 9. Regarding the example in Figure 10, assume that u1, u2, and u3 have
+the same probability 1
+15 ; vi (for 1 ≤ i ≤ 6) has
+the probability 1
+6 . GV and GU are depicted and framed by boxes in Figure 11(a) and
+Figure 11(b) where U and V denote the roots of TU and TV , respectively. Note that the
+arcs without capacities labeled have the capacity 2.
+
+5 ; u4, u5, u6 have the same probability 2
+
+Constructing G s
+
+U,V . As follows, G s
+
+U,V is constructed by connecting GV to GU with the
+
+arcs corresponding to pairs of entries in F Q.
+
+—Connecting the source: Add an arc (cid:16)s, V 1(cid:17) to link the source s to the root V of TV with
+
+the capacity w(s, V 1) = 2.
+
+—Connecting the sink: Add an arc (cid:16)u2, t(cid:17) to link each leaf u in TU (i.e., an instance in
+
+U ) to the sink t with the capacity w(u2, t) = 2.
+
+—Connecting GV to GU : Run Algorithm 3 to get F Q. For each pair (EU , EV ) of entries
+
+in F Q, add an arc (cid:16)E2
+
+V , E1
+
+U (cid:17) to G s
+
+U,V with the capacity w(E2
+
+V , E1
+
+U ) = 2.
+
+ACM Transactions on Database Systems, Vol. 37, No. 2, Article 14, Publication date: May 2012.
+
+14:22
+
+W. Zhang et al.
+
+G V
+
+s
+
+1
+
+V
+
+1
+
+2
+
+V
+
+1
+V
+1
+
+3
+5
+2
+V
+1
+
+V
+
+1
+2
+
+2
+5
+2
+2
+
+V
+
+1
+v
+1
+
+1
+v
+2
+
+1
+v
+3
+
+1
+5
+
+1
+5
+
+1
+5
+
+2
+v
+1
+
+2
+v
+2
+
+2
+v
+3
+
+v
+
+1
+4
+2
+15
+2
+4
+
+v
+
+v
+
+1
+5
+2
+15
+
+v
+
+2
+5
+
+v
+
+1
+6
+
+2
+15
+
+v
+
+2
+6
+
+( a ) 
+
+Fig. 11. G s
+
+U,V .
+
+G U
+
+1
+
+U
+
+1
+
+2
+
+U
+
+U
+
+1
+1
+
+U
+
+2
+1
+
+1
+2
+
+1
+2
+
+U
+
+1
+2
+
+U
+
+2
+2
+
+1
+u
+1
+
+u
+
+1
+2
+
+u
+
+1
+3
+
+1
+6
+
+1
+6
+u
+
+2
+2
+
+1
+6
+u
+
+2
+3
+
+2
+u
+1
+
+u
+
+1
+4
+
+1
+6
+u
+
+2
+4
+
+u
+
+1
+5
+1
+6
+u
+
+2
+5
+
+u
+
+1
+6
+1
+6
+u
+
+2
+6
+
+t
+( b ) 
+
+Example 10. Continue Example 8 where the generated F Q is {(U1, V1), (U2, V2),
+2(cid:17) are added
+
+1(cid:17), (cid:16)v2
+(u1, v6), (u2, v6)}. Consequently, the 4 arcs (cid:16)V 2
+to link GV and GU as described earlier. Figure 11 shows the result: G s
+
+2 (cid:17), (cid:16)v2
+
+6 , u1
+
+1 , U 1
+
+1 (cid:17), (cid:16)V 2
+
+2 , U 1
+
+6 , u1
+U,V .
+
+Theorem 13 next states that testing if U (cid:8)uo V , when U (cid:12)= V , is equivalent to
+U,V has a maximum ﬂow f with | f | = 1. The proof of Theorem 13 is
+
+determining if G s
+presented in Appendix A.3.
+
+THEOREM 13. Suppose that U (cid:12)= V . U ≺uo V if and only if G s
+
+U,V has a max-ﬂow f
+
+with | f | = 1.
+
+QuickTest. (U ≺uo V ) is a modiﬁcation of the basic veriﬁcation algorithm, Algorithm
+U,V is constructed in step 1 and used in step 2 instead of GU,V . The correct-
+
+2, where G s
+ness of QuickTest immediately follows from Theorem 13.
+
+At each intermediate entry E of an R-tree TU , we also keep pE to speed up the
+construction of G s
+U,V . While the worst-case time complexity of QuickTest remains the
+same as that of Algorithm 2, our experiment demonstrates QuickTest can achieve a
+speedup up to one order of magnitude against Algorithm 2. Note that in constructing
+G s
+U,V , we could reverse one of GU and GV or both; this gives 3 other ways to construct
+G s
+U,V . Nevertheless, our initial experiment shows that they have a similar performance.
+We do not remove the non-s source nodes and non-t sink nodes from G s
+U,V since any
+nontrivial max-ﬂow algorithm can efﬁciently handle this.
+
+5. STOCHASTIC SKYLINES COMPUTATION
+In this section, we present index-based efﬁcient algorithms to compute two kinds of
+stochastic skylines, lskyline and gskyline, respectively. They adopt the same framework
+and same index. We ﬁrst present the index to be used, followed by our index-based
+framework, ﬁltering techniques, and algorithm analysis.
+
+5.1. Statistic R-Tree
+As discussed in Sections 3.3 and 4.4, the instances of an object are organized into a
+local aggregate R-tree. In our algorithm, we assume that a global R-tree is built on the
+MBBs of each object; that is, the data entries (unit data) in the global R-tree are MBBs.
+To facilitate our ﬁltering techniques, we store the following statistic information at
+each entry of the global R-tree.
+
+ACM Transactions on Database Systems, Vol. 37, No. 2, Article 14, Publication date: May 2012.
+
+Stochastic Skylines
+
+14:23
+
+Suppose that U has m instances in Rd
+
++, u1, u2, . . . , um with the occurrence probabil-
+
+ities p1, p2, . . . , pm, respectively.
+
+Deﬁnition 6 (Mean μ). The mean of U , denoted by μ(U ), is (cid:3)m
+
+i=1 pi × ui.
+
+Note that μ(U ) is in Rd
+
++. For 1 ≤ i ≤ d, μi(U ) denotes the ith coordinate value of
+
+μ(U ).
+
+Deﬁnition 7 (Variance σ 2). For 1 ≤ i ≤ d, σ 2
+
+i (U ) = (cid:3)m
+
+j=1 pj(uj,i − μi(U ))2 where
+
+each uj,i denotes the ith coordinate value of uj.
+
+Suppose that an entry E of the global R-tree has l child entries {E1, E2, . . ., El}. E
+i (Ej) for 1 ≤ i ≤
+i (V ) | V ∈ Ej }
+
+stores the MBB of each child entry Ej (1 ≤ j ≤ l), as well as μi(Ej) and σ 2
+d. Here, for 1 ≤ i ≤ d, μi(Ej) = min{μi(V ) | V ∈ Ej } and σ 2
+i (Ej) = max{σ 2
+are called the mean and the variance of Ej on ith dimension, respectively.
+
+The global R-tree, together with the aforesaid statistic information, is called a statis-
+tic R-tree, denoted by sR-tree. Our algorithmic framework for computing stochastic
+skylines is conducted against sR-tree of U. To correctly use the veriﬁcation algorithms
+(Algorithm 1 and QuickTest in Section 4.4, respectively) in this article we assume that
+no two objects U and V in an sR tree of U are equal. In case that U contains equal
+objects, we only index one of the equal objects and record the object IDs for others while
+building an sR-tree of U.
+
+5.2. Framework for Stochastic Skylines Computation
+It is immediate that for any lower set S ∈ Rd
++, if U.cdf (S) ≤ V .cdf (S) and V .cdf (S) ≤
+W.cdf (S) then U.cdf (S) ≤ W.cdf (S). Immediately, ≺uo has the transitivity. Since ≺lo
+is deﬁned on a speciﬁc type of lower sets, any rectangle with the origin as the lower
+corner, ≺lo also has the transitivity. Consequently, the standard ﬁltering paradigm is
+applicable to computing both lskyline and gskyline; that is, if U ≺lo V (or U ≺uo V )
+then V can be immediately removed since for any W, if V ≺lo W (or V ≺uo W) then
+U ≺lo W (or V ≺uo W) and W can be pruned by U . Theorem 14 next shows that both
+stochastic orders also “preserve” the distance.
+
+THEOREM 14. For two objects U and V , if dist(Umin) < dist(Vmin) then V (cid:12)≺lo U and
+V (cid:12)≺uo U , where dist(Umin) and dist(Vmin) denote the distances of Umin and Vmin to the
+origin, respectively.
+
+PROOF. Immediately, Vmin (cid:12)≺ Umin and Vmin (cid:12)= Umin. Thus, there must be an instance
+u in U such that Vmin (cid:12)≺ u and Vmin (cid:12)= u. Therefore, U.cdf (Ru) > 0 and V .cdf (Ru) = 0
+where Ru is the rectangle with the original and u as the lower and upper corners,
+respectively. Note that Ru is also a lower set. Thus the theorem holds.
+
+Our index-based algorithm, Algorithm 4, adopts the branch-and-bound search
+paradigm [Papadias et al. 2003]. While Algorithm 4 that follows is presented against
+computing lskyline, computing gskyline follows exactly the same procedures by re-
+placing ≺lo with ≺uo, and storing gskyline in Rssky. Algorithm 4 iteratively traverses
+on the global sR-tree to ﬁnd the data entry (MBB) such that its lower corner has the
+minimum distance to the origin. An advantage by doing this is that we can guarantee
+that later accessed objects are with distances to the origin not smaller than those of
+the earlier accessed objects. Consequently, based on Theorem 14 a later accessed object
+is only possible to stochastically dominate an earlier accessed object when such dis-
+tances from two objects are the same. Thus, our algorithm has a progressive nature if
+all such distances are different. Moreover, when dist(Umin) (cid:12)= dist(Vmin), our algorithm
+only needs to test one of “if U stochastically dominates V ” and “if V stochastically
+dominates U ” but not both.
+
+ACM Transactions on Database Systems, Vol. 37, No. 2, Article 14, Publication date: May 2012.
+
+14:24
+
+W. Zhang et al.
+
+ALGORITHM 4: lskyline Computation(sR)
+
+: sR (sR-Tree for U)
+Input
+Output : Rssky (lskyline of U)
+
+1 Rssky := ∅;
+2 QUEUE(the root entry of sR) into a heap H;
+3 while H (cid:12)= ∅ do
+4
+
+E := H.deheap();
+if NOT PRUNE (Rssky, E) then
+
+5
+
+6
+
+7
+
+8
+
+9
+
+10
+
+11
+
+12
+
+13
+
+14
+
+15
+
+16
+
+if E is an MBB of a V (i.e a data entry) then
+
+for each U ∈ Rssky do
+
+if Veriﬁcation(U ≺lo V ) then
+
+Goto Line 3;
+
+else
+
+if dist(Umin) = dist(Vmin) then
+
+if Veriﬁcation(V ≺lo U ) then
+
+Rssky := Rssky − {U } ;
+
+Rssky := Rssky + {V };
+
+else
+
+QUEQUE(E) into H;
+
+17 return Rssky
+
+Lines 2 and 16 push each child entry descriptions of the root or E, including its
+MBBs and the preceding statistic information, into the heap H. Here, H is a min-heap
+built against the distances of the lower corners of the MBBs of entries to the origin.
+PRUNE(Rssky, E) returns true if E is pruned by the current Rssky using our ﬁltering
+techniques in Section 5.3 for lskyline or the ﬁltering techniques in Section 5.5 for
+gskyline.
+
+Line 8 (line 12) performs the veriﬁcation algorithms, Algorithm 1 in Section 3.3 for
+testing the lower orthant order in computing lskyline or the QuickTest algorithm in
+Section 4.4 for testing the usual order in computing gskyline. Since U is accessed
+earlier than V , U is impossible to be stochastically dominated by V unless dist(Umin) =
+dist(Vmin) according to Theorem 14. When dist(Umin) = dist(Vmin), according to our
+algorithm an object U involved in line 12 is not stochastically dominated by any objects
+accessed earlier regarding the lower orthant order and the usual order, respectively,
+including those in the current Rssky. Nevertheless, it is possible that V stochastically
+dominates an earlier accessed object U with dist(Umin) = dist(Vmin); such U will be
+detected and removed from Rssky by line 12 and line 13.
+
+5.3. Filtering in Computing lskyline
+A key in Algorithm 4 is to efﬁciently and effectively conduct PRUNE(Rssky, E). The
+following two ﬁltering techniques are developed to check if E can be pruned by U for
+each object U in Rssky until Rssky is exhausted or E is pruned.
+
+(1) MBB-Based Pruning. The following pruning rule is immediate according to Def-
+inition 1 since each object contains at least 2 instances. Note that Emin denotes the
+lower corner of the MBB of an entry E.
+
+PRUNING RULE 1. If Umax ≺ Emin or Umax = Emin (i.e., Umax (cid:8) Emin), then U stochas-
+tically dominates every object in E regarding the lower orthant order; that is, E can be
+pruned.
+
+ACM Transactions on Database Systems, Vol. 37, No. 2, Article 14, Publication date: May 2012.
+
+Stochastic Skylines
+
+14:25
+
+V
+1ia
+
+Vm a x 
+
+2ia
+
+U m a x 
+
+Vm i n 
+
+Vm a x 
+
+V
+ia
+
+U m a x 
+
+U
+
+Vm i n 
+
+U
+
+( a ) 
+
+( b ) 
+
+Fig. 12. Statistic pruning for lskyline.
+
+(2) Statistic-Based Pruning. Our statistic-based pruning technique uses the observa-
+
+tion in Theorem 7 combined with the Cantelli’s Inequality [Meester 2004].
+
+Suppose that E cannot be pruned by U by Pruning Rule 1; that is, Umax (cid:12)≺ Emin
+and Umax (cid:12)= Emin. Intuitively, E could still be pruned if U and E are “signiﬁcantly”
+separated from the statistic point of view; that is, Umax is signiﬁcantly closer to Emin
+than the mean of E. We show our basic ideas by the case when E is a data entry; that
+is, E is Vmbb - the MBB of an object V .
+
+Suppose that Umin (cid:8) Vmin, Umax ≺ Vmax, and Umax (cid:12)(cid:8) Vmin. Let Umax = (a1, a2, . . ., ad),
+Vmin = (b1, b2, . . ., bd), and I be the subset of {1, . . ., d} such that ai > bi if i ∈ I and
+ai ≤ bi otherwise. Note that if I = ∅, then V is pruned by Pruning Rule 1. Figure 12
+shows two cases in a 2-dimensional space where |I| = 2 in Figure 12(a) and |I| = 1 in
+Figure 12(b).
+
+Let k = |I|. We use the following k + 1 rectangular regions to cover Vmbb: ∀i ∈ I,
+ri = {(x1, . . ., xd) | xi ≤ ai, (x1, . . ., xd) ∈ Vmbb}, and the (k + 1)th rectangular region is
+R(Umax, Vmax). Note that for the ease of statistic estimation that follows, ri and r j (i, j ∈
+I) share a common area. It can be immediately veriﬁed that R(Umax, Vmax) is always
+a valid region regarding U ≺lo V . For each ri (i ∈ I), let the lower corner and upper
+corner of ri be denoted by ri,min and ri,max, respectively. Clearly, ∀i ∈ I, V .cdf (ri,max) =
+V .cdf (Vi ≤ ai) where Vi is the ith subvariable of V (i.e., V = (V1, . . ., Vd)), respectively.
+Therefore, based on Theorems 7 and 4, if ∀i ∈ I, ri is valid regarding U ≺lo V then
+U ≺lo V since ∪i∈Iri ∪ R(Umax, Vmax) covers Vmbb. Consider that Vmin = ri,min (∀i ∈ I).
+Immediately, each ri is valid regarding U ≺lo V if
+
+U.cdf (Vmin) ≥ max
+i∈I
+
+{V .cdf (Vi ≤ ai)}.
+
+(1)
+
+In our pruning technique, we can precisely calculate U.cdf (Vmin) for both cases since
+U ∈ Rssky is already read in memory; and the Cantelli’s Inequality [Meester 2004] is
+employed to provide an upper bound for V .cdf (Vi ≤ ai). Let δ(x, y) be
+if y (cid:12)= 0, 1 if
+
+1
+
+1+ x2
+y2
+
+x = 0 and y = 0, and 0 if x (cid:12)= 0 and y = 0.
+
+THEOREM 15 (CANTELLI’S INEQUALITY [MEESTER 2004]). Suppose that t is a random
+variable in R1 with mean μ(t) and variance σ 2(t), Prob(t − μ(t) ≥ a) ≤ δ(a, σ (t)) for
+any a ≥ 0, where Prob(t − μ(t) ≥ a) denotes the probability of t − μ(t) ≥ a.
+
+Note that Theorem 15 extends the original Cantelli’s Inequality [Meester 2004] to
+cover the case when σ = 0 and/or a = 0. The following theorem provides an upper
+bound for Prob(t ≤ b) when b ≤ μ.
+
+THEOREM 16. Assume that 0 ≤ b ≤ μ(t). Then, Prob(t ≤ b) ≤ δ(μ(t) − b, σ (t)).
+
+ACM Transactions on Database Systems, Vol. 37, No. 2, Article 14, Publication date: May 2012.
+
+14:26
+
+W. Zhang et al.
+
+V
+1ia
+
+V3
+
+Vm a x 
+
+V4
+
+2ia
+
+U 3
+
+U 4/ V 1
+
+U m a x 
+V2
+
+U
+
+Vm i n 
+U 2
+
+U 1
+
+V1
+
+Vm i n 
+
+Vm a x 
+
+V
+1ia
+
+V2
+
+U m a x 
+
+U
+
+U 1
+
+U 2
+
+( a )   C a s e   1 
+
+( b )   Ca s e   2 
+
+Fig. 13. Statistic pruning for gskyline.
+
+PROOF. Let t′ = 2μ(t) − t. It can be immediately veriﬁed that σ 2(t′) = σ 2(t) and
+
+μ(t) = μ(t′). Applying Cantelli’s Inequality on t′, the theorem holds.
+
+Now we generalize the previous observations formally into our second pruning rule.
+Let Umax = (a1, a2, . . ., ad), Emin = (b1, b2, . . ., bd), and I is the subset of {1, . . ., d} such
+that ai > bi if i ∈ I and ai ≤ bi otherwise. Let (E, U ) = maxi∈I{δ(μi(E) − ai, σi(E))} if
+ai ≤ μi(E) for each i ∈ I; and (E, U ) = ∞ otherwise.
+
+PRUNING RULE 2. Suppose that Umin (cid:8) Emin and Umax ≺ Emax. If U.cdf (Emin) ≥
+(E, U ), then every object in the entry E of the global R-tree is stochastically domi-
+nated by U regarding the lower orthant order; that is, E can be pruned by U .
+
+The proof of Pruning Rule 2 is presented in Appendix A.4.
+
+5.4. Analysis of Algorithm 4 for Computing lskyline
+Prune(Rssky, E) in Algorithm 4 is conducted as follows. For each object U in Rssky, we
+ﬁrst check Pruning Rule 1 and then Pruning Rule 2. It immediately terminates and
+returns true if E is pruned. Clearly, Pruning Rule 1 runs in time O(d) and Pruning
+Rule 2 runs in time O(d + T (Uartree)) for each U ∈ Rssky.
+
+Correctness. Based on the correctness of our veriﬁcation algorithm in Section 3.3,
+
+and Pruning Rules 1 and 2, it can be immediately shown that Algorithm 4 is correct.
+
+Access Order of Rssky. In Algorithm 4, the objects in Rssky can be accessed in any order.
+Nevertheless, in our implementation, we access objects U in Rssky according to the
+increasing order of dist(Umin) with the aim to maximize the chance that Veriﬁcation(U ,
+V ) may terminate earlier and an entry may be pruned earlier.
+
+5.5. Filtering in Computing gskyline
+According to Deﬁnition 4, it is immediate that Pruning Rule 1 in computing lskyline,
+the MBB-based Pruning in Section 5.3, can also be used as the ﬁrst pruning rule
+in computing gskyline. Nevertheless, Pruning Rule 2 in computing lskyline is not
+applicable since U ≺lo V does not imply U ≺uo V . To follow is a new statistic-aggregate-
+based pruning rule in computing gskyline.
+
+Pruning Based on Statistic Aggregate. Suppose that E cannot be pruned by U by
+Pruning Rule 1; that is, Umax (cid:12)(cid:8) Emin. Intuitively, E could still be pruned if Umax is very
+“close” to Emin. Assuming E is an object V , the basic idea is to iteratively “trim” V by
+U using Pruning Rule 1; if V can be completely trimmed off, then U ≺uo V (i.e., V is
+pruned). What follows is an example.
+
+Consider U and V in Figure 13(a). Clearly, U1 fully dominates V1 ∪ V2 and V1 ∪ V3,
+respectively. If U.cdf (U1) ≥ V .cdf (V1 ∪ V2), then V1 ∪ V2 can be trimmed away from V .
+
+ACM Transactions on Database Systems, Vol. 37, No. 2, Article 14, Publication date: May 2012.
+
+Stochastic Skylines
+
+14:27
+
+Iteratively, since U1∪U3 fully dominates V3, V3 can be trimmed away if U.cdf (U1∪U3)−
+V .cdf (V1 ∪ V2) ≥ V .cdf (V3), where U.cdf (U1 ∪ U3) − V .cdf (V1 ∪ V2) is the probability
+mass of U in U1 ∪ U3 after discounting the trimming of V1 ∪ V2. Since V4 is fully
+dominated by U and U.cdf (U ) = V .cdf (V ) = 1, we can claim U ≺uo V if V1 ∪ V2 ∪ V3 is
+trimmed away. Similarly, for another possible trimming permutation, we need to test
+if U.cdf (U1) ≥ V .cdf (V1 ∪ V3) and U.cdf (U1 ∪ U2) − V .cdf (V1 ∪ V3) ≥ V .cdf (V2) to
+claim U ≺uo V . Pruning Rule 3 shortly formally presents this observation in Rd
++ based
+on using Cantelli’s Inequality to provide an upper bound of the probability mass (see
+Section 5.3).
+
+We need the following notations to present Pruning Rule 3. Given U and V (U (cid:12)= V ),
+let Umin (cid:8) Vmin and Umax ≺ Vmax where Umax = (a1, a2, . . ., ad) and Vmin = (b1, b2, . . ., bd).
+Assume that I ((cid:12)= ∅) is the subset of {1, . . ., d} such that ai > bi for i ∈ I and ai ≤ bi
+otherwise; note I = ∅ implies U ≺uo V based on Pruning Rule 1.
+
+Let |I| = k, and {i1, i2, . . ., ik} is a permutation of I. For 0 ≤ j ≤ k − 1, RU
+
+i j ,≤b denotes
+the set of points (x1, . . ., xd) in Umbb such that xi ≤ bi if i ∈ {i j+1, . . ., ik}; that is, the
+remaining of Umbb after its “right” parts are cut by the (k − j) hype-planes xi = bi for
+i ∈ {i j+1, . . ., ik}, respectively; note that each point in RU
+
+i0,≤b fully dominates Vmbb.
+
+Example 11. Regarding the example in Figure 13, assume that the horizontal
+dimension is 1 and the vertical dimension is 2. Clearly, I = {1, 2} for the two objects U
+and V in Figure 13(a); and I = {1} for the example in Figure 13(b).
+
+Regarding Figure 13(a), if (1, 2) is a permutation of I (i.e., i1 = 1 and i2 = 2), RU
+
+i0,≤b is
+
+U1, RU
+
+i1,≤b is U1 ∪ U2.
+
+tation; that is, i1 = 1. RU
+
+i0,≤b is U1.
+
+Regarding Figure 13(b), as I only contains the dimension 1, there is only one permu-
+
+Given a U ∈ Rssky and an entry E in sR-tree, let Umin (cid:8) Emin, and Umax ≺ Emax
+where Umax = (a1, a2, . . ., ad) and Emin = (b1, b2, . . ., bd). For 1 ≤ i ≤ d, i(E, U ) =
+δ(μi(E) − ai, σ 2
+
+i (E)) when ai ≤ μi(E) and i(E, U ) = ∞ otherwise.
+
+PRUNING RULE 3. Assume Umin (cid:8) Emin, Umax ≺ Emax, and I is the subset of {1, . . ., d}
+such that ai > bi for i ∈ I and ai ≤ bi otherwise. Suppose that {i1, . . ., ik} is a permutation
+of I. If the following conditions hold, then for every object V in E, U ≺lo V ; that is, E
+can be pruned by U .
+
+(1) For each i ∈ I, ai < μi(E).
+(2) For 1 ≤ j ≤ k, U.cdf (RU
+
+i j−1,≤b) ≥ (cid:3) j
+
+l=1 il (E, U ).
+
+The proof of Pruning Rule 3 is presented in Appendix A.5.
+
+5.6. Execution and Analysis of Algorithm 4 in Computing gskyline
+Prune(Rssky, E) in Algorithm 4 is conducted as follows. For each entry E and each
+object U in Rssky, we ﬁrst check Pruning Rule 1 and then check Pruning Rule 3. It
+terminates and returns true if E is pruned. Pruning Rule 1 runs in time O(d).
+
+If a permutation of I is given, testing the conditions in Pruning Rule 2 can be
+conducted in O(d + k × t(Urtree)) where O(t(Urtree)) is the average time complexity to
+run the window aggregate techniques in Tao and Papadias [2012] to calculate U.cdf s
+and k = |I|. In our implementation, we examine one particular permutation obtained
+by the greedy paradigm such that iteratively, for 1 ≤ j ≤ k, we choose i j from I such
+that (U.cdf (RU
+l=1 il (E, U )) is maximized and the pruning fails/terminates
+immediately if it is negative. The complexity is O(d + k2t(Urtree)) for each U ∈ Rssky and
+each entry E.
+
+i j−1,≤b) − (cid:3) j
+
+ACM Transactions on Database Systems, Vol. 37, No. 2, Article 14, Publication date: May 2012.
+
+14:28
+
+W. Zhang et al.
+
+Note that using the permutation, generated by the greedy heuristic, may fail to
+ﬁnd a “feasible” permutation to meet the conditions in Pruning Rule 2. Nevertheless,
+our initial experiment in a lower-dimensional space (d ≤ 4) shows that possible gains
+in pruning powers are very small by exploring all permutations. We omit a further
+improvement due to space limits.
+
+Correctness. Based on the correctness of our veriﬁcation algorithms (Section 4), and
+
+Pruning Rules 1 and 3, Algorithm 4 for computing gskyline is correct.
+
+Access Order of Rssky. We use the same access order as that in computing lskyline
+
+with the same aim.
+
+6. EMPIRICAL STUDY
+We conduct a thorough performance evaluation on the efﬁciency and effectiveness of
+our techniques to compute both lskyline and gskyline. Since this is the ﬁrst work in
+stochastic skyline computation, the performance evaluation is conducted against our
+techniques only. We implement the following techniques.
+
+—lsky. Algorithm 4 proposed in Section 5.2, together with the veriﬁcation algorithm
+(Algorithm 1) in Section 3.3 and Pruning Rules 1 and 2 in Section 5.3, to compute
+lskyline.
+
+—lsky-NoP. lsky without Pruning Rule 1 and 2.
+—lsky-NoP2. lsky without Pruning Rule 2.
+—lsky-NaiveV. lsky with the ﬁltering techniques in Section 5.3 and the naive veriﬁca-
+
+tion algorithm in Section 4.1.
+
+—gsky. Algorithm 4 proposed in Section 5.2, together with the veriﬁcation algorithm
+(QuickTest) in Section 4.4 and the two pruning rules (Pruning Rules 1 and 3) in
+Section 5.5, to compute gskyline.
+
+—gsky-NoP. gsky without two pruning rules - Pruning Rules 1 and 3.
+—gsky-NoP3. gsky without the second pruning rule in computing gskyline- Pruning
+
+Rule 3.
+
+—gsky-BasicV. gsky with the ﬁltering techniques in Section 5.5 and the basic veriﬁca-
+
+tion algorithm Algorithm 2 in Section 4.3.
+
+6.1. Experiment Setup
+All algorithms proposed in the article are implemented in standard C++ with STL li-
+brary support and compiled with GNU GCC. Experiments are conducted on a PC with
+Intel Xeon 2.4 GHz dual CPU and 4G memory under Debian Linux. In our implemen-
+tation, MBBs of the uncertain objects are indexed by an sR-tree with page size 4096
+bytes. The instances of an object are organized by a main-memory-based aggregate
+R-tree with fan-out 4 and we load in the whole aggregate R-tree of V if V cannot be
+pruned by the ﬁltering techniques. The open source-code of the max-ﬂow algorithm in
+Hochbaum [2008] is used in our algorithm.
+
+We use both real and synthetic datasets in our evaluation process.
+
+The real dataset is extracted from NBA players’ game-by-game statistics from 1991
+to 2005 (http://www.nba.com), containing 339, 621 records of 1, 313 players. A player
+is treated as an uncertain object with the game records as its instances. Instances of
+an object take equal probability. Three attributes are selected in our experiments: the
+number of points, the number of assistances, and the number of rebounds. The NBA
+dataset is employed since the MBBs of players have a very large overlapping degree;
+thus it may give a good challenge to our techniques.
+
+Synthetic data is generated by modifying the benchmark data generator
+in B¨orzs¨onyi et al. [2001] with the following parameters. The centers of object MBBs
+
+ACM Transactions on Database Systems, Vol. 37, No. 2, Article 14, Publication date: May 2012.
+
+Stochastic Skylines
+
+14:29
+
+Table III. Parameters
+
+edge length h
+dimensionality d
+number of objects n
+number of instances m
+object center distribution
+instance distribution
+
+0.02, 0.04, 0.06, 0.08, 0.1
+2, 3, 4, 5
+20k, 40k, 60k, 80k, 100k
+200, 400, 600, 800, 1k
+anti, corr, inde
+unif, zipf, norm, mix
+
+Table IV. pskyline vs Stochastic Skylines
+
+p
+0.5
+0.05
+0.005
+
+5 × 10−10
+
+# psky
+
+0
+83
+326
+837
+
+# hit of
+lskyline
+
+# hit of
+gskyline
+
+0
+76
+122
+124
+
+0
+80
+128
+131
+
+p
+0.8
+0.08
+0.008
+
+3 × 10−10
+
+# psky
+
+3
+
+190
+427
+1135
+
+# hit of
+lskyline
+
+# hit of
+gskyline
+
+3
+
+146
+201
+264
+
+3
+
+152
+217
+283
+
+(a) NBA( # lskyline: 127, # gskyline: 135)
+
+(b) 3d (# lskyline: 283, # gskyline: 303)
+
+follow Anti-correlated (anti), Correlated (corr), or Independent (inde) distributions with
+the default anti. Each dimension value domain is (0, 1]. The MBBs of objects are
+hyper-cube and their edge length randomly varies in (0, 2h] where the average length
+h varies from 0.02 to 0.1 with the default 0.04. The average number m of instances in
+each object varies from 200 to 1000 with the default 400. Instance locations of an object
+follow one of the 4 distributions, uniform(uni f ), normal(norm), zipf, or a mixture of
+uni f , norm and zipf (mix). In uni f , the instances of an object are distributed uniformly
+inside an MBB with the same occurrence probability. In zipf, one instance u of an object
+is ﬁrst randomly allocated and then the distances from all other instances to u follow
+the zipf distribution with z = 0.5 and the instance occurrence probabilities also follow
+the same zipf distribution. In norm, the instances follow the normal distribution inside
+MBB with the standard deviation σ = 0.2 × h, and the occurrence probabilities are
+the same. In mix, the preceding 3 distributions are mixed and each distribution has a
+portion of 1
+
+3 ; mix is used as the default in the experiment.
+
+We also study the impact of other key parameters. Due to space limits, some exper-
+iment results are presented in Appendix B. The dimensionality (d) varies from 2 to 5
+with the default value 3. The number n of objects varies from 20k to 100k where the
+default value is 20k.
+
+Table III summarizes parameter ranges and default values (in bold font). Note that
+in the default setting, the total number of instances is 8 millions. The maximal number
+of total instances of the datasets is 40 millions. In the experiments that fellow, these
+parameters use default values unless otherwise speciﬁed.
+
+6.2. Size of Stochastic Skyline
+
+pskyline, lskyline, and gskyline. We use the NBA data and a 3d synthetic dataset with
+the centers of MBBs following the inde distributions. The experiment result in Table IV
+shows the number of probabilistic skyline objects [Pei et al. 2007] (# psky), the number
+of lskyline objects (# lskyline), and the number of gskyline objects (# gskyline) where p
+indicates the threshold used in generating probabilistic skylines, and # hit of lskyline
+and # hit of gskyline are the numbers of lskyline objects and gskyline objects contained
+in the corresponding probabilistic skyline, respectively. It demonstrates that a non-
+stochastic skyline object may have a quite large skyline probability, while a stochastic
+skyline object may have very small skyline probability; that is, the probabilistic skyline
+model is orthogonal to the stochastic skyline models.
+
+ACM Transactions on Database Systems, Vol. 37, No. 2, Article 14, Publication date: May 2012.
+
+14:30
+
+W. Zhang et al.
+
+conv
+
+unif
+
+zipf
+
+norm
+
+mix
+
+1589
+
+110910721070
+
+907
+
+ 1500
+
+j
+
+s
+t
+c
+e
+b
+O
+e
+n
+
+ 
+
+ 1000
+
+i
+l
+
+y
+k
+S
+#
+
+ 
+
+ 500
+
+ 0
+
+342 283 297 268 294
+
+72 26 32 40 41
+
+anti
+
+inde
+
+corr
+
+(a) # lskyline
+
+conv
+
+unif
+
+zipf
+
+norm
+
+mix
+
+1589
+
+1260
+
+1132
+
+1184 1178
+
+j
+
+s
+t
+c
+e
+b
+O
+e
+n
+
+ 
+
+ 1500
+
+ 1000
+
+i
+l
+
+y
+k
+S
+#
+
+ 
+
+ 500
+
+ 0
+
+342 303 309 270
+
+336
+
+72 29 39 46 47
+
+anti
+
+inde
+
+corr
+
+(b) # gskyline
+
+Fig. 14. Skyline size vs different distributions.
+
+Note that gskyline is a superset of lskyline (Section 2.2); the experiment also demon-
+strates this. In our experiment, to retain the preference of the smaller values, we
+change all statistics to negative values. We use the binary code in Pei et al. [2007] to
+generate probabilistic skylines.
+
+Figure 14(a) and Figure 14(b) report the sizes of lskyline and gskyline regarding
+different distributions of instances locations and object MBB centers, respectively. The
+x-coordinate in Figure 14 indicates different distributions of MBB centers. For each
+distribution of MBB centers, we record the number of gskyline objects regarding a
+distribution of instance locations. conv denotes the conventional skyline over the data
+points in a 4d-space where each data point is the combination of the lower corner and
+the edge length of an MBB. It demonstrates that the sizes of lskyline and gskyline may
+be bounded by such conv in practice.
+
+We further explore the size difference of lskyline and gskyline regarding the number
+of objects, average number of instances per object, and the distribution of object MBBs’
+centers. The results show that the difference is small in practice though theoretically
+the ratio of #gskyline over #lskyline may equal the number of all uncertain objects.
+Details are presented in Appendix B.1.
+
+6.3. Evaluating Efﬁciency
+We evaluate the performance of lsky, lsky-NoP2, gsky and gsky-NoP3 since the ﬁltering
+techniques combining naive veriﬁcation algorithms (i.e., lsky-NaiveV and gsky-BasicV)
+or the algorithms without ﬁltering techniques (i.e., lsky-NoP and gsky-NoP) are very
+inefﬁcient (details are reported in Appendix B.2).
+
+Figure 15 reports the evaluation of lsky, lsky-NoP2, gsky, and gsky-NoP3 against
+different distributions of instance locations and NBA data. Both lsky and gsky are
+quite efﬁcient. It also shows that lsky and gsky always signiﬁcantly outperform lsky-
+NoP2 and gsky-NoP3, respectively; that is, the Pruning Rule 2 and Pruning Rule
+3 are very effective in practice. Note that lsky is signiﬁcantly more efﬁcient than
+gsky when the dimensionality is low, while the Appendix shows that gsky beats lsky
+
+ACM Transactions on Database Systems, Vol. 37, No. 2, Article 14, Publication date: May 2012.
+
+Stochastic Skylines
+
+ 150
+
+14:31
+
+lsky
+gsky
+
+lsky-NoP2
+gsky-NoP3
+
+111.7
+
+ 100
+
+i
+
+)
+s
+(
+ 
+e
+m
+T
+ 
+g
+n
+s
+s
+e
+c
+o
+r
+P
+
+i
+
+ 50
+
+ 0
+
+16.6
+
+4.48.47.2
+
+27.5
+
+13.2
+
+8.2
+
+5.6
+
+20.2
+
+9.2 7.2
+
+4.5
+
+24.7
+
+10.610.2
+
+6.5
+
+36.0
+
+25.2
+
+18.4
+
+mix
+
+unif
+
+zipf
+
+norm
+
+nba
+
+Fig. 15. Processing time regarding different distributions.
+
+ 40
+
+i
+
+)
+s
+(
+ 
+e
+m
+T
+ 
+g
+n
+s
+s
+e
+c
+o
+r
+P
+
+i
+
+ 20
+
+ 0
+
+ 80000
+
+ 60000
+
+)
+s
+e
+g
+a
+p
+(
+ 
+
+ 40000
+
+O
+
+/
+I
+ 
+
+#
+
+ 20000
+
+lsky-NoP2
+lsky
+
+gsky-NoP3
+gsky
+
+i
+
+)
+s
+(
+ 
+e
+m
+T
+ 
+g
+n
+s
+s
+e
+c
+o
+r
+P
+
+i
+
+ 150
+
+ 100
+
+ 50
+
+ 0
+
+20k
+
+40k
+
+60k
+
+80k
+
+100k
+
+20k
+
+40k
+
+60k
+
+80k
+
+100k
+
+(a) #Objects of lskyline
+
+(b) #Objects of gskyline
+
+Fig. 16. Processing time regarding #Objects.
+
+lsky-NoP2
+lsky
+
+gsky-NoP3
+gsky
+
+ 80000
+
+ 60000
+
+)
+s
+e
+g
+a
+p
+(
+ 
+
+ 40000
+
+O
+
+/
+I
+ 
+
+#
+
+ 20000
+
+ 0
+
+ 0
+
+20k
+
+40k
+
+60k
+
+80k
+
+100k
+
+20k
+
+40k
+
+60k
+
+80k
+
+100k
+
+(a) # objects of lskyline
+
+(b) # objects of gskyline
+
+Fig. 17.
+
+I/O costs regarding different parameters.
+
+when the dimensionality increases to 7 due to the NP-completeness regarding the
+dimensionality.
+
+In Figure 16, we evaluate the scalability of our algorithms against different dataset
+sizes. Figure 16(a) and (b) show that the performance of all algorithms degrades “lin-
+early” with the growth of dataset size. The experiment is also conducted while varying
+the number of instances, MBB sizes, and dimensionality; the results are presented in
+Appendix B.2 and show that computing gskyline is more expensive than lskyline.
+
+We further examine the effectiveness of the statistic pruning rules (i.e., Pruning
+Rule 2 and Pruning Rule 3 ) by evaluating the I/O costs reduced. Figure 17 reports the
+number of pages accessed in lsky, lsky-NoP2, gsky, and gsky-NoP3 regarding dataset
+sizes. It shows that the Pruning Rule 2 and Pruning Rule 3 are very effective and lead
+
+ACM Transactions on Database Systems, Vol. 37, No. 2, Article 14, Publication date: May 2012.
+
+14:32
+
+W. Zhang et al.
+
+Table V. Time in Seconds (s)
+
+Filter
+Verify
+
+I/O
+
+20k
+0.27
+1.93
+2.18
+
+40k
+0.67
+3.56
+4.47
+
+60k
+0.82
+5.56
+4.98
+
+80k
+1.31
+7.47
+6.89
+
+100k
+1.39
+4.48
+8.26
+
+Filter
+Verify
+
+I/O
+
+20k
+0.46
+5.70
+2.27
+
+40k
+1.34
+14.34
+4.67
+
+60k
+1.81
+20.80
+5.19
+
+80k
+3.60
+38.20
+7.15
+
+100k
+4.70
+45.84
+8.58
+
+(a) lsky
+
+(b) gsky
+
+to around 2 times reduction of the number of pages accessed. A similar trend of I/O
+costs is observed by varying dimensionality and we report the details in Appendix B.2.
+Table V gives a breakdown information of the ﬁltering, veriﬁcation, and I/O time
+(in seconds). The results are reported where we vary the number of objects from 20k
+to 100k. The results show that the ﬁltering costs are much smaller than the costs of
+veriﬁcation and I/O.
+
+Note that Pruning Rule 3 can also be used in lsky instead of Pruning Rule 2. As ex-
+pected, Pruning Rule 2 is more effective than Pruning Rule 3. Details of our experiment
+results are presented in Appendix B.2.
+
+7. RELATED WORK
+Conventional Skyline Computation. Skyline computation over conventional (certain)
+data has a long history. B¨orzs¨onyi et al. [2001] are the ﬁrst to study the problem of
+computing skylines in the context of databases and propose an SQL syntax for the
+skyline query. They develop two computation techniques based on block nested loop
+(BNL) and divide-and-conquer, respectively. Another BNL-based technique SFS (sort
+ﬁlter skyline) is proposed in Chomicki et al. [2003] with the aim to improve BNL by
+sorting a dataset ﬁrst. SFS is then signiﬁcantly improved by LESS (linear elimination
+sort for skyline) in Godfrey et al. [2005]. Sort and limit skyline algorithm (SaLSa)
+[Bartolini et al. 2008] aims to improve SFS or LESS by avoiding scanning the complete
+set of sorted objects.
+
+The index-based progressive techniques are ﬁrstly proposed in Tan et al. [2001]
+where two data structures, Bitmap and Index, are proposed. Kossmann et al. [2002]
+present another progressive technique based on the nearest-neighbor search technique.
+A branch-and-bound (BBS) algorithm to progressively output skyline points based on
+R-trees with the guarantee of minimal I/O cost is developed in Papadias et al. [2003].
+Various advanced index-based techniques are recently developed (e.g., Lee et al. [2007]
+and Zhang et al. [2009]).
+
+Variations of skyline computation have also been extensively explored; for example,
+skylines for partially ordered value domains[Chan et al. 2005] and skyline cubes [Pei
+et al. 2006].
+
+Skyline Computation over Uncertain Data. Considerable research effort has been
+put into modeling and managing uncertain data in recent years due to many emerging
+important applications (e.g., Boulos et al. [2005] and Sarma et al. [2006]).
+
+Probabilistic skyline on uncertain data is ﬁrst tackled in Pei et al. [2007] where
+skyline objects are retrieved based on skyline probabilities. Efﬁcient techniques are
+proposed following the bounding-pruning-reﬁning framework. Lian and Chen [2008]
+combine reverse skyline with uncertain semantics and study the probabilistic reverse
+skyline problem in both monochromatic and bichromatic fashion. In Atallah et al.
+[2011], novel, subquadratic algorithms are developed to compute skyline probabili-
+ties of every object. A stochastic skyline operator, lskyline, is studied in a prelimi-
+nary version [Lin et al. 2011] of this article; nevertheless, lskyline only provides the
+minimum candidate set for all multiplicative decreasing functions. This article is a
+signiﬁcant extension of the preliminary version [Lin et al. 2011] by including our
+
+ACM Transactions on Database Systems, Vol. 37, No. 2, Article 14, Publication date: May 2012.
+
+Stochastic Skylines
+
+14:33
+
+investigation of gskyline which gives the minimum candidate set for all decreasing
+ranking functions.
+
+8. CONCLUSION
+In this article, we introduce a novel stochastic skyline model on uncertain data with the
+aim to provide a minimum set of candidates to the optimal solutions over the family
+of multiplicative decreasing scoring functions, as well as general decreasing scoring
+functions, for users to make their personal trade-offs. We investigate the problem of
+computing stochastic skyline regarding the lower orthant order and the usual order,
+namely lskyline and gskyline. For the ﬁrst time in the literature, we show that the
+problem of determining the lower orthant order is NP-complete regarding the dimen-
+sionality; consequently lskyline is NP-complete in the same sense. Then we show that
+while the lower orthant order is much simpler than the usual order in terms of ge-
+ometry, determining the usual order can be solved in polynomial time in contrast to
+the complexity of determining the lower orthant order. We also develop novel and efﬁ-
+cient polynomial-time algorithms to compute the stochastic skyline regarding the lower
+orthant order and usual order, respectively, over large datasets. Comprehensive exper-
+iments are conducted on both real and synthetic data to demonstrate the efﬁciency of
+our techniques.
+
+Possible Future Work. In the article, we focus on discrete cases of PDF. The framework
+and the pruning rules work for continuous PDF in principle; nevertheless the calcula-
+tion of probability mass involves integration which is expensive. Moreover, veriﬁcation
+is a big challenge for usual order between two uncertain objects, while the partition-
+ing paradigm in Section 3.3 works for determining lskyline though it may involve an
+inﬁnite number of partitions. As an alternative, we can discretize a continuous PDF
+by sampling methods. While the framework is immediately applicable to the sampled
+points, the main issue is to estimate the accuracy of a sampling method. This is one
+possible future work.
+
+Specifying stochastic skylines regarding other measures/variance is nontrivial; this
+could be a very interesting future work. Another possible future work is to compute
+lskyline and gskyline over any subspace [Pei et al. 2006]. While our veriﬁcation tech-
+niques between two objects are immediately applicable, developing effective index
+techniques to support any subspace computation is a challenge. The next question is
+how to compute representative stochastic skylines [Lin et al. 2007].
+
+Finally, while our work in the article deals with independent uncertain objects, uncer-
+tain objects are correlated in many applications. It is a challenge to specify stochastic
+skylines against correlated data regarding the expected utility principle.
+
+REFERENCES
+
+ATALLAH, M. J., QI, Y., AND YUAN, H. 2011. Asymptotically efﬁcient algorithms for skyline probabilities of
+
+uncertain data. ACM Trans. Datab. Syst. 32, 2, 12.
+
+BARTOLINI, I., CIACCIA, P., AND PATELLA, M. 2008. Efﬁcient sort-based skyline evaluation. ACM Trans. Datab.
+
+Syst. 33, 4.
+
+B ¨ORZS ¨ONYI, S., KOSSMANN, D., AND STOCKER, K. 2001. The skyline operator. In Proceedings of the International
+
+Conference on Data Engineering (ICDE’01). 421–430.
+
+BOULOS, J., DALVI, N., MANDHANI, B., MATHUR, S., RE, C., AND SUCIU, D. 2005. MYSTIQ: A system for ﬁnding
+more answers by using probabilities. In Proceedings of the ACM SIGMOD Conference on Management
+of Data. 891–893.
+
+BRINKHOFF, T., KRIEGEL, H.-P., AND SEEGER, B. 1993. Efﬁcient processing of spatial joins using r-trees. In
+
+Proceedings of the ACM SIGMOD Conference on Management of Data. 237–246.
+
+CHAN, C.-Y., ENG, P.-K., AND TAN, K.-L. 2005. Stratiﬁed computation of skylines with partially ordered domains.
+
+In Proceedings of the ACM SIGMOD Conference on Management of Data. 203–214.
+
+ACM Transactions on Database Systems, Vol. 37, No. 2, Article 14, Publication date: May 2012.
+
+14:34
+
+W. Zhang et al.
+
+CHAUDHURI, S., DALVI, N. N., AND KAUSHIK, R. 2006. Robust cardinality and cost estimation for skyline operator.
+
+In Proceedings of the International Conference on Data Engineering (ICDE’06). 64.
+
+CHOMICKI, J., GODFREY, P., GRYZ, J., AND LIANG, D. 2003. Skyline with presorting. In Proceedings of the Inter-
+
+national Conference on Data Engineering (ICDE’03). 717–719.
+
+CORMEN, T. H., LEISERSON, C. E., RIVEST, R. L., AND STEIN, C. 2001. Introduction to Algorithms 2nd Ed. The MIT
+
+Press, Cambridge, MA.
+
+GAREY, M. AND JOHNSON, D. 1990. Computers and Intractability: A Guide to the Theory of NP-Completeness.
+
+W. H. Freeman and Company.
+
+GODFREY, P., SHIPLEY, R., AND GRYZ, J. 2005. Maximal vector computation in large data sets. In Proceedings of
+
+the International Conference on Very Large Databases (VLDB’05). 229–240.
+
+HOCHBAUM, D. 2008. The pseudoﬂow algorithm: A new algorithm for the maximum-ﬂow problem. Oper. Res.
+
+56, 4, 992–1009.
+
+KIJIMA, M. AND OHNISHI, M. 1999. Stochastic orders and their applications in ﬁnancial optimization. Math.
+
+Methods Oper. Res. 50, 2, 351–372.
+
+KOSSMANN, D., RAMSAK, F., AND ROST, S. 2002. Shooting stars in the sky: An online algorithm for skyline
+
+queries. In Proceedings of the International Conference on Very Large Databases (VLDB’02).
+
+LEE, K. C. K., ZHENG, B., LI, H., AND LEE, W. C. 2007. Approaching the skyline in z order. In Proceedings of the
+
+International Conference on Very Large Databases (VLDB’07). 279–290.
+
+LEVY, H. 1992. Stochastic dominance and expected utility: Survey and analysis. Manag. Sci. 38, 4, 555–593.
+LIAN, X. AND CHEN, L. 2008. Monochromatic and bichromatic reverse skyline search over uncertain databases.
+
+In Proceedings of the ACM SIGMOD Conference on Management of Data. 213–226.
+
+LIN, X., YUAN, Y., ZHANG, Q., AND ZHANG, Y. 2007. Selecting stars: The k most representative skyline operator.
+
+In Proceedings of the International Conference on Data Engineering (ICDE’07). 86–95.
+
+LIN, X., ZHANG, Y., ZHANG, W., AND CHEEMA, M. A. 2011. Stochastic skyline operator. In Proceedings of the
+
+International Conference on Data Engineering (ICDE’11). 721–732.
+
+MEESTER, R. 2004. A Natural Introduction to Probability Theory. Birkhauser.
+PAPADIAS, D., TAO, Y., FU, G., AND SEEGER, B. 2003. An optimal progressive algorithm for skyline queries. In
+
+Proceedings of the ACM SIGMOD Conference on Management of Data. 467–478.
+
+PEI, J., JIANG, B., LIN, X., AND YUAN, Y. 2007. Probabilistic skylines on uncertain data. In Proceedings of the
+
+International Conference on Very Large Databases (VLDB’07). 15–26.
+
+PEI, J., YUAN, Y., LIN, X., JIN, W., ESTER, M., LIU, Q., WANG, W., TAO, Y., YU, J. X., AND ZHANG, Q. 2006. Towards
+
+multidimensional subspace skyline analysis. ACM Trans. Datab. Syst. 31, 4, 1335–1381.
+
+SARMA, A. D., BENHELLOUN, O., HALEVY, A., AND WIDOM, J. 2006. Working models for uncertain data. In Pro-
+
+ceedings of the International Conference on Data Engineering (ICDE’06). 7.
+
+SHAKED, M. AND SHANTHIKUMAR, J. G. 2007. Stochastic Orders and Their Applications. Academic Press.
+STEUER, R. E. 1995. Multi Criteria Optimization: Theory, Computation, and Application. John Wiley and
+
+Sons.
+
+TAN, K.-L., ENG, P.-K., AND OOI, B. C. 2001. Efﬁcient progressive skyline computation. In Proceedings of the
+
+International Conference on Very Large Databases (VLDB’01). 301–310.
+
+TAO, Y. AND PAPADIAS, D. 2012. Range aggregate processing in spatial databases. IEEE Trans. Knowl. Data
+
+Engin. 16, 12.
+
+ZHANG, S., MAMOULIS, N., AND CHEUNG, B. W. 2009. Scalable skyline computation using object-based space
+
+partitioning. In Proceedings of the ACM SIGMOD Conference on Management of Data. 483–494.
+
+Received August 2011; revised January 2012; accepted March 2012
+
+ACM Transactions on Database Systems, Vol. 37, No. 2, Article 14, Publication date: May 2012.
+
+

@@ -1,0 +1,1772 @@
+Efﬁcient Reasoning about Data Trees via
+
+Integer Linear Programming
+
+Claire David
+
+Université Paris-Est
+
+Claire.David@univ-mlv.fr
+
+Leonid Libkin
+
+University of Edinburgh
+libkin@inf.ed.ac.uk
+
+Tony Tan
+
+University of Edinburgh
+ttan@inf.ed.ac.uk
+
+ABSTRACT
+
+Keywords
+
+Data trees provide a standard abstraction of XML documents
+with data values: they are trees whose nodes, in addition to
+the usual labels, can carry labels from an inﬁnite alphabet
+(data). Therefore, one is interested in decidable formalisms
+for reasoning about data trees. While some are known –
+such as the two-variable logic – they tend to be of very high
+complexity, and most decidability proofs are highly nontriv-
+ial. We are therefore interested in reasonable complexity for-
+malisms as well as better techniques for proving decidability.
+
+Here we show that many decidable formalisms for data trees
+are subsumed – fully or partially – by the power of tree au-
+tomata together with set constraints and linear constraints
+on cardinalities of various sets of data values. All these con-
+straints can be translated into instances of integer linear pro-
+gramming, giving us an NP bound on the complexity of the
+reasoning tasks. We prove that this bound, as well as the key
+encoding technique, remain very robust, and allow the addi-
+tion of features such as counting of paths and patterns, and
+even a concise encoding of constraints, without increasing
+the complexity. We also relate our results to several rea-
+soning tasks over XML documents, such as satisﬁability of
+schemas and data dependencies and satisﬁability of the two-
+variable logic.
+
+Categories and Subject Descriptors
+
+F.1.1 [Computation by Abstract Devices]: Models of
+Computation—Automata; F.4.1 [Mathematical logic and
+formal languages]: Mathematical logic; G.1.6 [Numerical
+Analysis]: Optimization—Integer programming; H.2.1
+[Database Management]: Logical Design—Data Models
+
+General Terms
+
+Algorithms, Theory
+
+Permission to make digital or hard copies of all or part of this work for
+personal or classroom use is granted without fee provided that copies are
+not made or distributed for proﬁt or commercial advantage and that copies
+bear this notice and the full citation on the ﬁrst page. To copy otherwise, to
+republish, to post on servers or to redistribute to lists, requires prior speciﬁc
+permission and/or a fee.
+ICDT 2011 March 21-23, 2011, Uppsala, Sweden.
+Copyright 2011 ACM 978-1-4503-0529-7/11/0003 ...$10.00.
+
+XML, tree languages, data values, Presburger arithmetic,
+reasoning, integer linear programming
+
+1.
+
+INTRODUCTION
+
+Traditional approaches to studying logics on trees use a ﬁnite
+alphabet for labeling tree nodes. The interest in such logics
+was reawakened by the development of XML as the standard
+for data exchange on the Web. Logical formalisms provide
+the basis for query languages as well as for reasoning tasks,
+including many static analysis questions such as consistency
+of speciﬁcations, query optimization, and typing [1, 2, 13,
+14, 22, 29].
+
+The simplest abstraction of XML documents is ordered un-
+ranked ﬁnite trees whose nodes are labeled by letters from a
+ﬁnite alphabet [23, 34]. This abstraction works well for rea-
+soning about structural properties, but real XML documents
+carry data, which cannot be captured by a ﬁnite alphabet.
+Thus, there has been a consistent interest in data trees, i.e.,
+trees in which nodes carry both a label from a ﬁnite alphabet
+and a data value from an inﬁnite domain [6, 7, 8, 12, 25, 17].
+It seems natural to add at least the equality of data values
+to a logic over data trees. But while for ﬁnitely-labeled trees
+many logical formalisms are decidable by converting formu-
+lae to automata (e.g., the monadic second-order logic MSO),
+adding data-equality makes even FO (ﬁrst-order logic) un-
+decidable.
+
+This explains why the search for decidable reasoning for-
+malisms over data trees has been a common theme in XML
+research. Such a search has largely followed two routes. The
+ﬁrst takes a speciﬁc XML reasoning task, or a set of similar
+tasks, and builds algorithms for them (see, e.g, [2, 3, 5, 9, 13,
+29, 14]). The second attempts to ﬁnd a sufﬁciently general
+logical formalism that is decidable, and can express some
+XML reasoning tasks of interest (see, e.g, [12, 6, 16]).
+
+While both approaches have yielded many nontrivial and in-
+ﬂuential results, they are not completely satisfactory. The
+ﬁrst approach gives us specialized algorithms for concrete
+problems, but no general tools. The second approach tends
+to produce extremely high complexity bounds, such as 4EX-
+PTIME, or even non-primitive-recursive, and in addition, the
+
+proofs are usually highly nontrivial and are very hard to
+adapt to other reasoning tasks.
+
+Instead we want a sufﬁciently general formalism – in fact, a
+family of formalisms, that are not extremely complicated to
+deal with, and at the same time give us acceptable complex-
+ity bounds. For reasoning tasks (as opposed to, say, query
+evaluation which we are used to in databases), acceptable
+complexity is often viewed as single-exponential [28], or
+better yet, NP (since SAT solvers are now a practical tool
+for many static analysis problems [20]).
+
+The particular class of formalisms we deal with here is mo-
+tivated by several concrete reasoning tasks studied in the
+XML context, as well as some decidable logical formalisms.
+We now brieﬂy describe those. One of the earliest reason-
+ing problems studied in the XML context was the problem
+of reasoning about keys and inclusion constraints. An XML
+key says that for a given label a, the data value of an a-node
+(i.e., node labeled a) uniquely determines the node. An in-
+clusion constraint says that every data value of an a-node
+will occur in a b-node as well. Such constraints are typical
+in databases, from which many XML documents are gener-
+ated. The question is then whether they are consistent with
+the schema of an XML document, usually given as a tree
+automaton, or a DTD. This problem is decidable in NP [13].
+
+On the logic side, there appear to be two main ideas leading
+to decidability. One starts with a temporal logic, and adds a
+limited memory for keeping and comparing data values. Ex-
+amples include [12, 16], but the logics, although decidable,
+have extremely high complexity (non-primitive-recursive).
+A different approach based on restricting the number of vari-
+ables was followed by [6], which showed that FO2, ﬁrst-
+order logic with two variables, is decidable over data trees.
+In fact, even ∃MSO2, its extension with existential monadic
+second-order quantiﬁers, is decidable. The complexity drops
+to elementary but is still extremely high: the decision proce-
+dure runs in 3NEXPTIME.
+
+Our formalisms extend the speciﬁc constraints such as keys
+and inclusions, and yet come very close to subsuming the
+power of logics such as ∃MSO2, while permitting many
+properties which are not even deﬁnable in MSO. To moti-
+vate the kind of constraints we use, let us restate keys and
+inclusion constraints in a slightly different way. For this, we
+need two new notations: V (a) stands for the set of data val-
+ues in a-labeled nodes, and #a is the number of a-nodes.
+
+• A key simply states that #a = |V (a)|. We view this
+as a linear constraint, and allow arbitrary linear con-
+straints over the values #a and |V (a)|, for example,
+|V (a)| ≥ 2|V (b)| − #c.
+
+• An inclusion constraint states that V (a) ⊆ V (b), or,
+equivalently, V (a) ∩ V (b) = ∅. We generalize this
+to arbitrary set-constraints [26], stating that a Boolean
+combination of V (a)’s is either empty or nonempty.
+
+We consider the problem of satisﬁability of such constraints
+with respect to a schema declaration, given by an unranked
+
+tree automaton [21]. Or, formally: Given an unranked tree
+automaton A and a collection C of set and linear constraints,
+does there exist a tree t accepted by A that satisﬁes all the
+constraints in C?
+
+We prove that this problem, and several of its variations,
+are all decidable in NP (the hardness result has been known
+even for simple keys and inclusion constraints [13]). The
+techniques are all based on reduction to instances of integer
+linear programming. In fact, the basic result, unlike many
+decidability proofs [6, 12, 13], is quite easy to establish.
+
+Already our basic result subsumes, not only reasoning about
+integrity constraints in XML (as in, e.g., [2, 13]), but also a
+very large fragment of ∃MSO2. These relationships will be
+made precise in Section 6. Note that even the decidability
+of the satisﬁability problem does not follow from known re-
+sults such as [6] which are restricted to fragments of MSO;
+in contrast, our formalism expresses many properties not de-
+ﬁnable in MSO.
+
+One beneﬁt of having simple proof techniques is that the
+basic result can be extended in several ways. One of the ex-
+tensions introduces variables that count not just the number
+of nodes labeled a, but also the number of such nodes that
+permit some paths starting from them. For example, we can
+reason about the number of a-nodes that have a b-parent and
+a c-sibling. By extending the translation into integer linear
+programming, we obtain such extensions quite easily.
+
+A more surprising extension is to concisely represented con-
+straints. One way to reduce the size of the representation of
+linear constraints is to discard all zero entries from matri-
+ces deﬁning them. This can shrink the size of the instance of
+the problem exponentially. A common phenomenon in com-
+plexity theory is that such a shrinking increases the complex-
+ity by an exponent. So more naturally, the expected bound
+thus would be NEXPTIME. We prove that, quite surpris-
+ingly, under such concise representation of constraints, the
+problem stays in NP.
+
+As a ﬁnal contribution, we make the entire approach com-
+pletely algorithmic, by providing simple and self-contained
+translations: (1) from an unranked tree automaton A to a
+simple instance ΨA of linear programming, i.e.
+instances
+with only 0, 1 or -1 coefﬁcients; and (2) from a solution
+of ΨA to a tree accepted by A. Of course the existence of
+translation (1) is known [33, 18]; the contribution here is to
+provide a simple algorithm for doing it, that also results in
+simple formulae which could be used and implemented for
+concrete veriﬁcation problems.
+
+Organization. Section 2 presents the main deﬁnitions. In
+Section 3 we deﬁne the contraints and the problem we are
+interested in. In Section 4 we establish the basic result. An
+extension is presented in Section 5. In Section 6 we relate
+set and linear constraints to XML reasoning tasks and the
+logic ∃MSO2 of [6]. We study the complexity of the prob-
+lem in the case of concise representation of the constraints
+in Section 7. Finally, the translation from unranked tree au-
+tomata to linear integer programming is provided in Section
+
+8. Some proofs are only sketched, or completely omitted,
+they will be available in the journal version.
+
+2. PRELIMINARIES
+
+Trees and automata. We start with the standard deﬁnitions
+of unranked ﬁnite trees and logics and automata for them.
+An unranked ﬁnite tree domain is a preﬁx-closed ﬁnite sub-
+set D of N∗ (words over N) such that v · i ∈ D implies
+v · j ∈ D for all j < i and v ∈ N∗. Given a ﬁnite la-
+beling alphabet Σ, a Σ-labeled unranked tree is a structure
+hD, E↓, E→, {a(·)}a∈Σi, where
+
+• D is an unranked tree domain,
+• E↓ is the child relation: (v, v · i) ∈ E↓ for v · i ∈ D,
+• E→ is the next-sibling relation: (v · i, v · (i + 1)) ∈ E→
+
+for v · (i + 1) ∈ D, and
+
+• the a(·)’s are labeling predicates, i.e. for each node v,
+
+exactly one of a(v), with a ∈ Σ, is true.
+
+The label of the node v in t will be denoted by ℓabt(v), and
+the domain D is denoted by Dom(t).
+
+Let r be a designated symbol in Σ. We assume that the root
+of the tree (i.e., the empty word) is labeled r, and no other
+node is labeled r. (This is not a restriction as we can always
+put a new root with a given label.)
+
+An unranked tree automaton [10, 32] over Σ-labeled trees is
+a tuple A = (Q, Σ, δ, F ), where Q is a ﬁnite set of states,
+F ⊆ Q is the set of ﬁnal states, and δ : Q × Σ → 2(Q∗)
+is a transition function; we require that δ(q, a)’s be regular
+languages over Q for all q ∈ Q and a ∈ Σ.
+A run of A over a tree t is a function ρA : Dom(t) → Q such
+that for each node v with n children v · 0, . . . , v · (n − 1),
+the word ρA(v · 0) · · · ρA(v · (n − 1)) is in the language
+δ(ρA(v), ℓabt(v)). Of course, for a leaf v labeled a this
+means that v could be assigned state q iff the empty word
+ǫ is in δ(q, a). A run is accepting if ρA(ǫ) ∈ F , i.e., if the
+root is assigned an accepting state. A tree t is accepted by A
+if there exists an accepting run of A on t. The set of all trees
+accepted by A is denoted by L(A).
+
+Data trees. In a data tree, besides carrying a label from
+the ﬁnite alphabet Σ each non-root node also carries a data
+value from some countably inﬁnite data domain (to be con-
+crete, we assume it to be N). For a node v of a data
+tree t, labeled with a symbol a ∈ Σ − {r}, the assigned
+data value is denoted by valt(v). We also denote the set
+of all data values assigned to a-nodes by Vt(a). That is,
+Vt(a) = {valt(v) | ℓabt(v) = a}.
+Note that we assume Vt(r) = ∅ (i.e., no data value assigned
+to the root). This is done for convenience and is not a re-
+striction, as one can always add a new root without a data
+value.
+
+sists of an m × k integer matrix A and a vector b ∈ Zm. The
+question is whether there is a k-vector ¯v over integers such
+that A¯v ≥ b.
+
+The problem is well-known to be NP-complete. It is NP-
+hard even when entries are restricted to be 0s and 1s. Mem-
+bership in NP follows from the fact that if A¯v ≥ b has an
+integer solution, then there is one in which all entries are
+bounded by (ak)p(m), where a is the maximum absolute
+value that occurs in A and b, and p is a polynomial [27].
+
+We also consider existential Presburger formulae, i.e., ﬁrst-
+order formulae over the structure hZ, +, 0, 1, <i. Such for-
+mulae can always be converted to formulae of the form
+
+ϕ(¯x) = ∃¯y PBC(Ai¯vi ≥ bi),
+
+(1)
+where PBC means a positive Boolean combination, and
+each Ai¯vi ≥ bi is an instance of integer linear programming
+with variables ¯vi coming from ¯x, ¯y. Whenever we refer to
+existential Presburger formulae, we assume that they are in
+the form (1). We also only work with non-negative integers
+for ¯x and ¯y, so we always assume that all the conditions
+xj ≥ 0, yl ≥ 0 are included in formulae. However, it is to
+be noted that the entries in Ai and bi can be negative.
+Notice that we occasionally use conditions such as x > 0 or
+x + y ≤ b, or x = y, but these are easily put in the form
+(1) by changing them to x ≥ 1, or −x − y ≥ −b, or the
+conjunction of x ≥ y and y ≥ x, respectively.
+
+Satisﬁability of existential Presburger formulae is known to
+be in NP. This follows from the bound of [27]. If we have
+a witness (¯x, ¯y) for ϕ of the form (1), then it does so by
+making some of the Ai¯vi ≥ bi true. Using the bound of [27],
+we see that no matter which combination of these instances
+of linear integer programming makes the formula true, there
+is a witness that will require only polynomially many bits in
+terms of the size of the formula. This implies the NP bound.
+
+3. CONSTRAINTS AND THE SATISFIA-
+
+BILITY PROBLEM
+
+In this section we give the precise deﬁnitions of set and linear
+constraints, and state the main satisﬁability problem.
+
+Set constraints. Recall that Σ is the labeling alphabet with
+a special symbol r for the root. Data-terms (or just terms)
+are given by the grammar
+
+τ := V (a) | τ ∪ τ | τ ∩ τ | τ
+
+for a ∈ Σ − {r}.
+
+The semantics Jτ Kt is deﬁned with respect to a data tree t:
+
+• JV (a)Kt = Vt(a);
+• Jτ1 ∩ τ2Kt = Jτ1Kt ∩ Jτ2Kt;
+• Jτ1 ∪ τ2Kt = Jτ1Kt ∪ Jτ2Kt;
+• Jτ Kt = Vt − Jτ Kt;
+
+Integer linear programming and Presburger formulae.
+Recall that an instance of integer linear programming con-
+
+where Vt = Sa∈Σ−{r} Vt(a) is the set of data values found
+in the data tree t.
+
+A set constraint is either τ = ∅ or τ 6= ∅, where τ is a term.
+A tree t satisﬁes τ = ∅, written as t |= τ = ∅, iff Jτ Kt = ∅
+(and likewise for τ 6= ∅).
+
+Note that set constraints τ1 ⊆ τ2 and τ1 ⊂ τ2 can be simi-
+larly deﬁned, but they are easily expressible with the empti-
+ness constraints (e.g., τ1 ⊆ τ2 means that τ1 ∩ τ2 is empty).
+In particular, the inclusion constraint from the introduction
+is an example of a set constraint: to say that all data values
+of a-nodes occur as data values of b-nodes, we write V (a) ∩
+V (b) = ∅.
+
+Linear data constraints. Fix variables xa for each a ∈ Σ
+and zS for each S ⊆ Σ − {r}. Linear data constraints are
+linear constraints over these variables.
+
+The interpretation of xa is #a(t) – the number of a-nodes
+in t. The interpretation of zS is the cardinality of the set
+
+[S]t = \
+
+a∈S
+
+Vt(a) ∩ \
+
+b /∈S
+
+Vt(b).
+
+That is, [S]t contains data values which are found among a-
+nodes for all a ∈ S but which are not attached to any b-nodes
+for the label b 6∈ S. Note that the sets [S]t’s are disjoint, and
+that
+
+Vt(a) =
+
+[
+
+S such that a∈S
+
+[S]t.
+
+This gives us much more information that just the number of
+data values in a-nodes, |Vt(a)|, which is simply
+
+|Vt(a)| = X
+
+S such that a∈S
+
+zS.
+
+For instance, with such constraints we can reason about data
+values that occur in a- and c-nodes but do not occur in b-
+nodes: the number of those is simply P{zS | a, c ∈ S, b 6∈
+S}.
+
+Notice that key constraints from the introduction are exam-
+ples of linear data constraints; that the data values of a-nodes
+form a key is that the number of a-nodes, which is xa, is
+equal to the number of data values found in the a-nodes,
+which is |Vt(a)|. It is expressible by the linear constraint:
+
+xa = |Vt(a)| = X
+
+S such that a∈S
+
+zS.
+
+We shall view linear data constraints as an instance of integer
+linear programming. If Σ = {a1, . . . , aℓ} and S1, . . . , Sk
+is an enumeration of nonempty subsets of Σ − {r} (thus
+k = 2|Σ|−1 − 1), then a set of m linear data constraints is
+A¯v ≥ b, where A is an m × (ℓ + k)-matrix over Z and
+b ∈ Zm. It is satisﬁed in a data tree t if it is true when v is
+interpreted as the vector
+
+(cid:0)#a1(t), . . . , #aℓ(t), (cid:12)(cid:12)[S1]t(cid:12)(cid:12), . . . , (cid:12)(cid:12)[Sk]t(cid:12)(cid:12)(cid:1).
+
+Satisﬁability problem. Let C denote a collection of set and
+linear data constraints. If a tree t satisﬁes all the constraints
+
+in C, we write t |= C. We study the following satisﬁability
+problem.
+
+PROBLEM:
+INPUT:
+
+QUESTION:
+
+SAT(A, C)
+an unranked tree automaton A;
+a collection C of set and
+linear data constraints
+is there a tree t accepted by A
+such that t |= C?
+
+The problem of consistency of XML constraints and
+schemas [2, 13] is a special instance of this problem. We
+shall later see that other problems related to XML con-
+straints, as well as a large fragment of the two-variable logic
+can be formulated as special cases of SAT(A, C). More-
+over, SAT(A, C) includes many instances that cannot even
+be formulated in MSO, which is the logic that typically sub-
+sumes XML reasoning tasks (for example, the linear con-
+straint which states that #a(t) > 2 · #b(t) is not expressible
+in MSO, but is a simple linear data constraint xa > 2xb).
+
+4. DECIDING SATISFIABILITY
+
+We shall now prove the decidability of SAT(A, C) problem.
+In our ﬁrst result, we assume a simple way of measuring the
+size of the input:
+
+• For the automaton A, we take the size of the transition
+table, where each transition δ(q, a) is represented by
+an NFA (or by a regular expression, since an NFA can
+be computed from it in polynomial time).
+
+• The size of each set constraint τ {=, 6=} ∅ is measured
+
+as the size of the parse-tree for the term τ.
+
+• The size of the linear data constraints A¯v ≥ b is the
+sum of sizes of A and b, with numbers represented in
+binary.
+
+THEOREM 4.1. The problem SAT(A, C) is solvable in
+
+NP.
+
+Before proving this result, we give a couple of remarks.
+First, hardness for NP has been known, as it easily follows
+from the hardness result for XML keys and foreign keys in
+[13] and many other proofs can be adapted as well. In this
+result the most important task is to prove the upper bound,
+showing that reasoning tasks have acceptable complexity.
+
+Second, extending the class of linear constraints by adding
+multiplication leads to the immediate loss of decidability,
+as Hilbert’s 10th problem can be trivially encoded. This
+remains undecidable even for quadratic equations. On the
+other hand, if we extend the class of linear constraints to Pre-
+quadratic Diophantine Equation, where in addition to linear
+constraint, constraints such as xi ≤ xjxk are allowed, it be-
+comes decidable in NEXPTIME [15].
+
+Proof of Theorem 4.1. Let Σ = {a1, . . . , an} and
+S1, . . . , Sk be the enumeration of non-empty subsets of
+Σ − {r}. We ﬁx the vectors ¯x = (xa1 , . . . , xan ) and
+¯z = (zS1, . . . , zSk ).
+We ﬁrst show how to express set constraints in terms of lin-
+ear data constraints. For a term τ, we deﬁne a family S(τ )
+of subsets of Σ as follows.
+
+• If τ = V (a), then S(τ ) = {S | a ∈ S and S ⊆
+
+Σ − {r}}.
+
+• If τ = τ 1, then S(τ ) = 2Σ−{r} − S(τ1).
+• If τ = τ1 ⋆ τ2, then S(τ ) = S(τ1) ⋆ S(τ2), where ⋆ is
+
+∩ or ∪.
+
+It follows immediately that for every data tree t, we have
+Jτ Kt = SS∈S(τ )[S]t. Recall that the sets [S]t’s are disjoint.
+Hence, the set constraint τ = ∅ can be expressed as a linear
+data constraint PS∈S(τ ) zS = 0. Similarly, τ 6= ∅ can be
+expressed as PS∈S(τ ) zS ≥ 1. Since the size of linear con-
+straints is exponential in Σ, this transformation is polyno-
+mial in the size of the whole input.1 Hence, from now on, we
+can assume that the set C is of the form A(¯x, ¯z) ≥ b, and thus
+is given by a quantiﬁer-free Presburger formula ψC(¯x, ¯z).
+Next, we convert automata into linear constraints. In [33]
+it is shown that given a context free grammar G, whose ter-
+minals are a1, . . . , an, one can construct in polynomial time
+an existential Presburger formula ϕG(x1, . . . , xn) such that
+ϕG(m1, . . . , mn) holds if and only if there exists a word
+w ∈ L(G) such that #a1(w) = m1, . . . , #an(w) = mn,
+where #ai(w) denotes the number of occurrences of ai in
+the word w. Then, in [18] it is observed that the method can
+be extended to ranked tree automata. Since unranked tree au-
+tomata can be easily converted to ranked tree automata with
+additional new symbol, we can construct the existential Pres-
+burger formula ϕA(x1, . . . , xn) for unranked tree automaton
+A, with one extra existential quantiﬁer for the new symbol2.
+Hence, we have:
+
+LEMMA 4.2. (See also Section 8.) Given an unranked
+tree automaton A, over alphabet Σ = {a1, . . . , an},
+one can construct in polynomial time an existential Pres-
+burger formula ϕA(x1, . . . , xn) such that if w ∈ L(A),
+then ϕA(#a1(w), . . . , #an(w) holds; and conversely, if
+ϕA(m1, . . . , mn) holds, then there exists a tree t ∈ L(A)
+such that #a1(t) = m1, . . . , #an(t) = mn.
+
+Going back to the proof of Theorem 4.1, we introduce ad-
+ditional variables va for each a ∈ Σ − {r}. The intended
+meaning of va is the cardinality of Vt(a). Let ¯v be the vec-
+tor (va1 , . . . , van ). We next deﬁne two formulae that ensure
+proper interaction between ψC and ϕA. First,
+
+χ(¯v, ¯x, ¯z) = ^
+
+a∈Σ−{r}
+
+(va = X
+
+a∈S
+
+zS) ∧ (va ≤ xa)
+
+1In Section 7 when we look at the concise representations of the
+input, we will need a more reﬁned technique for eliminating set
+constraints.
+2We shall present a more thorough construction in Section 8.
+
+states the expected conditions on these variables, given their
+intended interpretations. Second,
+
+χ′(¯v, ¯x) = ^
+
+a∈Σ−{r}
+
+(xa = 0 ∨ va > 0)
+
+ensures that if a-nodes exist (i.e., xa > 0), then at least one
+data value is found in the a-nodes.
+
+We now consider a Presburger formula Ψ(A,C)(¯x, ¯z)
+∃¯v (cid:0)ψC(¯x, ¯z) ∧ ϕA(¯x) ∧ χ(¯v, ¯x, ¯z) ∧ χ′(¯x, ¯z)(cid:1).
+
+To convert Ψ(A,C)(¯x, ¯z) into the form (1), we simply move
+all the existential quantiﬁer in ϕA(¯x) to the front. Each
+atomic predicate inside Ψ(A,C)(¯x, ¯z) can then be viewed as
+an instance of integer linear programming A¯yi ≥ bi.
+
+LEMMA 4.3. Given tuples of non-negative integers
+¯n = (na)a∈Σ and ¯m = (mS)S⊆Σ−{r},
+the formula
+Ψ(A,C)(¯n, ¯m) holds iff there exists a data tree t accepted by
+A such that
+
+1. na = #a(t) for each a ∈ Σ − {r};
+2. mS = |[S]t| for each S ⊆ Σ − {r};
+3. t |= C.
+
+PROOF. The “if” part is immediate from the construc-
+tion of Ψ(A,C). We prove the “only if” direction. Suppose
+Ψ(¯n, ¯m) holds. That is, there exists a witness ¯v such that
+ϕC(¯n, ¯m) ∧ ϕA(¯n) ∧ χ(¯v, ¯n, ¯m) ∧ χ′(¯n, ¯m) holds.
+
+Since ϕA holds, by Lemma 4.2, there exists a tree t ∈ L(A)
+such that (#a1(t), . . . , #an(t)) = ¯n.
+Now we show how to assign data values to the nodes in the
+tree t so that in the resulting data tree t′ we have mS =
+|[S]t′ |, for every S ⊆ Σ − {r}. Let K = PS⊆Σ−{r} mS,
+and we shall use the set {1, . . . , K} as the data values. Let
+
+ξ : {1, . . . , K} 7→ 2Σ−{r} − ∅
+
+be a function satisfying |ξ−1(S)| = mS, for each S ⊆ Σ −
+{r}. The witness for ¯v is (Pa2∈S mS, . . . ,Pan∈S mS).
+The data tree t′
+is obtained by letting Vt′ (a) be
+Sa∈S ξ−1(S). This is possible since χ(¯v, ¯n, ¯m) holds as
+Pa∈S |ξ−1(S)| = va ≤ #a(t) = na. By deﬁnition
+of the function ξ, we obtain that [S]t′ = ξ−1(S), thus,
+|[S]t′ | = ms, for each S ⊆ Σ − {r}. This proves the
+lemma.
+
+We now have an NP algorithm for SAT(A, C): in polyno-
+mial time we construct the formula Ψ(A,C)(¯x, ¯z) and then
+check for its satisﬁability. It runs in NP, and Lemma 4.3
+implies that it solves SAT(A, C).
+2
+
+We shall see in the next section that our algorithm for
+SAT(A, C) gives some results obtained by using much
+harder techniques (such as reasoning about constraints in
+XML), and comes very close to giving us results obtained
+by considerably much harder techniques (like the results of
+[6]). The simpler structure of the proof will lead to some ex-
+tensions that otherwise would have been very hard to obtain.
+
+5. AN EXTENSION: COMPLEX PROPER-
+
+TIES OF NODES
+
+2. Moreover, it is decidable in NP if Π is ﬁxed, or even if
+for each symbol a ∈ Σ the number of formulae πi(x)
+which can be true in a-nodes is ﬁxed.
+
+We now demonstrate how the simple structure of the proof
+lets us obtain extensions for the main reasoning task almost
+effortlessly.
+
+So far we were counting numbers of nodes #a(t) – i.e.,
+nodes labeled a. Checking whether a node is labeled a is
+a simple property expressed by a ﬁxed MSO (in fact, by an
+atomic FO) formula with one free variable. We now show
+that we can count sets of nodes expressed by arbitrary ﬁxed
+MSO formulae and use them in linear constraints.
+
+More precisely, let π(x) be an MSO formula with one free
+ﬁrst-order variable in the usual vocabulary of unranked trees,
+that is, E↓, E→, and a(·)a∈Σ for child and next-sibling edges
+and labeling predicates. These formulae select nodes in
+trees. We let #π(t) be the cardinality of the set of nodes
+in t that satisfy π.
+
+Using our proof, we can extend the decidability result to con-
+straints that include “counting” the number of nodes output
+selected by such formulae π(x). Note that unary MSO sub-
+sumes many XML formalisms, for example node formulae
+of XPath (or even conditional XPath).
+
+If Π = {π1(x), . . . , πs(x)} is collection of such MSO for-
+mulae, then we refer to Π-linear constraints: these are linear
+constraints over the usual variables xa’s and zS’s, as well as
+wπi’s, interpreted as #πi(t). We then deal with the problem
+Π-SAT(A, C): its input is an automaton A and a collection
+C of set and Π-linear constraints, and the question is whether
+these are satisﬁable.
+
+Our proof immediately implies that the problem is decid-
+able:
+
+COROLLARY 5.1. The problem Π-SAT(A, C) is decid-
+
+able.
+
+PROOF. We can embed the formulae π1, . . . , πs into the
+automaton A and check the existence of a tree over the al-
+phabet Σ × 2Π, where (i) its Σ projection is accepted by
+A and (ii) for each node labeled with (a, P ) ∈ Σ × 2Π, a
+formula π is satisﬁed iff π ∈ P is satisﬁed. The linear con-
+straints in C over the variables xa’s and zS’s can be easily
+converted into the variables xa,P ’s and zT , where P ⊆ 2Π
+and T ⊆ (Σ × 2Π).
+
+The complexity of Π-SAT(A, C) of course depends on how
+the formulae π1, . . . , πn are given. If they are given as MSO
+formulae, then it is immediately known that the complexity
+is non-elementary. But these formulae are also captured by
+the query automata of [24]: these are automata that also se-
+lect nodes in their accepting runs. With query automata, the
+complexity drops to NEXPTIME, and in some cases to NP.
+
+COROLLARY 5.2.
+
+1. If the formulae in Π are given
+as query automata, then Π-SAT(A, C) is decidable in
+NEXPTIME.
+
+is
+
+straightforward,
+
+PROOF. Item (1)
+
+the non-
+elementary blow-up for SAT(A, C) occurs in translating the
+MSO formulae to query automata. However, the blow-up
+from NP (complexity of SAT(A, C)) to NEXPTIME occurs
+when moving from the alphabet Σ to Σ × 2Π. Thus, if Π is
+ﬁxed, then the complexity remains in NP.
+
+as
+
+Moreover, if for each symbol a ∈ Σ the number of formulae
+πi(x) which can be true in a-nodes is ﬁxed, we do not need
+to move to the alphabet Σ × 2Π. We can stay in the alphabet
+Σ, and embed each π ∈ Π inside the automaton A. The
+automaton A can remember the ﬁxed number of nodes that
+satisfy π and verify that indeed such is the case. This way
+we avoid the exponential blow-up and remains in NP.
+
+While converting from MSO to query automata is non-
+elementary, for some other formalisms that complexity is
+much lower:
+for example, [19] shows how to convert
+conditional-XPath to query automata in single-exponential
+time.
+
+6. COMPARISON WITH OTHER FOR-
+
+MALISMS
+
+We now show how the satisﬁability problem SAT(A, C) re-
+lates to reasoning tasks for XML with data.
+
+6.1 XML constraints
+
+As we already noticed, keys and inclusion constraints, stud-
+ied extensively in the XML context (and included in the stan-
+dards) are modeled with set and linear constraints. A simple
+key, saying that data values determine a-nodes, is a linear
+constraint xa = Pa∈S zS, and an inclusion constraint say-
+ing that data values of a-nodes occur as data values of b-
+nodes is V (a) ∩ V (b) = ∅. Similarly, one can handle denial
+constraints, often used in dealing with inconsistent data. An
+example of a denial constraint is saying that the same data
+value cannot appear in both an a-node and a b-node; this is
+expressible as V (a) ∩ V (b) 6= ∅.
+
+Our result implies that the satisﬁability problem for key, in-
+clusion, and denial constraints wrt an automaton is solvable
+in NP. Note however that to express a key as a linear con-
+straint one needs exponentially many (in Σ) variables zS,
+while we can compactly encode keys simply by letters in-
+volved in them, requiring log |Σ| bits instead. It turns out
+that this does not change the bound for keys and inclusion
+constraints; our proof can easily be adjusted to show:
+
+COROLLARY 6.1. The satisﬁability problem for key (en-
+coded by log |Σ| bits) and inclusion constraints wrt an au-
+tomaton is solvable in NP.
+
+PROOF. Let A be an automaton over the alphabet Σ
+and let C be a collection of keys and inclusion constraints,
+
+where elements of C are written as V (a) 7→ a (for keys)
+and V (a) ⊆ V (b) (for inclusion constraints). Let Σ =
+{a1, . . . , an}.
+Our algorithm to decide whether there exists a data tree t ∈
+L(A) such that t |= C works as follows.
+
+1. Construct
+
+the
+ϕA(x1, . . . , xk)
+to Lemma 4.2.
+
+existential
+for
+
+formula
+the automaton A according
+
+Presburger
+
+2. Let ϕC(x1, . . . , xk) be the formula: ∃v1 · · · ∃vk
+
+^
+
+i
+
+vi ≤ xi ∧ ^
+
+i
+
+(vi = 0 ↔ xi = 0)
+
+∧
+vi = xi(cid:17) ∧ (cid:16)
+
+(cid:16) ^
+
+V (ai)7→ai∈C
+
+^
+
+V (ai)⊆V (aj )∈C
+
+vi ≤ vj(cid:17).
+
+3. Let ϕA,C(x1, . . . , xk)
+
+ϕC(x1, . . . , xk).
+Test the satisﬁability of ϕA,C(x1, . . . , xk).
+
+:=
+
+ϕA(x1, . . . , xk) ∧
+
+Note that here we do not use the variables zS’s.
+We claim that for each data tree t, t ∈ L(A) and t |= C if
+and only if ϕA,C(#a1(t), . . . , #ak(t)) holds.
+We start with the “only if” part. Let t ∈ L(A) and t |= C.
+That ϕA(#a1(t), . . . , #ak(t)) follows from Lemma 4.2. To
+show that ϕC(#a1(t), . . . , #ak(t)) holds, we let the wit-
+nesses for each vi as the cardinality |Vt(ai)|, the number of
+data values found in the ai-nodes in t. Then, it is straightfor-
+ward to show that ϕC(#a1(t), . . . , #ak(t)) holds.
+Now we show the “if” part. Suppose ϕA,C(n1, . . . , nk)
+holds. By Lemma 4.2, there exists a tree t ∈ L(A) such
+that for each ai ∈ Σ, ni = #ai(t). Let (m1, . . . , mk) be
+the witness for (v1, . . . , vk) that ϕC(x1, . . . , xk) holds. We
+assign the values 1, . . . , mi as data values for the ai-nodes
+in t such that Vt(ai) = {1, . . . , mi}, for each ai ∈ Σ. Such
+assignment is always possible since mi ≤ #ai(t). That
+the keys and inclusion constraints in C are satisﬁed follows
+immediately from the constraints vi = xi and vi ≤ vj, re-
+spectively.
+
+This extends the results of [2, 13] which showed an NP
+bound for keys and a special form of inclusions (whose right-
+hand-sides are keys as well); but in addition our proof is
+much more streamlined compared to the proofs there.
+
+Furthermore, it is easy to extend these results to more com-
+plex constraints studied in the XML context. For example,
+consider key constraints given by regular expressions over
+Σ. Such a constraint V (e) → e, for a regular expression e,
+is satisﬁed in a tree t if nodes reachable from the root by fol-
+lowing a path from e are uniquely determined by their data
+values. These constraints, common in XML schema speci-
+ﬁcations, are easily described by our formalism: one simply
+marks the nodes with states of an automaton for e, and uses
+the tree automaton A to ensure that the marking is correct.
+
+6.2 Two-variable logic
+
+As mentioned already, out main result does not follow
+from the decidability of the two-variable existential monadic
+second-order logic over data trees [6]. We now shall make
+precise the relationship between the two formalisms. When
+we talk about logics over data trees, we view them as struc-
+tures
+
+t = hD, E↓, E→, {a(·)}a∈Σ, ∼i,
+
+(2)
+
+which extend unranked trees with the binary predicate ∼ in-
+terpreted as v ∼ v′ ⇔ valt(v) = valt(v′).
+
+the logic ∃MSO2 are of
+
+The sentences of
+the form
+∃X1 . . . ∃Xm ψ, where ψ is an FO formula over the vocab-
+ulary extended with the unary predicates X1, . . . , Xm that
+uses only two variables, x and y. Every MSO sentence that
+does not mention data values is equivalent to an ∃MSO2 sen-
+tence. Other examples are keys ( ∀x∀y (a(x) ∧ a(y) ∧ x ∼
+y → x = y)),
+inclusion constraints (∀x∃y (a(x) →
+b(y)∧x ∼ y)), and denial constraints (∀x∀y (a(x)∧b(y) →
+¬(x ∼ y))).
+
+It was shown in [6] that every ∃MSO2 formula over data
+trees is equivalent to a formula
+
+∃X1 . . . ∃Xk(χ ∧ ^
+
+i
+
+ϕi ∧ ^
+
+j
+
+ψj)
+
+where
+
+1. χ describes a behavior of an automaton that can make
+“local” data comparisons (i.e., whether a data value in
+a node is equal/not equal the data value of its parent,
+left- or right-sibling);
+
+2. each ϕi is of the form ∀x∀y(α(x) ∧ α(y) ∧ x ∼ y →
+x = y), where α is a conjunction of labeling predi-
+cates, Xk’s, and their negations; and
+
+3. each ψj is of the form ∀x∃y α(x) → (x ∼ y ∧ α′(y)),
+
+with α, α′ as in item 2.
+
+If we extend the alphabet to Σ × 2k so that each label also
+speciﬁes the family of the Xi’s the node belongs to, then
+formulae in items 2 and 3 can be encoded by constraints.
+
+• Formulae in item 2 become conjunctions of keys and
+denial constraints over the extended alphabet. That is,
+it becomes a formula
+
+∀x∀y( _
+
+a∈Σ′
+
+a(x) ∧ _
+
+a∈Σ′
+
+a(y) ∧ x ∼ y → x = y),
+
+for some Σ′ ⊆ Σ × 2k, which is equivalent to:
+
+– a is a key for each a ∈ Σ′, and
+– V (a) ∩ V (b) = ∅, for every a, b ∈ Σ′ and a 6= b.
+
+• Formulae in item 3 become
+
+∀x∃y( _
+
+a∈Σ′
+
+a(x) → x ∼ y ∧ _
+
+a∈Σ′′
+
+a(y)),
+
+for some Σ′, Σ′′ ⊆ Σ × 2k, which is equivalent to gen-
+eralized inclusion constraints of the form
+
+NEXPTIME, and it is tempting to think that CONCISE-SAT
+is NEXPTIME-complete.
+
+[
+
+a∈Σ′
+
+V (a) ⊆ [
+
+b∈Σ′′
+
+V (b),
+
+or, equivalently Sa∈Σ′ V (a) ∩ Tb∈Σ′′ V (b) = ∅.
+
+Hence, [6] and our results imply the following.
+
+COROLLARY 6.2.
+
+• (corollary of [6]) Satisﬁability
+of ∃MSO2 formulae over data trees is equivalent to
+satisﬁability of keys, denial constraints, and general-
+ized inclusions constraints with respect to an automa-
+ton with local data comparisons.
+
+• (corollary of Theorem 4.1) Satisﬁability of keys, denial
+constraints, and generalized inclusions constraints
+with respect to an automaton is solvable in NP.
+
+While our main result and the decidability of ∃MSO2 are in-
+comparable, in essence we subsume ∃MSO2 minus the local
+data comparison constraints. Note that our proof is concep-
+tually much simpler than the 30+ page proof of [6] that goes
+via more than a dozen reductions. Unlike [6], we fail to cap-
+ture local data comparisons in automata; on the other hand,
+we add many properties (e.g., linear constraints) which are
+not even expressible in MSO.
+
+7. CONCISE REPRESENTATIONS OF
+
+THE SATISFIABILITY PROBLEM
+
+Recall that we measure the size of the linear data constraints
+A¯v ≥ b as the sum of sizes of A and b, with numbers repre-
+sented in binary.
+
+This could be a rather inefﬁcient way of representing lin-
+ear constraints. Since the number of variables zS in the
+constraints is 2|Σ|−1 − 1, we may achieve a more compact
+representation if only few of those variables are used in the
+constraints. Namely, we can safely disregard all the zero-
+columns in A, and keep only the columns that correspond
+to variables actually used in constraints. This representa-
+tion can be exponentially smaller than the full representation
+of the constraints (since Σ is a part of the input, we cannot
+achieve a smaller reduction even if there are no linear con-
+straints).
+
+We call this a concise representation, and consider the cor-
+responding CONCISE-SAT(A, C):
+it is the same as the
+SAT(A, C) problem before, except we use a concise rep-
+resentation of linear constraints.
+
+It is a very common phenomenon in complexity theory
+that going to concise representation increases the complex-
+ity by an exponent; in fact doing so is a common way of
+getting NEXPTIME-complete problems from NP-complete
+problems. Of course given a concise representation of con-
+straints, we can always convert it into the usual represen-
+tation in at most exponential time, and then apply Theo-
+rem 4.1. This immediately tells us that CONCISE-SAT is in
+
+This, however, is not the case. Quite surprisingly, the con-
+cise representation does not increase the complexity of the
+problem. To show this, we need to design the decision pro-
+cedure in a much more careful way.
+
+THEOREM 7.1. The problem CONCISE-SAT(A, C) is
+
+solvable in NP.
+
+We now indicate where the proof of Theorem 4.1 falls short
+when we have concise representations. First, the transfor-
+mation from set to linear constraints is polynomial in the
+number of variables zS, i.e., O(2|Σ|). This did not cause
+problems before, but now we may not have all the variables
+zS, so the input may be of the size O(|Σ|k) for a ﬁxed k.
+Then the algorithm for eliminating set constraints becomes
+exponential. Second, the introduction of new variables va
+for Pa∈S⊆Σ zS used in the proof may likewise induce an
+exponential blow-up when considering concise representa-
+tion.
+
+The main aim is to show that there exists a subset Z ⊆ 2Σ
+of polynomial size such that there exists a tree t ∈ L(A)
+and t |= C iff there exists a tree t′ ∈ L(A) and t′ |= C and
+[S]t′ = ∅, for all S /∈ Z. For this we introduce another
+extension of the ILP problem.
+
+We give the sketch of the proof in the following subsection.
+The full proof will be available in the full version.
+
+7.1 Sketch of Proof of Theorem 7.1
+
+Let Σ be a ﬁnite alphabet and C is a collection of set and
+linear constraints. In the following we say that a term τ ∈ C
+if and only if C contains a set constraint of the form τ = ∅ or
+τ 6= ∅. Similarly we say that a variable zS ∈ C if and only if
+there is a linear data constraint in C that uses zS. We denote
+by Ψlin(C) the set of linear data constraints found in C.
+
+DEFINITION 7.2
+
+(C-FUNCTIONS). Given an alphabet
+Σ and a collection C of data constraints, a C-function is a
+function F from Σ ∪ {τ |τ ∈ C} ∪ { zS|zS ∈ C} to 2Σ such
+that:
+
+• for each a ∈ Σ, either F (a) = ∅ or a ∈ F(a);
+
+• for each zS ∈ C, either F (zS) = ∅ or F (zS) = S;
+
+• for each constraint τ 6= ∅ ∈ C, we have F (τ ) ∈ S(τ );
+
+• for each constraint τ = ∅ ∈ C, we have F (τ ) = ∅ and
+
+Im(F ) ∩ S(τ ) = ∅;
+
+where Im(F ) denotes the image of F, and S(τ ) was deﬁned
+in the proof of Proposition 8.4.
+
+The intuition of F is such that Im(F ) is the desired set Z.
+Given a collection C of data constraints and a C-function F,
+we call Ψ(C, F ) the system obtained from C by adding the
+following constraints to Ψlin(C):
+
+zS ≥ 1
+xa = 0
+zS = 0
+
+X
+
+zS ≤ xa
+
+a∈S∈Im(F )−∅
+
+for each S ∈ Im(F) − ∅
+for each a ∈ Σ such that F(a) = ∅
+for each zS ∈ C such that F(zS) = ∅
+for each a ∈ Σ;
+
+Notice that the size of Ψ(C, F ) is polynomial in the size of
+both C and the alphabet Σ.
+
+In the rest of the proof, all instances of ILP we refer to are
+instances over the variables xa, zS, va.
+
+DEFINITION 7.3
+
+(ILP UNDER C-CONDITION). An in-
+stance of ILP problem under C-condition is given by an in-
+stance Ψ of ILP together with a collection C of data con-
+straints. We say that it has a non-negative solution if there
+exists a C-function F such that the instance of ILP given by
+Ψ and Ψ(F , C) has a non-negative solution.
+
+We shall now state the two main lemmas from which Theo-
+rem 7.1 follows immediately. The proofs will be available in
+the full version.
+
+LEMMA 7.4. Checking whether an instance of ILP with
+C-condition has a non-negative solution can be done in NP.
+
+LEMMA 7.5. Given an automaton A and a set C of data
+constraints in concise representation, one can construct, in
+polynomial time, an instance of ILP with C-condition so that
+there exists a tree t ∈ L(A) such that t |= C iff the instance
+of ILP with C-conditions has a non-negative solution.
+
+8. CONVERTING AUTOMATA TO PRES-
+
+BURGER FORMULA
+
+To make our proof completely algorithmic, in this section
+we spell out the translation from automata to a Presburger
+formula deﬁning Parikh images of trees, used as a black box
+(Lemma 4.2) in the proof of Theorem 4.1. Moreover, we
+also present an algorithm, that given a solution to the Pres-
+burger formula, constructs a tree accepted by the original
+automaton.
+
+that
+
+the Parikh image of a tree t over
+We recall
+Σ = {al, . . . , an} is
+an n-tuple Parikh(t) =
+(#a1(t), . . . , #an(t)), and the Parikh image of a tree
+language L is Parikh(L) = {Parikh(t) | t ∈ L} ⊆ Nn.
+
+PROPOSITION 8.1. There is a quadratic time algorithm
+that, given an unranked tree automaton A over Σ =
+{al, . . . , an}, returns a formula
+
+ϕA(x1, . . . , xn) = ∃¯y α(¯x, ¯y)
+
+of at most quadratic size such that
+
+• if t ∈ L(A), then ϕA(#a1(t), . . . , #an(t)) holds; and
+
+conversely,
+
+• if ϕA(k1, . . . , kn) holds, then there exists a tree t ∈
+
+L(A) such that #a1(t) = k1, . . . , #an(t) = kn
+
+and α is a conjunction of formulae of the form:
+
+• A(¯x, ¯y) ≥ b, where all the entries of A and b are either
+
+0 or 1 or −1;
+
+• formulae (w = 0 ∨ u ≥ 1) where w, u are variables
+
+among ¯x, ¯y; and
+
+• disjunctions Wi(wi ≥ 1∧ui = 1), where wi’s and ui’s
+
+are variables among ¯x, ¯y.
+
+Moreover,
+from every solution (k1, . . . , kn) and witness
+tuple ¯m such that α(k1, . . . , kn, ¯m) holds, we can con-
+struct effectively a tree t ∈ L(A) such that Parikh(t) =
+(k1, . . . , kn).
+
+8.1 Proof of Proposition 8.1
+
+The general outline is as follows: we ﬁrst replace an au-
+tomaton by an extended DTD (Proposition 8.2), and then by
+a DTD of a special form, which we call simple DTD (Propo-
+sition 8.3). We then show the construction of the Presburger
+formula for such simple DTDs (Proposition 8.4). The ﬁrst
+two reductions are standard. The crucial one is the last one.
+
+Recall that an extended document type deﬁnition (EDTD)
+is a context-free grammar in which the right-hand sides of
+productions can be regular expressions. Formally, an ex-
+tended DTD over the alphabet (Γ ∪ Λ) of nonterminals Γ,
+with a distinguished symbol r for the root, and terminals Λ
+is G = (Γ, Λ, ∆), where ∆ assigns to each symbol a ∈ Γ a
+regular expression over (Γ ∪ Λ) − {r}. The set of trees of G
+is denoted by T (G). That is, an unranked tree t is in T (G)
+if its root is labeled r, for each node v labeled a ∈ Γ with
+children v · 0, . . . , v · (n − 1), the word of their labels, i.e.,
+ℓabt(v · 0) · · · ℓabt(v · (n − 1)), is in the language of ∆(a),
+and each node labeled with b ∈ Λ is a leaf.
+
+The ﬁrst reduction is stated as a proposition below. The
+proof will be available in the full version.
+
+PROPOSITION 8.2. Given an automaton A with the set
+Q of states over alphabet Σ, one can construct, in quadratic
+time, an extended DTD G = (Γ, Σ − {r}, ∆) with Γ =
+Q × Σ ∪ {r} such that the following holds.
+
+1. For all tree t ∈ L(A), there exists a tree t′ ∈ T (G)
+
+such that for all a ∈ Σ, #a(t) = #a(t′).
+
+2. Vice versa, for all tree t′ ∈ T (G), there exists a tree
+
+t ∈ L(A) such that for all a ∈ Σ, #a(t) = #a(t′).
+
+Moreover, every tree t′ ∈ T (G) can be converted effectively
+into a tree t ∈ L(A).
+
+Next, we deﬁne simple DTDs as G = (Γ, Λ, ∆) with a des-
+ignated terminal symbol λ ∈ Λ. In them, ∆(a) is one of the
+following: b, or bc, or b|c, or λ, where b, c ∈ (Γ ∪ Λ) − {r}.
+We denote the set of parse trees of G by T (G). Note that
+trees in T (G) can have only unary or binary branching.
+We make the standard assumption that all symbols in Γ are
+reachable from the root symbol r. If a CFG has unreach-
+able symbols, they can be eliminated without affecting the
+set T (G).
+
+The second reduction is stated as proposition below. The
+proof will be available in the full version.
+
+PROPOSITION 8.3. Given an extended DTD G =
+(Γ, Λ, ∆), one can construct, in linear time, a simple DTD
+G = (Γ′, Λ ∪ {λ}, ∆′) such that the following holds.
+
+1. For all tree t ∈ T (G), there exists a tree t′ ∈ T (G)
+
+such that for all a ∈ Λ, #a(t) = #a(t′).
+
+2. Vice versa, for all tree t′ ∈ T (G), there exists a tree
+
+t ∈ T (G) such that for all a ∈ Λ, #a(t) = #a(t′).
+
+Moreover, every tree t′ ∈ T (G) can be converted effectively
+into the tree t ∈ T (G).
+
+The last reduction is stated as proposition below.
+
+PROPOSITION 8.4. Given a simple DTD G = (Γ, Λ ∪
+{λ}, ∆), where Λ = {a1, . . . , an}, one can con-
+struct,
+in linear time, an existential Presburger formula
+ϕG(x1, . . . , xn) := ∃¯yψ(¯x, ¯y) such that for every tree t,
+t ∈ T (G) iff ϕG(#a1(t), . . . , #an(t)) holds.
+Moreover, from every solution (k1, . . . , kn) and ¯m such that
+ψ(k1, . . . , kn, ¯m) holds, we can construct effectively a tree
+t ∈ T (G) such that Parikh(t) = (k1, . . . , kn).
+
+We devote the rest of this subsection to the proof of Propo-
+sition 8.4. We need a new notation here. For a tree t
+over the alphabet Γ ∪ Λ ∪ {λ}, we deﬁne a directed graph
+Gt = (Vt, Et), where the set of vertices is Vt = Γ∪Λ∪{λ};
+and for every a, b ∈ Γ∪Λ∪{λ}, there is an edge (a, b) ∈ Et
+if there exists a node in t labeled with b and whose parent is
+labeled with a. If a symbol a does not appear in the tree t,
+then it is an isolated vertex in Gt.
+The main idea is to prove that a tree t ∈ T (G) iff the follow-
+ing quantities:
+
+1. na = #a(t), for each a ∈ Γ ∪ Λ ∪ {λ};
+2. na↓b is the number of b-nodes whose parents in t is
+
+labeled with a;
+
+3. δa is the length of some path from the root r to the
+
+symbol a in the graph Gt,
+
+satisfy the following relations:
+
+• na = Pb∈Γ∪Λ nb↓a, for each a ∈ Γ ∪ Λ ∪ {λ}.
+•
+
+– na = na↓b + na↓c, if ∆(a) = b|c.
+– na = na↓b = na↓c, if ∆(a) = bc,
+– na = na↓b, if ∆(a) = b,
+
+• δr = 0;
+• for each a ∈ Γ ∪ Λ ∪ {λ} and a 6= r,
+
+δa = −1 ↔ na = 0
+
+and
+
+_
+
+nb↓a6=0 and δb6=−1
+
+δa = δb + 1
+
+Note that by default, we set δa = −1, if there is no path from
+the root to the symbol a in the graph Gt, which means that
+the symbol a does not appear in t.
+
+Then, the construction of the desired formula ϕG is straight-
+forward. It uses the variables xa’s, ya’s and xa↓b’s, for all
+a ∈ Γ ∪ Λ and b appears in ∆(a). The intended meaning of
+each variable is as follows: xa is for na; xa↓b is for na↓b; ya
+is for δa.
+The formula ϕG is the conjunction of the following:
+
+• xr = 1;
+• xa = Pb∈Γ∪Λ xb↓a for each a ∈ Γ ∪ Λ;
+• xa = xa↓b = xa↓c for each ∆(a) = bc;
+• xa = xa↓b + xa↓c for each ∆(a) = b|c;
+• xa = xa↓b for each ∆(a) = b;
+• yr = 0;
+• for each a ∈ Γ ∪ Λ ∪ {λ},
+
+ya = −1 ↔ xa = 0
+
+∨
+
+_
+
+a appears in ∆(b)
+
+ya = yb + 1 ∧ xb↓a 6= 0 ∧ yb 6= −1.
+
+The total number of variables xa’s and xa↓b’s and ya’s is
+linear in the size of ∆. We do not need the variables xa↓b’s,
+if b does not appear in ∆(a).
+
+By existentially quantifying all the variables xa↓b’s and ya’s,
+we can then view ϕG as an existential Presburger formula
+with xa’s as the free variables.
+Proposition 8.4 follows immediately from the lemma below.
+LEMMA 8.5. Let G = (Γ, Λ, ∆) be a simple CFG. The
+formula ϕG(¯n) holds – where (¯n) = (na)a∈Σ and the wit-
+nesses for xa↓b’s and ya’s are: xa↓b = na↓b ∈ N, and
+ya = da ∈ N, for a, b ∈ Γ ∪ Λ – if and only if there ex-
+ists a tree t ∈ T (G) such that
+
+(1) na = #a(t) for each a ∈ Γ ∪ Λ,
+(2) na↓b is the number of b-nodes whose parents are a-
+
+nodes, and
+
+(3) da is the length of some path from the root r to the
+
+symbol a in the graph Gt.
+
+PROOF. From the deﬁnition of Ψ(G), the “if” part is im-
+mediate. We prove the other implication. Let ¯n = (na)a∈Σ
+such that ϕG(¯n) holds. Let na↓b be the witness for xa↓b for
+a, b ∈ Γ ∪ Λ, and da for ya, for a ∈ Γ ∪ Λ. Let ˜G = ( ˜V , ˜E)
+be a directed graph where the set ˜V of nodes is Γ ∪ Λ and
+the set ˜E of edges is deﬁned as: (a, b) ∈ ˜E iff na↓b 6= 0.
+We shall construct a tree t ∈ T (G) that satisﬁes (1) and
+(2) and that Gt = ˜G. First, we construct a directed graph
+G = (V, E) with the following properties.
+
+(i) For each a ∈ Γ ∪ Λ, there are exactly na nodes labeled
+
+a.
+
+(ii) For each a, b ∈ Γ ∪ Λ, there are exactly na↓b edges
+
+going from an a-node to a b-node.
+
+(iii) There is exactly one node labeled r and it has no in-
+
+coming edges (the root node).
+
+(iv) All nodes, except the root node, have exactly one in-
+
+coming edge.
+
+(v) For all nodes, outgoing edges conform to ∆. That is,
+for each a ∈ Γ, the outgoing edges from a-nodes are as
+follows: if ∆(a) = b · c, there are exactly two outgoing
+edges: one to a b-node and one to a c-node; if ∆(a) =
+b|c, there is exactly one outgoing edge going to a node
+labeled by b or c; and if ∆(a) = b, there is exactly one
+outgoing edge that goes to a b-node.
+
+Procedure 1 shows the construction of the graph G. Since
+nr = 1, there is only one root node in G. The steps 7, 8,
+12, 13 and 17 of the procedure are possible due to the equal-
+ity xb = Pd∈Γ∪Λ xd↓b in Ψ(G). Properties (i)-(v) follow
+directly from the construction and the constraints given in
+Ψ(G).
+
+For each a ∈ Γ ∪ Λ, we label na nodes with a.
+
+Procedure 1 Construct Graph G = (V, E)
+1: The set V consists of Pa∈Γ∪Λ na nodes.
+2: E := ∅.
+3: for all a ∈ Γ do
+4:
+5:
+6:
+7:
+
+Let w1, . . . , wna be the a-nodes.
+if ∆(a) = b · c then
+
+Let n = na = na↓b = na↓c.
+Pick a sequence u1, . . . , un of n distinct b-nodes with no
+incoming edges in E.
+Pick a sequence v1, . . . , vn of n distinct c-nodes with no
+incoming edges in E.
+E := E ∪ {(wi, ui), (wi, vi)}i=1,...,n.
+
+end if
+if ∆(a) = b ∪ c then
+
+Pick a sequence u1, . . . , una↓b of na↓b distinct b-nodes
+with no incoming edges in E.
+Pick a sequence v1, . . . , vna↓c of na↓c distinct c-nodes
+with no incoming edges in E.
+E
+{(wna↓b+j, vj )}j=1,...,na↓c.
+
+E ∪ {(wi, ui)}i=1,...,na↓b
+
+:=
+
+∪
+
+8:
+
+9:
+10:
+11:
+12:
+
+13:
+
+14:
+
+15:
+16:
+17:
+
+end if
+if ∆(a) = b then
+
+Pick a sequence u1, . . . , una↓b of na↓b distinct b-nodes
+with no incoming edges in E.
+E := E ∪ {(wi, ui)}i=1,...,na↓b.
+
+18:
+end if
+19:
+20: end for
+
+If G were a tree, we would be done: membership in T (G)
+would follow from (v), property (1) from (i), and property
+(2) from (ii) and (v). Therefore, to ﬁnish the proof of Lemma
+8.5, we show Claim 8.6 and Claim 8.8 below.
+
+CLAIM 8.6. A connected directed graph G = (V, E) that
+
+satisﬁes (i)-(v) is a tree.
+
+graph is a tree [35]. The root (the r-labeled node) gives the
+tree a unique orientation; we must show that it is the same
+one as the one in G. For this, consider any path from the root
+to a leaf in the tree, and suppose one edge has an orientation
+different from G. Let (u, v) be the ﬁrst such edge; that is, in
+G we have an edge (v, u). This cannot be the ﬁrst edge of
+the path, as the root has no incoming edge in G. Hence u has
+a parent u′ in the oriented tree, and the edge (u′, u) has the
+same orientation in both the oriented tree and in G. But this
+tells us that u has two incoming edges, which contradicts
+(iv).
+
+2
+
+We shall use Claim 8.7 to prove Claim 8.8.
+
+CLAIM 8.7.
+
+In the directed graph ˜G, a node a is con-
+nected from the root symbol r iff da 6= −1, or equivalently,
+na 6= 0. Moreover, da is the length of some path from the
+root symbol r to a, if da 6= −1.
+
+PROOF. The proof is by straightforward induction on the
+value da. The base case, da = 0, is trivial as it means a = r.
+The induction hypothesis is that for each node a with da =
+k 6= −1 is connected from the root symbol r by a path of
+length k.
+
+Suppose b is a node such that db = k + 1. By the construc-
+tion of ϕG, there exists a node a such that na↓b 6= 0 and
+da = k. By the induction hypothesis, a is connected from
+the root symbol r with a path of length k, and by the con-
+struction of ˜G, there exists an edge from a to b. Thus, our
+claim holds.
+
+CLAIM 8.8. From a directed graph G = (V, E) that
+satisﬁes (i)-(v), one can compute in polynomial time a con-
+nected directed graph G′ = (V, E′) that also satisﬁes (i)-(v).
+
+PROOF. The idea is to change a few edges in G in or-
+der to connect all components to the connected compo-
+nent that contains the r-node. We ﬁrst observe the follow-
+ing. Suppose G consists of several connected components:
+G0, G1, . . . , Gl, where G0 is the component that contains
+the root node. Then, there exist a node u in G0 and a node
+v in one of G1, . . . , Gl such that u and v are labeled by the
+same symbol from Σ.
+
+By Claim 8.7, if da 6= −1 (thus, na 6= 0), the symbol a
+is connected to the root symbol r in ˜G, and that da is the
+length of some path from r to a in ˜G. So, for every sym-
+bol a that appears in G, there exists a sequence of symbols
+b0, b1, . . . , bj, respectively, where
+
+• b0 = r,
+
+• bl = a, and
+
+• for each i = 0, . . . , j − 1, nbi↓bi+1 6= 0.
+
+PROOF. From Properties (iii) and (iv), we can see that the
+graph G satisﬁes the equation |E| = |V | − 1. If we for-
+get about orientation, this equation implies that a connected
+
+If the symbol a does not appear in G0, then there are a node
+u in G0 and a node v in one of G1, . . . , Gl such that both u
+and v are labeled with the same symbol bi ∈ {b1, . . . , bl}.
+
+Let G1 be the component that contains that node v. By (v),
+the node v has as many children as u (and it has at least one
+child as it is not labeled by λ).
+
+If u and v have one child each, then let w1 and w2 be their re-
+spective children. We can then connect G0 and G1 by replac-
+ing the edges (u, w1) and (v, w2) with (u, w2) and (v, w1).
+If u and v have two children each, then let w1, w′
+1 and w2, w′
+2
+be their respective children. We can then connect G0 and G1
+by replacing the edges (u, w1), (u, w′
+1) and (v, w2), (v, w′
+2)
+with (u, w2), (u, w′
+It is straightforward to see that after such edge replacement
+the graph still satisﬁes properties (i)-(v), and each edge re-
+placement reduces the number of connected components, so
+eventually this algorithm produces a tree t that satisﬁes (i)-
+(v). Moreover, the numbers na↓b do not change during the
+process, thus, Gt = ˜G.
+
+2) and (v, w1), (v, w′
+
+1).
+
+This completes the proof of Lemma 8.5.
+
+2
+
+9. CONCLUSIONS
+
+We have studied the consistency problem of set and linear
+constraints with respect to regular tree languages given by
+an automata. We prove that this problem is solvable in NP
+(the hardness result has been known even for simple keys
+and inclusion constraints [13]).
+
+At least as important as the result itself, we provide an orig-
+inal and modular proof using simple proof techniques as in
+particular linear integer programming. This unable us to ex-
+tend the result to more complicated path constraints. Sur-
+prisingly, we can use the same techniques to show that the
+complexity of the problem remains NP even when consider-
+ing concise representation of the constraints.
+
+In terms of expressivity, our formalism subsumes many in-
+teresting formalism such as keys, inclusions and denial con-
+straints. Our formalism is also closely related to the exten-
+sion of ∃MSO2 presented in [6], as it subsumes ∃MSO2 mi-
+nus the local data comparison constraints. In addition, it is
+also able to express many non-MSO properties.
+
+Acknowledgment. We thank the anonymous referees for
+their comments. This work was supported by the FET-Open
+project FoX (Foundations of XML), grant agreement FP7-
+ICT-233599, and by EPSRC grant G049165. This work was
+done when the ﬁrst author was at the University of Edin-
+burgh.
+
+10. REFERENCES
+
+[1] N. Alon, T. Milo, F. Neven, D. Suciu, V. Vianu. XML with data
+
+values: typechecking revisited. J. Comput. Syst. Sci. 66(4): 688-727
+(2003).
+
+[2] M. Arenas, W. Fan, L. Libkin. On the complexity of verifying
+
+consistency of XML speciﬁcations. SIAM J. Comput. 38(3): 841-880
+(2008).
+
+[3] M. Arenas, L. Libkin. XML data exchange: consistency and query
+
+answering. J. ACM 55(2): (2008).
+
+[4] H. Björklund, M. Bojanczyk. Bounded depth data trees. In
+
+ICALP’07, pages 862–874.
+
+[5] H. Björklund, W. Martens, T. Schwentick. Optimizing conjunctive
+
+queries over trees using schema information. MFCS’08, pages
+132–143.
+
+[6] M. Bojanczyk, A. Muscholl, T. Schwentick, L. Segouﬁn.
+
+Two-variable logic on data trees and XML reasoning. J. ACM 56(3):
+(2009).
+
+[7] M. Bojanczyk, C. David, A. Muscholl, T. Schwentick, L. Segouﬁn.
+
+Two-variable logic on words with data. In LICS’06, pages 7-16.
+
+[8] P. Bouyer, A. Petit, D. Thérien. An algebraic characterization of data
+
+and timed languages. CONCUR’01, pages 248–261.
+
+[9] D. Calvanese, G. De Giacomo, M. Lenzerini, and M. Y. Vardi.
+Regular XPath: constraints, query containment and view-based
+answering for XML documents. In LID’08, 2008.
+
+[10] H. Comon, et al. Tree Automata: Techniques and Applications.
+
+October 2007.
+
+[11] S. Dal-Zilio, D. Lugiez, C. Meyssonnier. A logic you can count on.
+
+POPL 2004, 135–146.
+
+[12] S. Demri, R. Lazic. LTL with the freeze quantiﬁer and register
+
+automata. ACM TOCL 10(3): (2009).
+
+[13] W. Fan, L. Libkin. On XML integrity constraints in the presence of
+
+DTDs. J. ACM 49(3): 368–406 (2002).
+
+[14] D. Figueira. Satisﬁability of downward XPath with data equality
+
+tests. PODS’09, 197-206.
+
+[15] R. Givan, D. A. McAllester, C. Witty, and D. Kozen. Tarskian set
+
+constraints. Inform. and Comput., 174 (2002), pp. 105–131.
+
+[16] M. Jurdzinski, R. Lazic. Alternation-free modal mu-calculus for data
+
+trees. In LICS’07, pages 131–140.
+
+[17] M. Kaminski, T. Tan. Tree automata over inﬁnite alphabets. In
+
+Pillars of Computer Science, 2008, pages 386–423.
+
+[18] E. Kopczynski, A. Widjaja To. Parikh Images of Grammars:
+
+Complexity and Applications. In LICS 2010.
+
+[19] L. Libkin, C. Sirangelo. Reasoning about XML with temporal logics
+
+and automata. J. Applied Logic, 8:2, 210–232 (2010).
+
+[20] S. Malik and L. Zhang. Boolean satisﬁability: from theoretical
+
+hardness to practical success. CACM 52(8), 76–82, 2009.
+[21] W. Martens, F. Neven, T. Schwentick. Simple off the shelf
+
+abstractions for XML schema. SIGMOD Record 36(3): 15-22 (2007).
+[22] T. Milo, D. Suciu, V. Vianu. Typechecking for XML transformers. J.
+
+Comput. Syst. Sci. 66(1): 66-97 (2003).
+
+[23] F. Neven. Automata, logic, and XML. In CSL 2002, pages 2–26.
+[24] F. Neven, Th. Schwentick. Query automata over ﬁnite trees. Theor.
+
+Comput. Sci. 275(1-2):633-674 (2002).
+
+[25] F. Neven, Th. Schwentick, V. Vianu. Towards regular languages over
+
+inﬁnite alphabets. MFCS 2001, pages 560–572.
+
+[26] L. Pacholski, A. Podelski. Set constraints: a pearl in research on
+
+constraints. In CP’97, pages 549–562.
+
+[27] C. Papadimitriou. On the complexity of integer programming. J.
+
+ACM, 28 (1981), 765–768.
+
+[28] A. Robinson, A. Voronkov, eds. Handbook of Automated Reasoning.
+
+The MIT Press, 2001.
+
+[29] Th. Schwentick. XPath query containment. SIGMOD Record 33(1):
+
+101-109 (2004).
+
+[30] H. Seidl, Th. Schwentick, A. Muscholl. Numerical document
+
+queries. PODS’03, 155–166.
+
+[31] H. Seidl, Th. Schwentick, A. Muscholl, P. Habermehl. Counting in
+
+trees for free. In ICALP 2004, pages 1136–1149.
+
+[32] J.W. Thatcher. Characterizing derivation trees of context-free
+
+grammars through a generalization of ﬁnite automata theory. JCSS 1
+(1967), 317–322.
+
+[33] K. N. Verma, H. Seidl, T. Schwentick On the Complexity of
+
+Equational Horn Clauses. In CADE 2005, pages 337–352.
+
+[34] V. Vianu. A web Odyssey: from Codd to XML. In PODS’01, pages
+
+1–15.
+
+[35] D. West. Introduction to Graph Theory. Prentice Hall, 2001.
+
+

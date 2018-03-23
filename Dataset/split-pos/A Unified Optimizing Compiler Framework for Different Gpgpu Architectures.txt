@@ -1,0 +1,3011 @@
+A Uniﬁed Optimizing Compiler Framework for Different
+GPGPU Architectures
+
+YI YANG and PING XIANG, North Carolina State University
+JINGFEI KONG and MIKE MANTOR, Advanced Micro Devices
+HUIYANG ZHOU, North Carolina State University
+
+This article presents a novel optimizing compiler for general purpose computation on graphics processing
+units (GPGPU). It addresses two major challenges of developing high performance GPGPU programs: ef-
+fective utilization of GPU memory hierarchy and judicious management of parallelism. The input to our
+compiler is a na¨ıve GPU kernel function, which is functionally correct but without any consideration for
+performance optimization. The compiler generates two kernels, one optimized for global memories and the
+other for texture memories. The proposed compilation process is effective for both AMD/ATI and NVIDIA
+GPUs. The experiments show that our optimized code achieves very high performance, either superior or
+very close to highly ﬁne-tuned libraries.
+
+Categories and Subject Descriptors: D.3.4 [Programming Languages]: Processors—Compilers,
+Optimization
+
+9
+
+General Terms: Performance, Experimentation, Languages
+
+Additional Key Words and Phrases: GPGPU, OpenCL, CUDA, CUBLAS, GPU Computing
+
+ACM Reference Format:
+Yang, Y., Xiang, P., Kong, J., Mantor, M., and Zhou, H. 2012. A uniﬁed optimizing compiler framework for
+different GPGPU architectures. ACM Trans. Architec. Code Optim. 9, 2, Article 9 (June 2012), 33 pages.
+DOI = 10.1145/2207222.2207225 http://doi.acm.org/10.1145/2207222.2207225
+
+1. INTRODUCTION
+The high computational power and affordability of state-of-art graphics processing
+units (GPU) have made them the ﬁrst widely accessible parallel computers with
+teraﬂops capability. To fully realize the power of general purpose computation on
+graphics processing units (GPGPU) or GPU computing, two key issues need to
+be considered carefully: (1) how to parallelize an application into concurrent work
+items and distribute the workloads in a hierarchy of thread blocks and threads and
+(2) how to efﬁciently utilize the GPU memory hierarchy, given its dominant impact
+on performance. As these two issues are usually coupled together and ﬁnding an op-
+timal tradeoff between different levels of parallelism and memory optimizations re-
+quires detailed understanding of GPU hardware, developing high performance GPGPU
+
+An earlier version of this article appeared in the ACM SIGNPLAN Conference on Programming Language
+Design and Implementation (PLDI’10) [Yang et al. 2010].
+This work is supported by the National Science Foundation, CAREER award CCF-0968667 and an AMD
+grant.
+Authors’ addresses: Y. Yang, P. Xiang, and H. Zhou, Electrical and Computer Engineering Department,
+North Carolina State University, Raleigh, NC; email: yyang14@ncsu.edu; J. Kong and M. Mantor, Graphics
+Products Group, Advanced Micro Devices.
+Permission to make digital or hard copies of part or all of this work for personal or classroom use is granted
+without fee provided that copies are not made or distributed for proﬁt or commercial advantage and that
+copies show this notice on the ﬁrst page or initial screen of a display along with the full citation. Copyrights for
+components of this work owned by others than ACM must be honored. Abstracting with credit is permitted.
+To copy otherwise, to republish, to post on servers, to redistribute to lists, or to use any component of this
+work in other works requires prior speciﬁc permission and/or a fee. Permissions may be requested from
+Publications Dept., ACM, Inc., 2 Penn Plaza, Suite 701, New York, NY 10121-0701 USA, fax +1 (212)
+869-0481, or permissions@acm.org.
+c(cid:2) 2012 ACM 1544-3566/2012/06-ART9 $10.00
+DOI 10.1145/2207222.2207225 http://doi.acm.org/10.1145/2207222.2207225
+
+ACM Transactions on Architecture and Code Optimization, Vol. 9, No. 2, Article 9, Publication date: June 2012.
+
+9:2
+
+Y. Yang et al.
+
+programs remains challenging for application developers. Furthermore, different GPUs
+(e.g., AMD/ATI GPUs vs. NVIDIA GPUs) may have signiﬁcantly different hardware
+features and even the GPUs from the same vendor (e.g., NVIDIA GTX480 vs. GTX285)
+have quite different characteristics due to the fast evolution of GPU hardware architec-
+tures. This fact makes the code developed and tuned for one GPU (e.g., NVIDIA GTX
+285) less optimal for a different one (e.g., NVIDIA GTX 480). Our envisioned solution
+to these problems is to simplify the GPU hardware abstraction model for program-
+mers. Instead of exposing hardware details such as shared memory, thread hierarchy,
+caches, we propose a GPU hardware abstraction as an array of independent processors
+connected to the off-chip memory. This way, we encourage application developers to fo-
+cus on extracting ﬁne-grain thread-level parallelism and/or data-level parallelism from
+their application algorithms. An optimizing compiler, on the other hand, will perform
+hardware-speciﬁc low-level performance optimizations.
+
+Our compiler works as follows. The input is a na¨ıve GPU kernel function, which is
+developed based on our simpliﬁed GPU hardware abstraction model. The na¨ıve kernel
+is functionally correct but does not include any device-speciﬁc performance optimiza-
+tions. Such a kernel function represents the user-identiﬁed ﬁne-grain work items that
+can run concurrently. A typical example of a ﬁne-grain work item is the computation
+of single data element in the output domain and very often it corresponds to single
+outer-loop iteration in the CPU code. The compiler analyzes the na¨ıve kernel and
+generates two kernels, one optimized for global memories and the other for texture
+memories. For the global memory version, the compiler checks the off-chip memory ac-
+cess patterns, and optimizes the memory accesses through vectorization and coalescing
+to achieve high data access bandwidth. For the texture memory version, the compiler
+uses aggressive vectorization to exploit the bandwidth provided by texture caches.
+Then the compiler analyzes data dependencies and identiﬁes possible data sharing
+across threads and thread blocks. Based on data sharing patterns, the compiler intel-
+ligently merges threads and/or thread-blocks to improve memory reuse through the
+register ﬁle, the on-chip shared memory, and the texture cache. These merges pro-
+vide a novel way to achieve loop tiling and unrolling by aggregating ﬁne-grain work
+items into threads and thread blocks. Additionally, the compiler schedules the code
+to enable data prefetching so as to overlap computation with memory access laten-
+cies. To avoid partition camping [Ruetsch and Micikevicius 2009] (i.e., to distribute
+memory trafﬁc evenly across memory partitions), thread blocks are checked for their
+memory accesses and depending on the thread block dimensions, either an address
+offset is inserted or the block identiﬁers (ids) are remapped, if necessary. The com-
+piler also performs hardware-speciﬁc tuning based on hardware parameters such as
+the register ﬁle size, the shared memory size, and the number of cores in the target
+GPU.
+
+Besides the aggressive compiler optimizations, another distinguishing feature of our
+compiler is that the optimized code is reasonably understandable compared to the code
+generated using algebraic frameworks such as polyhedral models [Pouchet et al. 2007].
+As a result, it is relatively easy to reason about the optimized code generated by our
+compiler, which facilitates algorithm-level exploration.
+
+In our experiments, we use the compiler to optimize 10 scientiﬁc and image pro-
+cessing functions for different GPUs, including NVIDIA GTX 285, NVIDIA GTX 480
+and AMD/ATI HD 5870. The experimental results show that our optimized code
+can achieve very high performance, either superior or very close to the NVIDIA
+CUBLAS 3.2 library and up to 62X over the na¨ıve implementation on NVIDIA
+GTX 285, up to 12X on NVIDIA GTX 480 and up to 87X over AMD/ATI HD
+5870.
+
+ACM Transactions on Architecture and Code Optimization, Vol. 9, No. 2, Article 9, Publication date: June 2012.
+
+A Uniﬁed Optimizing Compiler Framework for Different GPGPU Architectures
+
+9:3
+
+In summary, our work makes the following contributions.
+
+(1) We propose a compiler for GPGPU programming that enables the application de-
+velopers to focus on algorithm-level issues rather than low-level hardware-speciﬁc
+performance optimizations.
+
+(2) We propose a set of new compiler optimization techniques to improve memory
+access bandwidth, to effectively leverage on-chip memory resource (register ﬁle,
+shared memory, and texture cache) for data sharing, and to eliminate partition
+conﬂicts.
+
+(3) Our compiler generates two versions of the code with one optimized for global
+memory and the other for texture memory. To our knowledge, our compiler is the
+ﬁrst to perform code optimizations to automatically utilize texture memory for
+GPGPU.
+
+(4) We show that the proposed optimizing compiler is highly effective for different
+GPUs and the programs optimized by our compiler achieve very high performance,
+often superior to manually optimized codes.
+
+The remainder of the article is organized as follows. In Section 2, we present a brief
+background on the GPGPU programming model including NVIDIA CUDA [NVIDIA
+2010] and OpenCL [OpenCL] and then highlight key requirements for high perfor-
+mance GPU computation. In Section 3, we present our proposed optimizing compiler in
+detail. Section 4 explores the design space of our propose optimizations. Case studies
+of matrix multiplication and matrix-vector multiplication are presented in Section 5 to
+illustrate the compilation process for global memory and texture memory, respectively.
+The experimental methodology and results are presented in Section 6. In Section 7,
+we highlight the limitations of the proposed compiler. Related work is discussed in
+Section 8. Finally, Section 9 concludes our article and discusses future work.
+
+2. BACKGROUND
+State-of-the-art GPUs employ many-core architectures. The on-chip processors cores
+are organized in a hierarchical manner. In the NVIDIA GT200/GF100 architecture, a
+GPU has a number of streaming multiprocessors (SMs) (30 SMs in a GTX 285 and
+15 SMs in a GTX 480) and each SM contains multiple streaming processors (SPs) (8
+in a GTX 285, 32 in a GTX 480). AMD/ATI HD 5870 GPU has similar architecture
+and has 20 SIMD engines (i.e., SMs). Each SIMD has 16 stream cores (i.e., SPs). The
+on-chip memory resources include register ﬁles (64kB per SM in GTX 285, 128kB
+per SM in GTX 480, and 256kB per SIMD in HD 5870), shared memory (16kB per
+SM on GTX 285, 16kB or 48kB on GTX 480 depending on conﬁguration, and 32kB
+per SIMD in HD 5870), and caches for different memory regions. To hide the long
+off-chip memory access latency, these GPUs support a high number of threads to run
+concurrently. These threads follow the single-program multiple-data (SPMD) program
+execution model. They are grouped in 32-thread warps/64-thread wavefronts with each
+warp/wavefront being executed in the single-instruction multiple-data (SIMD) manner.
+According to the CUDA programming guide [NVIDIA 2010] and ATI Stream SDK
+OpenCL Programming Guide [AMD 2011], each warp/wavefront contains threads of
+consecutive, increasing thread ids. In a typical 2D/3D execution domain, the threads
+in a warp (if not at the boundary) have increasing thread ids along the X direction, and
+the same thread ids along the Y and Z directions.
+
+In the CUDA/OpenCL programming model, the code to be executed by GPUs is
+the kernel functions. All the threads (called work items in OpenCL) will run the
+same kernel code with different thread ids to determine their workloads. The software
+
+ACM Transactions on Architecture and Code Optimization, Vol. 9, No. 2, Article 9, Publication date: June 2012.
+
+9:4
+
+Y. Yang et al.
+
+architecture also deﬁnes the concept of a thread block/workgroup as an aggregation of
+threads which must be executed in the same SM and the threads in the same thread
+block can communicate with each other through the shared memory on the SM.
+
+Next, we summarize the key aspects for high performance GPGPU code as they are
+
+the main focus of our proposed compiler optimizations.
+
+(1) Global memory access bandwidth. To utilize the global memory bandwidth efﬁ-
+ciently, memory accesses need to be coalesced and each data item may need to
+be a vector type, depending on speciﬁc GPU hardware. Memory coalescing refers
+to the requirement that the accesses from 16 consecutive threads in a warp (i.e.,
+a half warp) can be coalesced into a single memory access. According to CUDA
+programming guide [NVIDIA 2010], for devices of compute capability 1.0 and 1.1
+(e.g., GTX 8800), the accesses from threads in a half warp must be consecutive and
+aligned. For devices of compute capability 1.2 and 1.3 (e.g., GTX285), these accesses
+do not need to be consecutive but still need to be aligned. For devices of compute
+capability 2.0 (e.g., GTX480), the L1 data cache is used to reduce the requirement
+on coalescing. AMD/ATI HD5870 has the similar requirement to GTX285. In this
+article, we use the requirements for coalescing based on compute capability 1.2 and
+1.3 and show that the devices of compute capability 2.0 (i.e., GTX480) also beneﬁts
+from coalescing. We refer to such a coalesced aligned region as a coalesced segment.
+If each memory access is of the type ‘ﬂoat’, each segment starts from an address
+which is a multiple of 64 bytes, and has the size of 64 bytes. The memory bandwidth
+utilization may be signiﬁcantly improved when each of coalesced memory accesses
+is of a vector data type, such as ﬂoat2 (a vector of two ﬂoat numbers) and ﬂoat4
+(a vector of four ﬂoat numbers). We use a simple copy kernel with one-dimension
+thread blocks to quantify the impact of vector data types on memory bandwidth.
+For AMD/ATI HD 5870, the sustained bandwidth reaches 112GB/s, 148GB/s, and
+150GB/s when accessing 128MB data using the ﬂoat, ﬂoat2, and ﬂoat4 data types,
+respectively. In comparison, for the same data transmission on NVIDIA GTX 285,
+the sustained bandwidth is 128GB/s, 133GB/s, and 106GB/s using the ﬂoat, ﬂoat2,
+and ﬂoat4 data types, respectively. On NVIDIA GTX 480, the sustained bandwidth
+is 145GB/s, 146GB/s, and 145GB/s using the ﬂoat, ﬂoat2, and ﬂoat4 data types,
+respectively.
+
+(2) Texture memory access bandwidth. Both AMD/ATI and NVIDIA GPUs have on-
+chip caches for texture memory. Our micro benchmarks, in which each thread reads
+the its texture data multiple times to compensate the effect of cold misses, show
+the texture cache on HD5870 has higher bandwidth (1250GB/s) than its on-chip
+shared memory, called local data share (992GB/s). In comparison, GTX 480 has
+lower bandwidth (336GB/s) than its shared memory (1223GB/s). On GTX 285 the
+texture cache bandwidth is 310GB/s and shared memory bandwidth is 1011GB/s.
+The advantage of texture memories is that texture memory accesses do not need
+to be coalesced since texture caches will be checked before accessing the off-chip
+texture memory. Therefore, the key to performance is to hit in texture caches as
+often as possible rather than memory coalescing.
+
+(3) Shared memory. The common usage of shared memory is a software-managed cache
+for memory reuse. Although it has low access latencies, shared memory is slower
+than register ﬁles and has certain overheads beyond access latency. First it needs to
+be synchronized to ensure proper access order among the threads in a thread block.
+Second, the shared memory has a number of banks to achieve high bandwidth, and
+bank conﬂicts can impair the performance.
+
+(4) Balanced resource usage. As multiple threads in the same thread block and multiple
+thread blocks compete for limited resources in an SM, including the register ﬁle,
+
+ACM Transactions on Architecture and Code Optimization, Vol. 9, No. 2, Article 9, Publication date: June 2012.
+
+A Uniﬁed Optimizing Compiler Framework for Different GPGPU Architectures
+
+9:5
+
+Input: Naive kernel functions 
+
+Intrathread Vectorization 
+(float2) for NVIDIA GPUs 
+
+Vectorization (float2) for 
+
+AMD GPUs 
+
+Vectorization (float4) for 
+AMD and NVIDIA GPUs 
+
+Vectorization (section 3.1) 
+
+Checking memory coalescing (3.2) 
+
+Converting noncoalesced accesses into coalesced ones (3.3) 
+
+Checking data dependencies and sharing patterns (3.4) 
+
+Thread block merge (3.5.1) and 
+
+thread merge (3.5.2) 
+
+Data prefetching (3.6) 
+
+Removing memory partition camping (3.7) 
+
+Output: Optimized kernel 
+
+functions & invocation 
+
+t
+
+Fig. 1. The framework of the proposed compiler.
+
+Texture memory 
+version 
+
+Global memory 
+version 
+
+the shared memory, and the number of the thread contexts being supported in
+hardware, we need to carefully balance parallelism and memory optimizations.
+
+(5) Off-chip memory partitions. In current GPUs, off-chip memory is divided into mul-
+tiple partitions. There are 6 and 8 partitions in NVIDIA GTX 480 and AMD/ATI
+HD5870/NVIDIA GTX 285, respectively, and the partition width is 256 bytes. To use
+the partitions effectively, the memory trafﬁc should be evenly distributed among all
+the partitions. Otherwise, the requests may be queued up at some partitions while
+others are idle. This is referred to as partition camping [Ruetsch and Micikevicius
+2009] or partition conﬂicts, which are similar to bank conﬂicts at shared memory
+but incur much higher performance penalties. Since concurrent memory requests
+are issued on a per half-warp basis from all active thread blocks, partition conﬂicts
+happen across different thread blocks.
+
+Note that the key performance issues just listed are not unique to current GPUs.
+Future many-core architectures will probably use similar approaches to achieve high
+memory bandwidth (i.e., coalescing, multiple memory partitions) and to reduce mem-
+ory access latency (i.e., on-chip cache or shared memory). So, the proposed compiler
+optimizations are expected to be relevant beyond the scope of GPGPU.
+
+3. AN OPTIMIZING GPGPU COMPILER
+Our proposed compiler framework is shown in Figure 1.
+
+ACM Transactions on Architecture and Code Optimization, Vol. 9, No. 2, Article 9, Publication date: June 2012.
+
+9:6
+
+Y. Yang et al.
+
+float sum = 0; 
+for (int i=0; i<w; i++)  
+ 
+c[idy][idx] = sum; 
+
+sum+=a[idy][i]*b[i][idx]; 
+
+float sum = 0; 
+for (int i=0; i<w; i++)  
+       sum+=a[idx][i]*b[i];  
+c[idx] = sum; 
+
+(a) A naïve kernel for matrix multiplication 
+
+(b) A naïve kernel for matrix-vector multiplication 
+
+Fig. 2. Examples of naive kernel functions.
+
+The input to our compiler is a na¨ıve GPU kernel function developed using our sim-
+pliﬁed GPU hardware abstraction model. The na¨ıve kernel is functionally correct, but
+does not include any device-speciﬁc performance optimizations. For many scientiﬁc
+computing and media processing functions, the na¨ıve version is the code to compute
+one element/pixel in the output matrix/image. Typically such code is straightforward to
+extract from the sequential CPU code. One common example is the loop body of a heavily
+executed loop. In such a case, the subsequent optimization steps (e.g., thread/thread-
+block merge) have direct correspondence to loop-level optimizations (loop unrolling and
+titling in particular as discussed in Section 3.5). In Figures 2(a) and 2(b), we show the
+sample na¨ıve kernel functions for the matrix multiplication (mm) and matrix-vector
+multiplication (mv) algorithms, respectively. Each computes one element at the position
+(idx, idy).
+
+In Figure 2, idx and idy are the position/coordinate of the element in the output
+matrix. In the CUDA/OpenCL programming model, idy can be viewed as the absolute
+thread id along the Y direction, which is equal to (blockIdx.y*blockDimy + threadIdx.y)
+in the CUDA code and get global id(1) in OpenCL. Correspondingly, idx is the absolute
+thread id along the X direction, which equal to (blockIdx.x*blockDimx + threadIdx.x)
+in CUDA and get global id(0) in OpenCL. In comparison, the CUDA predeﬁned threa-
+dIdx.x (get local id(0) in OpenCL) and threadIdx.y (get local id(1) in OpenCL) are the
+relative thread position/coordinate within a thread block and we refer to them as “tidx”
+and “tidy” for short. Both tidx and tidy are independent of the thread block ids.
+
+As can be seen from the two examples, the na¨ıve kernel functions don’t have any
+shared memory usage and do not require thread block partition. In other words, we
+may simply assume every block has only one thread. All the arrays are initially in the
+off-chip global memory.
+
+For applications which require synchronization among computing different output
+pixels, For instance, reduction operations, a global sync function is supported in the
+na¨ıve kernel.
+
+To facilitate compiler optimizations, the following (optional) information can be con-
+veyed using the #pragma interface: the size of the input and output dimensions, and
+the output variable names. The latter can be used to eliminate global memory writes
+to temporary variables when they are moved to shared memory.
+
+Given the na¨ıve kernel function, the compiler generates two kernels, one optimized
+for global memories and the other for texture memories. For the global memory ver-
+sion, it takes the following steps. First, depending on the targeted GPUs, the compiler
+attempts to group memory accesses into vector data accesses. Second, the off-chip
+memory accesses are checked to see whether they satisfy the requirements for mem-
+ory coalescing. If not, the code will be converted to coalesced memory accesses using
+shared memory as temporary storage. Third, the compiler analyzes data dependencies
+and sharing patterns to determine how the data are shared among the neighboring
+thread blocks. The data reuse information is also used to disable certain memory co-
+alescing transformations when there is little or no data reuse. Based on data sharing
+patterns, the compiler merges both threads (i.e., combining several threads in different
+thread blocks into one) to enable the data reuse through registers and thread blocks
+
+ACM Transactions on Architecture and Code Optimization, Vol. 9, No. 2, Article 9, Publication date: June 2012.
+
+A Uniﬁed Optimizing Compiler Framework for Different GPGPU Architectures
+
+9:7
+
+(a) Intrathread
+
+float a = A[2*idx]; 
+float b = A[2*idx+1]; 
+
+// A_f2 = (float2*)A; 
+float2 tmp_f2 = A_f2[idx]; 
+float a = tmp_f2.x; 
+float b = tmp_f2.y; 
+
+(b) Interthread
+
+float a = A[idx+10]; 
+compute(a); 
+
+float2 tmp_f2 = A_f2[idx+5]; 
+float a_0 = tmp_f2.x; 
+float a_1 = tmp_f2.y; 
+// merge two threads into one thread 
+compute(a_0); compute(a_1);
+
+(c) Loop-based
+
+for (int i=0; i<w; i++) 
+{
+  float a = A[i]; …; 
+}
+
+for (int k=0; k<w/2; k++) { 
+  float2 tmp_f2 = A_f2[k]; 
+  {float a = tmp_f2.x; i=2*k; …; } 
+  {float a = tmp_f2.y; i=2*k+1; …;} 
+}
+
+Fig. 3. Three types of vectorization.
+
+(i.e., combining several blocks into one) to increase data reuse through shared mem-
+ory. After thread/thread-block merge, the compiler schedules the code to perform data
+prefetching. Then, the compiler checks the memory accesses from different thread
+blocks for partition camping and either inserts address offsets or remaps thread block
+ids, if necessary. Finally, the compiler generates one optimized kernel and the param-
+eters (i.e., the thread grid & block dimensions) to invoke the kernel function.
+
+For the texture memory version, the compiler applies more aggressive vectorization
+techniques but skips the step for memory coalescing as the texture caches eliminate
+the need for coalesced memory accesses. As the texture memory version does not utilize
+the shared memory, the thread-block merge step is simpliﬁed compared to the global
+memory version. The rest of the steps are essentially the same as those for the global
+memory version, as shown in Figure 1.
+
+The optimization process described above can also be used as a generic methodology
+to guide manual optimizations of GPGPU programs. As a result, our optimized code is
+reasonably understandable, as will be seen in the remainder of Section 3.
+
+3.1. Vectorization of Memory Accesses
+As discussed in Section 2, the data type of memory accesses may have signiﬁcant
+impact on bandwidth utilization. Therefore, the compiler ﬁrst checks data accesses
+inside the kernel function to see whether they can be grouped in a vector type data
+access. Since different GPUs favor different vector types, the compiler follows different
+rules to adjust the aggressiveness of vectorization. We consider the following three
+types of array accesses for vectorization.
+
+(1) if there is a pair of accesses to the same array in a thread with the indices: 2*idx+N
+and 2*idx+N+1, where N is an even number, the compiler generates a ﬂoat2
+variable f2 with array offset as idx+N/2 and replaces the original array accesses
+with f2.x and f2.y. We call this type of vectorization intra-thread vectorization,
+as shown in Figure 3(a). One typical opportunity for intrathread vectorization is
+complex numbers when the real part is stored next to the imaginary part of each
+data element.
+
+(2) If there is one global memory access to the index: idx+N, where N is an even
+number, the compiler merges two neighbor threads in the X direction into one
+thread, generates a ﬂoat2 variable f2 with the array offset as (idx+N/2) and replaces
+the original array accesses with f2.x and f2.y. We call this type of vectorization inter-
+thread vectorization, as shown in Figure 3(b).
+
+ACM Transactions on Architecture and Code Optimization, Vol. 9, No. 2, Article 9, Publication date: June 2012.
+
+9:8
+
+Y. Yang et al.
+
+(3) If there is global memory access to the index: i+N, where N is the even number and
+i is a loop iterator variable with the increment being 1, the compiler unrolls the
+loop by 2, generates a ﬂoat2 variable f2 with array offset as i/2+N/2, and replaces
+the original array accesses with f2.x and f2.y. We call this type of vectorization
+loop-based vectorization, as shown in Figure 3(c).
+
+The target data type of vectorization can be either ﬂoat2 or ﬂoat4. Due to the differ-
+ent impacts on bandwidth, different vectorization strategy is used for different memory
+types (texture vs. global) and different GPUs, as shown in Figure 4. Our proposed vec-
+torization is independent on conditional code in GPU kernel functions. In other words,
+we attempt to vectorize all the memory access statements no matter whether they are
+under control of a branch or not. The only limitation is that the statements to be vec-
+torized need to be in the same basic block. For the global memory version on NVIDIA
+GPUs, a vector of two ﬂoats (i.e. ﬂoat2) is the preferred data type. Considering that
+the bandwidth improvement of ﬂoat2 over ﬂoat is less than 3%, the compiler only ap-
+plies intra-thread vectorization. The reasons are (1) inter-thread vectorization merges
+neighboring threads, reducing thread-level parallelism; and (2) the vectorized data ac-
+cesses may not be coalesced, and when the compiler converts them into coalesced ones
+(Section 3.3) through shared memory, there may be bank conﬂicts in shared memory.
+For the na¨ıve kernels in Figure 2, the code remains the same after vectorization as
+there is no opportunity for intra-thread vectorization.
+
+For AMD/ATI GPUs, due to the high impact on bandwidth, the compiler applies
+all three types of vectorization in order to use the ﬂoat2 type for the global memory
+version. The reason why ﬂoat2 is preferred over ﬂoat4 is that ﬂoat4 reduces the overall
+number of the threads too much and the performance difference between ﬂoat2 and
+ﬂoat4 is limited. The compiler also checks the number of reads and writes for each
+array to determine the priority for vectorization. For arrays with a low number of
+accesses, the compiler only tries to ﬁnd opportunities for intra-thread vectorization.
+As the output arrays have a low number of accesses, the compiler only applies intra-
+thread vectorization on them. For example, for the matrix multiplication kernel shown
+in Figure 2(a), inter-thread and loop-based vectorization are used on input arrays, a
+and b, while only intra-thread vectorization is applied to the output array c. as shown
+in Figure 5(a). Similarly, for matrix-vector multiplication, loop-based vectorization is
+used on the input array a and input vector b, while the accesses to the array c are not
+vectorized.
+
+For the texture memory version on both AMD/ATI and NVIDIA GPUs, the target
+vector is ﬂoat4, because these GPUs’ texture units prefer 128 bits to maximize the
+bandwidth. In fact, the OpenCL speciﬁcation only deﬁnes 128-bit data types (ﬂoat4,
+int4 and etc) for the texture memory. Although CUDA supports ﬂoat and ﬂoat2 for
+texture memory, their performance is much lower than ﬂoat4. The compiler also applies
+intra-thread vectorization on output arrays.
+
+3.2. Checking Memory Coalescing
+As discussed in Section 2, GPGPU employs the SPMD model and the threads in a single
+warp execute the kernel function in the SIMD mode. Therefore, in order to determine
+whether off-chip memory accesses can be coalesced, we need to compute the addresses
+of each memory access in the kernel function for different threads. As arrays are the
+most common data structure in scientiﬁc and media processing, we consider four types
+of array indices and afﬁne transformations of these indices.
+
+(1) Constant index. The constant value is used in an array index, for example, the
+
+constant integer 5 in a[idy][i+5].
+
+ACM Transactions on Architecture and Code Optimization, Vol. 9, No. 2, Article 9, Publication date: June 2012.
+
+A Uniﬁed Optimizing Compiler Framework for Different GPGPU Architectures
+
+9:9
+
+procedure vectorization (Kernel kernel) { 
+  if (an input array access is from texture memory) { 
+    apply all 3 types of vectorization with the target type of float4; 
+  }  else {// kernel is global memory version 
+    if (the target device is AMD GPUs) 
+      apply all 3 types of vectorization with the target type of float2; 
+    else  if (the target is NVIDIA GPUs)  
+      apply intra-thread vectorization with target type of float2;       
+  } 
+  apply intra-thread vectorization on output arrays with target type of 
+float2; 
+}
+Procedure vec_intra_thread(Kernel kernel) { 
+  for each loop ll in kkernel { 
+    for memory statement pair (ss0, ss1) in ll { 
+      // the address of ss0 must be multiple of 2 and  
+      // the difference of the addresses between ss0 and ss1 must be 1 
+      if (ss1.address()-ss0.address()==1&&ss0.address()%2==0) { 
+        replace ss0, ss1 with one vector memory access statement; 
+      } 
+    } 
+  } 
+}
+Procedure vec_inter_thread(Kernel kernel) { 
+  for each loop ll in kkernel { 
+
+List ttodo;
+
+    for each memory statement ss in l { 
+      // the address of first thread must be multiple of 2 and  
+      // the difference of the addresses between neighbor threads must be 1 
+      if (ss.address(iidx=k+1)-ss.address(iidx=k)==1 
+        &&ss.address(iidx==0)%2==0)  
+        ttodo.add(ss); 
+    } 
+    if (ttodo is empty) continue; 
+    for statement ss in ttodo { 
+      replace ss with one vector memory access statement; 
+    } 
+    for statement ss not in ttodo { 
+      append one copy of ss to ss and replace the iidx with 2*iidx+1;
+      replace iidx with 2*iidx in ss;
+
+}
+update the thread block dimension in X direction 
+
+  } 
+}
+Procedure vec_loop_unroll(Kernel kernel) { 
+  for each loop ll in kkernel {     
+    (iit=sstart; iit<eend; iit+=iinc) is the loop header of ll;
+    List ttodo;
+    for each memory read statement ss in l { 
+      // the address of first iterator must be multiple of 2 and  
+      // the difference of the addresses between neighbor iterators must be 1 
+      if (ss.address(iit=k+inc)-ss.address(iit=k)==1&&ss.address(iit==sstart)%2==0)  
+        ttodo.add(ss); 
+       
+    } 
+    If (ttodo is empty) continue; 
+    for statement ss in ttodo { 
+      replace ss with one vector memory access statement; 
+    } 
+    for statement ss not in ttodo { 
+      append one copy of ss to the end of ll by replacing iit with iit+1; 
+    } 
+    set iinc of ll to 2*iinc;
+  }   
+}
+
+Fig. 4. Pseudocode for vectorization. The procedure “vectorization” shows how to make a decision of
+the vectorization for different cases. “vec intra thread” is the pseudocode for intrathread vectorization,
+“vec inter thread” is for interthread vectorization, and “vec loop unroll” is for loop-based vectorization. We
+only show the ﬂoat2 version of vectorization, but the ﬂoat4 version is similar. The function “address” calcu-
+lates the address of the memory access statement using the thread id (idx) and/or loop iterator (it).
+
+ACM Transactions on Architecture and Code Optimization, Vol. 9, No. 2, Article 9, Publication date: June 2012.
+
+9:10
+
+Y. Yang et al.
+
+float sum_0 = 0; 
+float sum_1 = 0; 
+for (int k=0; k<w/2; k++) { 
+
+float2 a0 = a_f2[idy][k]; 
+{
+    i = 2*k; 
+    float2 b0 = b_f2[i][idx];  
+
+        sum_0+=a0.x*b0.x; 
+        sum_1+=a0.x*b0.y; 
+    } 
+
+{
+    i = 2*k+1; 
+    float2 b0 = b_f2[i][idx];  
+
+        sum_0+=a0.y*b0.x; 
+        sum_1+=a0.y*b0.y; 
+    } 
+}
+c_f2[idy][idx] = {sum_0, sum_1}; 
+
+(a)
+
+float sum = 0; 
+for (int k=0; k<w/2; i++) { 
+
+float2 a0 = a_f2[idx][k]; 
+float2 b0 = b_f2[k]; 
+{sum+=a0.x*b0.x;} 
+{sum+=a0.y*b0.y;} 
+
+}
+c[idx] = sum; 
+
+(b)
+
+Fig. 5. Examples of vectorization for the global memory version for AMD/ATI GPUs. (a) matrix multiplica-
+tion after vectorization. (b) matrix-vector multiplication after vectorization.
+
+(2) Predeﬁned index. The predeﬁned numbers, such as absolute thread ids, idx, idy,
+and relative thread ids, tidx (i.e., threadIdx.x), tidy (i.e., threadIdx.y), are used as
+an array index. For example, idy in a[idy][i+5].
+
+(3) Loop index. A loop iterator variable is used as an array index, for example, i in
+
+b[i][idx] in Figure 2(a).
+
+(4) Unresolved index. An array index is used, which is not one of the ﬁrst three types.
+For example, an indirect access a[x] where x is a value loaded from memory. As
+our compiler cannot determine the addresses of such indices, we simply skip them
+without checking whether they can be coalesced.
+
+Among the four types of indices, the addresses corresponding to the ﬁrst two are
+ﬁxed for a given thread. For the third, however, we need to check different values of
+the loop iterator. Assuming that a loop index starts from S with increment Incr, then
+we need to check the index addresses from the ﬁrst 16 iterations: S, S+Incr, S+2*Incr,
+to S+15*Incr. The reason is that the same behavior repeats for remaining iterations
+in terms of whether the access can be coalesced as the difference in addresses is a
+multiple of 16.
+
+After determining the types of array indices in the kernel function, for each mem-
+ory access instruction, the compiler computes the addresses from the 16 consecutive
+threads in the same warp (i.e., a half warp) to see whether they can be coalesced. As
+discussed in Section 2, if we assume the array type of ﬂoat, the coalesced accesses will
+form a coalesced segment, which starts from an address, whose value is a multiple of
+64, and has the size of 64 bytes. Among the addresses from the 16 threads, we refer
+to the smallest one as the base address. The differences between the base address and
+the addresses from the subsequent 15 threads are referred to as offsets. To satisfy the
+coalescing requirement, the base address needs to be a multiple of 64 and offsets need
+to be 1 to 15 words. The following two rules are used to handle common array accesses.
+
+(1) For an index to a multidimensional array, e.g., A[z][y][x], the index to the higher-
+order dimensions, For instance, the y and z dimensions, should remain the same
+for all the 16 threads in the half warp. Otherwise, for example, if the predeﬁned
+index idx (the thread id along the x direction) is used in an index to the y dimension
+in a multi-dimension array A[][idx][0], the accesses from the 16 threads will be
+A[][0][0], A[][1][0], A[][2][0], etc., and are not coalesced.
+
+ACM Transactions on Architecture and Code Optimization, Vol. 9, No. 2, Article 9, Publication date: June 2012.
+
+A Uniﬁed Optimizing Compiler Framework for Different GPGPU Architectures
+
+9:11
+
+(2) When a loop index is used in the kernel function, the compiler computes the base
+address and the offsets for each possible value of the loop iterator. For example, for
+the address a[idy][i] in Figure 2(a), the base address is &a[idy][0] when the iterator
+i is 0; &a[idy][1] when i is 1, etc. The offsets are all zeros as the addresses do not
+change for different threads in the same half warp. As both the base addresses and
+the offsets do not meet the condition, the array access a[idy][i] is not coalesced. For
+the array access b[i][idx] in Figure 2a, the base address is &b[0][0] when i is 0;
+&b[1][0] when i is 1, etc. The offsets are from 1 word to 15 words. Thus, the array
+access b[i][idx] is coalesced as long as each row of array b is aligned to the multiple
+of 16 words. For the array access b[idx+i], although the offsets satisfy the condition
+for every possible i, it is not a coalesced access since the base address is not always
+a multiple of 16 words, for instance, b[1] when i is 1.
+
+3.3. Converting Noncoalesced Access into Coalesced Ones
+After the compiler analyzes every array access in the kernel code, the compiler con-
+verts the noncoalesced global memory accesses into coalesced ones through shared
+memory. The observation here is that for each noncoalesced memory access instruc-
+tion, the compiler can determine the coalesced segments that contain the data required
+by the noncoalesced memory accesses from the half warp. The compiler then introduces
+shared-memory array variables, inserts statements (coalesced memory accesses) to ini-
+tialize the shared memory variables, and replaces the original global memory accesses
+with shared memory accesses. The thread block size is also set to 16 so that each thread
+block contains one half-warp. The syncthreads function is also inserted to ensure the
+proper access order.
+
+For array accesses using constant or predeﬁned indices, the process is typically
+straightforward. For example, for the noncoalesced access, A[idy][0], the coalesced
+segment is A[idy][0:15]. The compiler inserts a shared-memory array variable sA[0:15]
+and initializes the sA[0:15] with A[idy][tidx], where tidx is thread relative id within the
+warp. In the case when idx is used in an index to a multi-dimensional array, the compiler
+may introduce a loop to load the required data for a half warp. For example, for an array
+access A[idx][0], the required data for a half warp is A[(idx-tidx)+(0:15)][0], where (idx-
+tidx) provides the start address of each thread block, which is the same as the start
+address of the half warp as each thread block only contains a half warp at this time. The
+coalesced segments that contains the required data are A[(idx-tidx)+(0:15)][0:15]. In
+the introduced loop of 16 iterations, a shared memory array is initialized with A[(idx-
+tidx)+l][tidx], where l is the iterator of the newly introduced loop. From these examples,
+it can be seen that not all the data loaded in the shared memory are useful, the compiler
+will perform data reuse analysis (Section 3.4) to determine whether this transformation
+is beneﬁcial or not. If it is not, the compiler will skip coalescing transformation on this
+access. In the special case where an array access involves both idx and idy, such as
+A[idx][idy], the compiler analyzes the feasibility to exchange idx and idy to make it
+coalesced. This transformation is equivalent to loop interchange on the CPU code.
+
+For array accesses using a loop index, A[m*i+n], where i is the loop iterator and m
+and n are constants, the compiler unrolls the loop for 16/(GCD(m,16)) times if m is less
+than or equal to 8. If m is greater than 8, the coalesced access has little beneﬁt due to
+limited reuse across different iterations. Then, the compiler groups the accesses from
+unrolled loops into coalesced ones. For example, for the array access A[idy][i] where i
+is the loop iterator, the segment A[idy][0:15] contains all the required data for the ﬁrst
+16 iterations. The compiler unrolls the loop for 16 times, introduces shared memory
+variable sA[0:15] which are initialized with A[idy][tidx+i] (coalesced as the increment
+of i is 16 after unrolling), and replaces A[idy][i] with sA[i].
+
+ACM Transactions on Architecture and Code Optimization, Vol. 9, No. 2, Article 9, Publication date: June 2012.
+
+9:12
+
+Y. Yang et al.
+
+(S0)for (i=0; i<w; i=(i+16)) { 
+(S1)  __shared__ float shared0[16]; 
+(S2)  shared0[(0+tidx)]=a[idy][((i+tidx)+0)]; 
+(S3)  __syncthreads(); 
+(S4)  for (int k=0; k<16; k=(k+1)) { 
+(S5)    sum+=shared0[(0+k)]*b[(i+k)][idx]); 
+(S6)  } 
+(S7)  __syncthreads(); 
+(S8)} 
+(S9)c[idy][idx] = sum; 
+
+(a) The coalesced mm kernel 
+
+(S0)for (i=0; i<w; i=(i+16)) { 
+(S1)  __shared__ float shared2[16]; 
+(S2)  __shared__ float shared1[16][17]; 
+(S3)  shared2[(0+tidx)]=b[i+tidx]; 
+(S4)  for (l=0; l<16; l=(l+1)) 
+(S5)    shared1[(0+l)][tidx]=a[((idx-tidx)+l)][(i+tidx)]; 
+(S6)  __syncthreads(); 
+(S7)  for (int k=0; k<16; k=(k+1)){ 
+(S8)    sum+=(shared1[tidx][k]*shared2[k]); 
+(S9)  } 
+(S10)__syncthreads(); 
+(S11)} 
+(S12)c [idx] = sum; 
+
+(b) The coalesced mv kernel
+
+Fig. 6. Coalesced kernels generated by the compiler.
+
+For the na¨ıve kernels in Figure 2, the coalesced versions on NVIDIA GPUs are
+shown in Figure 6. The inner loop with the iterator k is a result of unrolling the
+outer loop with the iterator i. In the na¨ıve kernel in Figure 2(a), the access a[idy][i] is
+not coalesced, which results in loop unrolling as described above. b[i][idx] is coalesced
+and it transforms to b[(i+k)][idx] due to unrolling for a[idy][i]. In the mv kernel in
+Figure 2(b), both accesses a[idx][i] and b[i] are not coalesced. Converting the access
+b[i] into coalesced accesses involves a loop unrolling of 16 (=16/GCD(1,16)) times and
+it becomes b[i+tidx] in Figure 6(b). For the access a[idx][i] the loop with the iterator
+l is introduced and the access is transformed to a[(idx-tidx)+l][i+tidx]. In addition,
+the compiler will add padding to the shared memory arrays to avoid bank conﬂicts if
+necessary. The compiler also assumes that the row size of each global memory array is
+a multiple of 16 words so as to meet the requirement of memory coalescing. Therefore
+the programmers may need to add padding to global memory arrays. It is similar
+to the unroll pragma provided by NVIDIA and AMD compilers, which require the
+programmers to guarantee that the loop counter is the multiple of the unroll factor.
+
+After memory coalescing, the kernel code generated by our compiler has the following
+
+characteristics.
+
+(1) Each thread block has 16 consecutive threads (i.e., only a half warp) along the X
+direction, because 16 threads are needed by hardware to coalesce memory accesses
+and they communicate with each other through shared memory. The number of
+threads in each thread block will be expanded during the next optimization phase
+(Section 3.5) to make sure there are enough threads in each thread block.
+
+(2) There are two types of global memory load statements: (a) Global memory to shared
+memory (G2S): the statements read data from global memory and store them into
+the shared memory, such as (S2) in Figure 6(a). (b) Global memory to register
+(G2R): the statements read data from global memory and save them to registers.
+
+ACM Transactions on Architecture and Code Optimization, Vol. 9, No. 2, Article 9, Publication date: June 2012.
+
+A Uniﬁed Optimizing Compiler Framework for Different GPGPU Architectures
+
+9:13
+
+For example, in (S5) in Figure 6(a), the global memory access ‘b[(i+k)[idx]’ loads
+the data into registers.
+
+On AMD/ATI GPUs, the compiler will apply vectorization on the global memory ﬁrst.
+
+Therefore the data unit for memory coalescing may be ﬂoat2 instead of ﬂoat.
+
+For the texture memory version on both AMD/ATI and NVIDIA GPUs, since texture
+memory accesses do not need to be coalesced due to texture caches, the compiler skips
+the steps for memory coalescing.
+
+3.4. Data Dependencies and Data Sharing
+In this step, the compiler detects data dependency and data sharing. Such analysis
+is similar to those used in analyzing afﬁne array accesses for locality optimization
+and parallelization [Aho et al. 1986]. For the global memory version, as our compiler
+has already enforced memory coalescing by associating coalesced segments with each
+global memory access, the compiler can detect data sharing by comparing whether the
+address ranges of the segments have overlaps. For the texture memory version, data
+sharing is achieved through the register ﬁle and texture caches. In the applications that
+we studied, we found that data sharing happens most frequently among neighboring
+blocks along the X or Y direction. Therefore, our current compiler implementation
+mainly focuses on checking data sharing among neighboring thread blocks and also
+the thread blocks with a ﬁxed stride along the X or Y direction.
+
+The data sharing/reuse information is also used to determine whether the code con-
+version for memory coalescing is beneﬁcial. As described in Section 3.3, shared memory
+is used as temporary storage to achieve memory coalescing. The data in the shared
+memory, however, may not be useful as they are simply loaded from off-chip memory
+to satisfy the coalescing requirement. For example, the compiler loads A[idy][0:15] in
+order to convert the access A[idy][0] into a coalesced one. Currently, our complier em-
+ploys a simple rule to check whether an access needs to be converted: if the loaded
+data in shared memory have no reuse, it is not converted. A more crafted heuristic
+may further rank code conversions for different accesses by comparing their shared
+memory usage and number of data reuses, and then select the most beneﬁcial ones if
+shared memory is used up. We left such investigation as our future work to reﬁne our
+compiler framework.
+
+3.5. Thread/Thread-Block Merge to Enhance Memory Reuse
+After detecting that there exists data sharing among thread blocks (mainly neighboring
+blocks), we propose two new techniques to enhance data sharing so as to reduce the
+number of memory accesses: merging thread blocks and merging threads. Thread-block
+merge determines the workload for each thread block while thread merge decides the
+workload for each thread. These two techniques combined are essentially a way to
+achieve loop tiling and unrolling by aggregating the ﬁne-grain work items into threads
+and thread blocks. We ﬁrst present the two techniques and then discuss how compiler
+prioritizes one over the other.
+
+3.5.1. Thread-Block Merge. For the global memory version, when our compiler deter-
+mines that multiple thread blocks share some common data, it may choose to merge
+them into one thread block, as shown in Figure 7.
+
+To illustrate the procedure to merge thread blocks, we show how our compiler com-
+bines two neighboring blocks along the X direction into one. First, the compiler recom-
+putes the thread id information within the thread block (i.e., tid). As two thread blocks
+along the X direction are merged, idx, idy and tidy remain the same while tidx is recom-
+puted as (idx%(N*blockDim.x)), where N is 2 for Figure 7. Second, for the statements
+that result in data sharing, we add control ﬂow to ensure that the global memory data
+
+ACM Transactions on Architecture and Code Optimization, Vol. 9, No. 2, Article 9, Publication date: June 2012.
+
+9:14
+
+Y. Yang et al.
+
+Thread block before merge
+
+…
+
+…
+
+…
+
+…
+
+Shared data in 
+shared memory 
+
+Thread 
+
+Thread block after thread-block merge
+
+Fig. 7.
+
+Improve memory reuse by merging neighboring thread blocks.
+
+int i = 0;  
+float sum = 0; 
+for (i=0; i<w; i=(i+16)) { 
+  __shared__ float shared0[16]; 
+  if (tidx<16)  { /*inserted due to block merge to remove redundant loads */ 
+      shared0[(0+tidx)]=a[idy][((i+tidx)+0)]; 
+  } 
+  __syncthreads(); 
+  int k; 
+  for (k=0; k<16; k=(k+1)) { 
+      sum+=shared0[(0+k)]*b[(i+k)][idx]); 
+  } 
+  __syncthreads(); 
+}
+c[idy][idx] = sum; 
+
+Fig. 8. The kernel function for matrix multiplication, after merging blocks along the X direction.
+
+are loaded only once. For the matrix multiplication example in Figure 6(a), the state-
+ment S2 in threads from two neighboring thread blocks accesses the same segment.
+Therefore, we add an ‘if (tidx < blockDim.x)’ statement to eliminate redundant global
+memory accesses, as shown in Figure 8. Third, the thread block dimension is resized
+(blockDim.x = 2*blockDim.x).
+
+As thread-block merge determines the workload for each thread block and all threads
+in the same thread block reuse data in shared memory, it essentially achieves loop tiling
+for locality and parallelism optimizations.
+
+For the texture memory versions, since they rely on the texture caches rather than
+shared memory for data reuse, the block merge does not change the kernel code. In-
+stead, the compiler simply adjusts the thread block conﬁguration to exploit data locality.
+We propose the following rules for thread block conﬁguration: (a) the number of threads
+in a thread block is set as the warp/wavefront size and the initial set up of the thread
+block conﬁguration is 32 × 1 (64 × 1 for a wavefront) for one-dimension output domain
+and 8 × 4 (8 × 8 for a wavefront) for two-dimension output domain; (b) if the threads
+in the same warp/wavefront exhibit spatial locality along the X direction, e.g., an array
+access with the index A[][][idx], the block dimension on the X direction is set to be at
+least k, where k is the ratio of the texture cache line size over the size of the datum to be
+accessed. If the data type is ﬂoat4 and the texture cache line size is 64 Bytes, the ratio is
+4, implying that there are at least 4 threads in a warp/wavefront can reuse a cache line
+in texture caches; and (c) similarly, if the threads in the same warp/wavefront exhibit
+spatial locality along the Y direction, e.g., an array access with the index A[][][idy].,
+the block dimension on the Y direction is set to be at least k as well.
+
+ACM Transactions on Architecture and Code Optimization, Vol. 9, No. 2, Article 9, Publication date: June 2012.
+
+A Uniﬁed Optimizing Compiler Framework for Different GPGPU Architectures
+
+9:15
+
+Thread block before merge 
+
+…
+
+Thread block before merge 
+
+…
+
+Shared data in 
+shared memory 
+
+Thread 
+
+Shared 
+Register 
+
+…
+
+Thread block after thread merge
+
+Fig. 9.
+
+Improve memory reuse by merging threads from neighboring thread blocks.
+
+3.5.2. ThreadMerge. The other approach to enhance data sharing is to merge threads
+from different thread blocks, which combines several threads’ workloads into one, as
+shown in Figure 9. Compared to thread-block merge, after these threads are combined
+into one, they can share not only shared memory, but also the registers in the regis-
+ter ﬁle. Furthermore, some control ﬂow statements and address computation can be
+reused, thereby further reducing the overall instruction count. The limitation is that an
+increased workload typically requires a higher number of registers, which may reduce
+the number of active threads that can ﬁt in the hardware. From the discussion, it can be
+seen that thread merge achieves the effects of loop unrolling. Note that thread merge
+also combines multiple thread blocks into one but it does not increase the number of
+threads in each thread block. Thread merge is the same for both the global memory
+version and the texture memory version.
+
+To illustrate the procedure to merge threads, we show how our compiler combines
+N neighboring blocks along the Y direction into one. First, the compiler recomputes
+the thread id information. As we merge threads from two thread blocks along the Y
+direction, the absolute thread ID along the X direction idx remains the same while the
+thread ID along the Y direction idy will be changed to idy*N, idy*N+1, idy*N+2. . . ,
+idy*N+(N-1) for the N replicated statements. The thread id information within a
+thread block remains the same. Second, for the statement that results in data sharing,
+we need only one copy. Third, for the control ﬂow statement such as loops, we also only
+need one copy. Fourth, for the remaining statements including data declaration, ALU
+computation statement and other memory access statements, we replicate them for N
+times. For the matrix multiplication example in Figure 8, the array access b[(i+k)][idx]
+results in the shared data among the thread blocks along the Y direction (as the access
+address is not dependent on ‘idy’). The compiler merges 32 neighboring blocks along
+the Y direction using thread merge, as shown in Figure 10.
+
+3.5.3. SelectionbetweenThreadMergeandThread-BlockMerge. As discussed in Section 3.3,
+for the global memory version, the code generated by the compiler after memory co-
+alescing has two types of global memory accesses: global to shared memory (G2S)
+and global to register (G2R). If data sharing among neighboring blocks is due to a
+G2S access, the compiler prefers thread-block merge to better utilize the shared mem-
+ory. When data sharing is from a G2R access, the compiler prefers to merge threads
+from neighboring blocks due to the reuse of registers. If there are many G2R ac-
+cesses, which lead to data sharing among different thread blocks, the register ﬁle
+is not large enough to hold all of the reused data. In this case, thread block merge
+is used and shared memory variables are introduced to hold the shared data. In
+
+ACM Transactions on Architecture and Code Optimization, Vol. 9, No. 2, Article 9, Publication date: June 2012.
+
+9:16
+
+Y. Yang et al.
+
+int i = 0; 
+float sum_0 = 0; 
+…… 
+float sum_31 = 0;   
+for (i=0; i<w; i=(i+16)) { 
+  __shared__ float shared0_0[16]; 
+  …… 
+  __shared__ float shared0_31[16]; 
+  if (tidx<16)  { /* 32 is the number of the threads to be merged */  
+        shared0_0[(0+tidx)] = a[idy*32+0][((i+tidx)+0)]; 
+        …… 
+        shared0_31[(0+tidx)] = a[idy*32+31][((i+tidx)+0)]; 
+     } 
+     syncthreads(); 
+     int k; 
+     for (k=0; k<16; k=(k+1)) { 
+        float r0 = b[(i+k)][idx]) 
+        sum_0+=shared0[(0+k)]*r0; 
+        …… 
+        sum_31+=shared0_31[0+k]*r0; 
+     } 
+     __syncthreads(); 
+}
+c[idy*32+0][idx] = sum_0;  
+…… 
+c[idy*32+31][idx] = sum_31;
+
+Fig. 10. The matrix multiplication kernel after merging 32 threads in 32 adjacent blocks along the Y
+direction.
+
+addition, if a block does not have enough threads, thread-block merge instead of thread
+merge is also used to increase the number of threads in a block even if there is no data
+sharing.
+
+Given the different sizes of register ﬁle and shared memory on different GPUs,
+the compiler applies different thread (block) merge policies based on their hardware
+speciﬁcations. On GTX 285, the compiler applies thread block merge along the X or Y
+direction depending on the data sharing pattern (if there exists data sharing along both
+directions, the Y direction is selected as the memory coalescing step already combine
+16 threads along the X direction into one thread block) followed with thread merge
+along the X or Y direction. With more resources available on GTX 480 or HD5870, the
+compiler applies thread block merge along both the X and Y directions followed with
+thread merge along the X and Y directions. If the compiler cannot ﬁnd the data sharing
+in one direction, the merge step along this direction is skipped.
+
+For the texture memory version, all data accesses are from memory to registers.
+So, thread merge is performed ﬁrst to exploit reuse along neighboring threads. Then,
+thread block merge adjusts thread block dimensions to leverage texture caches.
+
+Our compiler also assumes that there is enough thread level parallelism, which
+means there are enough threads to utilize the GPUs. If the input problem size is small,
+for example, for 16 by 16 matrix multiplication, thread merge doesn’t give any beneﬁt
+because of the lack of insufﬁcient threads. We leave it to the programmers to choose
+from naive or optimized kernels depending on their input sizes.
+
+3.6. Data Prefetching
+Data prefetching is a well-known technique to overlap memory access latency with
+computation for inner thread. The overhead of data prefetching code is the increased
+register usage due to the temporary variables. Because the GPUs can overlap memory
+access latency with computation by using thread level parallelism. Even compiler can
+support data prefetching, it doesn’t give much beneﬁt.
+
+ACM Transactions on Architecture and Code Optimization, Vol. 9, No. 2, Article 9, Publication date: June 2012.
+
+A Uniﬁed Optimizing Compiler Framework for Different GPGPU Architectures
+
+9:17
+
+Array A 
+
+Array A 
+
+TB0
+
+TB1
+
+TB2
+…
+
+TB0
+
+TB1
+
+TB2
+
+…
+
+P0 P1
+
+(a)
+
+TB: Thread block 
+P: Partition 
+
+P0 P1
+
+(b)
+
+Fig. 11. Eliminating partition camping. (a) Accesses to array A resulting in conﬂicts at partition 0.
+(b) Adding an offset as (partition size * bidx) eliminates the conﬂicts. The dark regions represent the memory
+footprint of A[idx][0] from different thread blocks.
+
+3.7. Eliminating Partition Camping
+In this step, the compiler reuses the address access patterns obtained for thread/thread-
+block merge to see whether they lead to partition camping. As neighboring thread blocks
+along the X direction are likely to be active at the same time, the compiler focuses on
+the addresses that involve blockIdx.x or bidx in short. Those accesses without involving
+bidx either access the same line in the same partition (e.g., A[0]) or access the same
+partition at different times (e.g., A[bidy][0] based on the assumption that thread blocks
+with different bidy will execute at different times). The following rules are followed by
+our compiler.
+
+Partition Camping Detection. If an array access involves bidx, the compiler checks
+the address stride between the two accesses from the two neighboring blocks (i.e., one
+with block id bidx and the other with bidx+1). The compiler detects partition camping
+if the stride is a multiple of (partition size * number of partitions). For example, for an
+array access A[idx], it is equivalent to A[bidx*blockDimx+tidx]. The stride between two
+neighboring blocks is blockDimx, whose value then decides whether there are partition
+conﬂicts (i.e., two concurrent accesses to the same partition).
+
+Partition Camping Elimination. If an access results in partition conﬂicts, depending
+
+on how thread blocks are organized, we use two ways to eliminate partition conﬂicts.
+
+(1) If thread blocks are arranged in one dimension, we add a ﬁxed offset, (the parti-
+tion width * bidx), to the access and update the loop bounds to accommodate the
+change. For example, in mv, the output is a vector. So the thread blocks are or-
+ganized in one dimension. The accesses A[idx][i] (or the coalesced version A[((idx-
+tidx)+l)][(i+tidx)]), from neighboring thread blocks result in partition camping if
+the width of A is a multiple of (partition size * number of partitions), as shown in
+Figure 11(a). With the added offset, the access pattern is changed to Figure 11(b),
+eliminating partition camping.
+
+(2) If thread blocks are organized in two or more dimensions, we apply the diagonal
+block reordering proposed in [Ruetsch and Micikevicius 2009], which essentially
+changes the workload (or tile) that each thread block is assigned to. The diagonal
+mapping rule is newbidy = bidx and newbidx = (bidx+bidy)%gridDim.x.
+
+4. DESIGN SPACE EXPLORATION
+
+4.1. The Number of Threads in a Thread Block
+In our compiler algorithm, for the global memory version, the number of threads in
+a thread block is determined by thread/thread-block merge. To better illustrate how
+the compiler applies thread (block) merge, we show the pseudo code in Figure 12. The
+basic functions at Lines 1 and 2 are thread block merge and thread merge discussed in
+
+ACM Transactions on Architecture and Code Optimization, Vol. 9, No. 2, Article 9, Publication date: June 2012.
+
+9:18
+
+Y. Yang et al.
+
+1 Procedure thread_block_merge(Kernel kernel, int dim, int number); 
+  // merge 'number' thread block into one thread block along 'dim' dimension 
+2 Procedure thread_merge(Kernel kernel, int dim, int number); 
+  // merge 'number' thread into one thread along 'dim' dimension 
+3 Procedure is_legal(Kernel kernel, int REG_LIMIT, int SM_LIMIT); 
+  // the register and shared memory usage of kernel should be less than   
+  // REG_LIMT and SM_LIMIT (without local memory or scratch register)  
+4 Procedure thread_and_thread_block_merge (Kernel kernel,  
+                                    int REG_LIMIT, int SM_LIMIT) { 
+5  int dimension = DIMENSION_Y; 
+6  if (kernel has one-dimensional thread block) dimension = DIMENSION_X; 
+7  merge_number = 16; 
+8  do {              
+9    output_kernel = thread_block_merge(kernel, dimension, merge_number); 
+10   merge_number /= 2; 
+11 } while (!is_legal(output_kernel, REG_LIMIT/2, SM_LIMIT/2)) 
+12 kernel = output_kernel; 
+13 List output_kernels; 
+14 for (ix = 8; ix >= 1; ix /= 2) { 
+15   for (iy = 8; iy >= 1; iy /= 2) { 
+16     output_kernel = thread_merge(kernel, DIMENSION_X, ix); 
+17     output_kernel = thread_merge(output_kernel, DIMENSION_Y, iy); 
+18     if (!is_legal (output_kernel, REG_LIMIT, SM_LIMIT)) continue; 
+19     output_kernels.add(output_kernel); 
+20   } } } 
+
+Fig. 12. Algorithm of choosing parameters for thread (block) merge.
+
+Section 3.5. Line 4 is the main function for choosing the parameters for thread and
+thread block merge. The code between Line 5 and Line 11 is for thread-block merge.
+The CUDA programming guide suggests that one SM should have at least 192 active
+threads to hide the latency of register read-after-write dependencies. Because our com-
+piler tries to use a number of resources (the shared memory due to thread-block merge
+and the register ﬁle due to thread merge) for better memory reuse, it is possible that
+the code after thread/thread-block merge requires a large amount of shared memory
+and registers so that one SM can only support a limited number of thread blocks. To
+balance the thread-level parallelism and memory reuse, our compiler tries to put 256
+threads into one thread block (equivalent to merging of 16 blocks as Line 7), if possible.
+Because after coalesced step, there are already 16 threads along the X dimension, we
+prefer to perform thread block merge along Y direction as shown in Line 5. However if
+the thread block has only one dimension, we can only apply thread block merge along
+X direction (Line 6). The compiler will also verify the resource usage to make sure that
+each SM/SIMD can run at least two thread blocks (Line 11). The code between Line 12
+and Line 20 is for thread merge. The compiler varies the degrees of thread merge (i.e.,
+how many threads to be merged into one) across 8, 4, 2, 1 along the X direction (Line 14)
+and 8, 4, 2, 1 along the Y direction (Line 15) so as to balance register-based data reuse
+and thread-level parallelism. As such, the combination of these design parameters cre-
+ates a design space to explore. As discussed in Section 3.5, merging threads/thread
+blocks is one way to achieve loop tiling and unrolling. So, exploring such a design space
+is similar to ﬁnding the best tile size and unrolling factors for parallelization and lo-
+cality enhancement. Due to the nonlinear performance effect of those parameters on
+GPU performance, the compiler generates multiple versions of code and resorts to an
+empirical search by test running each version to select the one with the best perfor-
+mance. Although the compiler can generate up to 16 versions, typically many of them
+will be discarded due to the resource usage check at Line 18. Another way is to use an
+analytical performance model [Hong and Kim 2009; Baghsorkhi et al. 2010] to predict
+the performance of each version, but this requires higher accuracy than current mod-
+els. Moreover, based on our experiments, the optimal version may be dependent upon
+
+ACM Transactions on Architecture and Code Optimization, Vol. 9, No. 2, Article 9, Publication date: June 2012.
+
+A Uniﬁed Optimizing Compiler Framework for Different GPGPU Architectures
+
+9:19
+
+Parameter
+CoalescedThread
+ThreadInWarp
+WarpInMP
+ThreadInMP
+ThreadBlockInMP
+RegisterInMP
+ThreadInBlock
+ShareMemoryInMP
+Vectorization
+CacheLineSize
+
+Table I. Machine Description
+
+Description
+
+Number of threads required for coalesced memory accesses
+Number of threads in one warp or wavefront
+Maximum number of warps in one MP or wavefronts in one SIMD
+Maximum number of threads in one MP or SIMD
+Maximum number of thread blocks in one MP or work groups in one SIMD
+Number of 32-bit registers in one MP or SIMD
+Maximum number of threads in one thread block or work group
+Size (KB) of shared memory in one MP or local data shared in one SIMD
+Targeted vector type on the global memory version
+Size (Bytes) of the texture cache line
+
+the size of the input arrays, which implies that unless the compiler knows detailed
+information of the intended inputs, it is almost inevitable that the compiler must run
+multiple versions of code in order to ﬁnd the optimal one.
+
+Both the NVIDIA and AMD compilers limit the number of registers for single thread.
+For example, if one thread requires more than 64 32-bits registers, the NVIDIA compiler
+will only allocate 64 registers per thread and spill data into local memory (which is
+scratch register in AMD GPUs) so as to guarantee as least 512 threads in GTX 480. The
+AMD compiler also limits 62 128-bits registers per thread to guarantee 256 threads in
+HD 5870, unless the programmers specify more registers explicitly [AMD 2011]. Our
+compiler follows the default conﬁgurations of the vendors’ compilers to ensure there is
+enough thread level parallelism for each MP or SIMD. Our compiler parses the register
+usage from the compilation results of the vendors’ compilers and make sure the thread
+merge would not introduce the local memory or scratch register usage, which is the
+is legal function at Line 3 of Figure 12. If our compiler detects the local memory or
+scratch register over-usage, the compiler will discard such kernels as shown at Line 11
+in Figure 12.
+
+4.2. Hardware Speciﬁcation
+GPU hardware is evolving rapidly. Although different generations of GPU hardware
+may share similar architecture, for instance, NVIDIA GTX 285, GTX 480 and AMD/ATI
+HD 5870, there are signiﬁcant variations, e.g., the size of the register ﬁles, the size of
+the shared memory, which may have a strong impact on performance. As a result,
+an optimized code tuned for one GPU generation may not be optimal for the next. To
+solve this problem, our compiler generates different versions of optimized code based
+on different machine descriptions so that they can be deployed on different GPUs.
+
+Table I lists the key parameters included in our proposed machine description ﬁles.
+Among them, the compiler applies vectorization based on the value of ‘vectorization’
+parameter for the global memory version. If the vectorization is 2 or 4, it means the
+preferred vector type is ﬂoat2 or ﬂoat4, respectively. The compiler applies memory coa-
+lescing detection and code conversion based on CoalescedThread, which is the number
+of threads in a warp required for coalesced memory accesses. ‘ThreadInBlock’ deﬁnes
+the maximum thread number of one thread block. When the compiler applies the thread
+block merge step, the compiler uses ThreadInBlock/4 as an initial number of threads
+in a thread block. Another important parameter is RegisterInMP, which limits the
+aggressiveness of thread merge. The compiler chooses the register usage such that at
+least two thread blocks can be put in one MP. CacheLineSize is used to determine the
+block dimension for the texture memory version, as discussed in Section 3.5.1. Other
+parameters are used to check if current optimization step produces valid code. For
+example, when the compiler applies code conversion for memory coalescing and thread
+
+ACM Transactions on Architecture and Code Optimization, Vol. 9, No. 2, Article 9, Publication date: June 2012.
+
+Matrix MulƟplicaƟon on GTX 285 (Global memory version)
+x32_y16
+
+x16_y32
+
+x16_y16
+
+x8_y32
+
+Y. Yang et al.
+
+x32_y8
+
+9:20
+
+)
+s
+p
+o
+ﬂ
+G
+
+(
+ 
+e
+c
+n
+a
+m
+r
+o
+f
+r
+e
+P
+
+500
+
+400
+
+300
+
+200
+
+100
+
+0
+
+4kx4k
+
+3kx3k
+
+2kx2k
+
+1kx1k
+
+Input matrix size
+
+Fig. 13. The performance impact (GTX 285) of the number of merged threads/thread blocks. xN yM means
+that N thread blocks merged along the X direction and M threads merged along the Y direction.
+
+(block) merge, it always checks the shared memory usage with ‘SharedMemoryInMP’
+to ensure that the shared memory usage does not exceed the hardware limitation.
+
+5. CASE STUDY
+
+5.1. Case Study: Matrix Multiplication
+Matrix multiplication (mm) is a commonly used algorithm and there has been continu-
+ing effort to improve its performance [Nath et al. 2010]. The ﬁne-tuned implementation
+in NVIDIA CUBLAS 2.2 has a throughput of 382 GFLOPS when computing the prod-
+uct of two 2kx2k matrices on GTX 285 based on the work of [Volkov et al. 2008]. In
+the latest CUBLAS 3.2, the achieved performance is 713GFLOPS on GTX 480 [Nath
+et al. 2010]. In this section, we use matrix multiplication as an example to illustrate
+our compilation process for the global memory version.
+
+The na¨ıve kernel, that is, the input to our compiler, is shown in Figure 2(a). In the
+kernel, there are two input arrays, a and b, from the global memory. The compiler
+converts the accesses to array a into coalesced ones, as shown in Figure 6(a). Based on
+detected data sharing, the compiler determines that neighboring thread blocks along
+the X direction can be merged to improve reuse of array a and neighboring thread
+blocks along the Y direction can be merged to improve memory reuse of array b. As the
+access to array a is a R2S (read-to-shared memory), the compiler chooses to perform
+thread-block merge. As the access to array b is R2R (read-to-register), the compiler
+chooses thread merge as discussed in Section 3.5. The next question is then how many
+thread blocks should be merged along either direction? As discussed in Section 4, the
+heuristic is to put at least 128 threads in each thread block and to generate different
+versions of kernel functions depending on the number of threads/thread blocks to be
+merged. Figure 13 shows the performance effect on GTX 285 of the number of merged
+threads/thread blocks in either direction. It can be seen that the optimal performance
+for different sizes of input matrices is achieved with merging 16 thread blocks along
+the X direction and 16 threads along the Y direction.
+
+Since GTX 480 has larger shared memory and register ﬁle than GTX285, the com-
+piler applies more aggressive thread merge as described in Section 3.5.3. For matrix
+multiplication, we show the performances of different number of merged threads along
+the X and Y directions in Figure 14. The number of merged thread blocks along the
+X and Y directions is set as 16. For comparison, we also include the version opt 285,
+which is optimized code for GTX 285. From the ﬁgure, we can see that opt 285 has the
+lowest performance and the version x8 y4 achieves the highest performance for GTX
+480.
+
+ACM Transactions on Architecture and Code Optimization, Vol. 9, No. 2, Article 9, Publication date: June 2012.
+
+A Uniﬁed Optimizing Compiler Framework for Different GPGPU Architectures
+
+9:21
+
+Matrix MulƟplicaƟon on GTX 480 (Global memory version)
+
+x4_y4
+
+x8_y4
+
+x4_y8
+
+opt_285
+
+)
+s
+p
+o
+ﬂ
+G
+
+(
+ 
+e
+c
+n
+a
+m
+r
+o
+f
+r
+e
+P
+
+800
+
+700
+
+600
+
+500
+
+400
+
+4kx4k
+
+3kx3k
+
+2kx2k
+
+1kx1k
+
+Input matrix size
+
+Fig. 14. The performance impact (GTX 480) of the number of merged threads. xN yM means that N threads
+merged along the X direction and M threads merged along the Y direction. opt 285 is the best GTX 285
+version running on GTX 480.
+
+5.2. Case Study: Matrix-Vector Multiplication
+Matrix-vector multiplication (mv) is one of BLAS2 applications. The algorithm has one
+input matrix, one input vector and one output vector. In this section, we use matrix
+vector multiplication as an example to illustrate our compilation process for the texture
+memory version.
+
+The na¨ıve implementation as the input of our compiler is shown in the Figure 2(b). For
+the texture memory version, the compiler applies vectorization ﬁrst. In the kernel there
+are two texture memory inputs a and b. The compiler applies loop-based vectorization
+to the kernel and the code after vectorization is shown in Figure 15(a). The compiler
+then performs thread merge along the X and Y directions to exploit data reuse. Because
+mv has only one dimension, the compiler tries to merge threads along the X direction
+to reuse the vector b. Figure 15(b) shows the code after merging two threads along the
+X direction. Since data reuse is very limited and thread merge may reduce thread-level
+parallelism, the compiler may also skip this thread step and then apply the partition
+camping elimination pass. The code after the transformation is shown in Figure 15(c).
+Figure 16 reports the performance on HD5870 for the different versions generated
+during the compilation process.
+
+From Figure 16, it can be seen that vectorization has the highest performance impact.
+The thread merge step (either merging two or four threads along the X direction) does
+not improve performance for mv due to the reduced number of threads. The impact
+of partition camping elimination depends on the data input sizes and improves the
+performance by up to 17% (on a 2k × 2k matrix) on HD 5870.
+
+6. EXPERIMENTS
+
+6.1. Experimental Methodology
+We implemented the proposed compiler framework in Cetus, a source-to-source com-
+piler infrastructure for C programs [Lee et al. 2003]. The CUDA language support in
+Cetus is ported from MCUDA [Stratton et al. 2008]. We also added the OpenCL lan-
+guage support so that our compiler can optimize na¨ıve kernels written in either CUDA
+or OpenCL and generate the optimized kernels in either CUDA or OpenCL. The al-
+gorithms under study are listed in Table II. All the na¨ıve kernels compute a single
+element at the position (idx, idy). The numbers of lines of code (LOC) of these na¨ıve
+kernel functions are included in Table I to illustrate their programming complexity/
+simplicity. Among the kernels, #pragma is used in the reduction kernel to convey the
+information of input vector length and the actual output to the compiler. The purpose
+to know the actual output is to provide the ﬂexibility to move the unnecessary global
+
+ACM Transactions on Architecture and Code Optimization, Vol. 9, No. 2, Article 9, Publication date: June 2012.
+
+9:22
+
+Y. Yang et al.
+
+float sum = 0; 
+for (int k=0; k<w/4; i++) { 
+
+float4 a0 = a_f4[idx][k]; 
+float4 b0 = b_f4[k]; 
+{sum+=a0.x*b0.x;} 
+{sum+=a0.y*b0.y;} 
+{sum+=a0.z*b0.z;} 
+{sum+=a0.w*b0.w;} 
+
+}
+c[idx] = sum; 
+
+(a)
+
+float sum_0 = 0; 
+float sum_1 = 0; 
+for (int k=0; k<w/4; i++) { 
+
+float4 a0_0 = a_f4[2*idx][k]; 
+float4 a0_1 = a_f4[2*idx+1][k]; 
+float4 b0 = b_f4[k]; 
+{sum_0+=a0_0.x*b0.x; sum_1+=a0_1.x*b0.x;} 
+{sum_0+=a0_0.y*b0.y; sum_1+=a0_1.y*b0.y;} 
+{sum_0+=a0_0.z*b0.z; sum_1+=a0_1.z*b0.z;} 
+{sum_0+=a0_0.w*b0.w; sum_1+=a0_1.w*b0.w;} 
+
+}
+c[2*idx] = sum_0; 
+c[2*idx+1] = sum_1;//c_f2[idx]={sum0,sum1};  
+
+(b)
+
+float sum_0 = 0; 
+float sum_1 = 0; 
+int start = bidx*32;  // offset for different thread blocks 
+for (int k= start; k<w/4+start; i++) { 
+    int k1=k%(w/4); 
+
+float4 a0 = a_f4[idx][k1]; 
+float4 b0 = b_f4[k1]; 
+{sum+=a0.x*b0.x;} 
+{sum+=a0.y*b0.y;} 
+{sum+=a0.z*b0.z;} 
+{sum+=a0.w*b0.w;} 
+
+}
+c[idx] = sum; 
+
+ (c) 
+
+Fig. 15. Compilation process for matrix vector multiplication. (a) kernel code after vectorization. (b) kernel
+code after thread merge along X direction. (c) kernel code after partition camping elimination.
+
+Matrix Vector MulƟplicaƟon on HD 5870 (Texture memory version)
+
+naïve
+
+vectorizaƟon
+
+x2
+
+x4
+
+parƟƟon camping eliminaƟon
+
+)
+s
+p
+o
+ﬂ
+G
+
+(
+ 
+e
+c
+n
+a
+m
+r
+o
+f
+r
+e
+P
+
+80
+
+60
+
+40
+
+20
+
+0
+
+k4
+
+k3
+
+Matrix size
+
+k2
+
+k1
+
+Fig. 16. The performance impact (HD 5870) of different passes. ‘vectorization’ means the vectorization on
+the input. xN means that N thread merged along the X direction after vectorization. Partition camping
+elimination’ means the compiler applied partition camping elimination after the vectorization (i.e., without
+thread merge).
+
+ACM Transactions on Architecture and Code Optimization, Vol. 9, No. 2, Article 9, Publication date: June 2012.
+
+A Uniﬁed Optimizing Compiler Framework for Different GPGPU Architectures
+
+9:23
+
+Table II. A List of the Algorithms Optimized with Our Compiler
+
+Algorithm
+transpose matrix vector
+multiplication (tmv)
+matrix mul. (mm)
+matrix-vector mul. (mv)
+vector-vector mul. (vv)
+reduction (rd)
+matrix equation solver (strsm)
+convolution (conv)
+matrix transpose (tp)
+Reconstruct image (demosaicing)
+ﬁnd the regional maxima
+(imregionmax)
+
+The size of input
+matrices/vectors
+
+Num. of LOC
+
+in the na¨ıve kernel
+
+1kx1k to 4kx4k (1k to 4k vec.)
+
+1kx1k to 4kx4k
+1kx1k to 4kx4k
+1k to 4k
+1–16 million
+1kx1k to 4kx4k
+4kx4k image, 32x32 kernel
+1kx1k to 8kx8k
+1kx1k to 4kx4k
+1kx1k to 4kx4k
+
+11
+
+10
+11
+3
+9
+18
+12
+11
+27
+26
+
+Speedup on naïve kernel on GTX 480
+
+GTX480_Global
+
+GTX480_Tex
+
+p
+u
+d
+e
+e
+p
+S
+
+16
+
+8
+
+4
+
+2
+
+1
+
+Input matrix size (4kx4k matrices or vector)
+
+Fig. 17. The speedups of the optimized kernels over the naive ones. (the input to reduction is a vector of
+16M ﬂoats) on GTX 480.
+
+memory operations to shared memory operations. For example, if both A and B are
+deﬁned as global memory arrays in a kernel and the compiler knows the A is the actual
+output, the compiler can replace memory accesses of B with shared memory accesses.
+The output of our compiler, that is, the optimized kernel, is compiled by the CUDA
+compiler, nvcc, or the OpenCL compiler to generate the GPU executable ﬁle. In our
+experiments, we used both NVIDIA GTX 285 and NVIDIA GTX 480 GPUs with CUDA
+SDK 3.2 and a 64-bit bit red hat enterprise Linux 5.4 operating system. For AMD/ATI
+HD 5870 GPUs, we used AMD/ATI Stream SDK 2.3 on a 32-bit Windows 7 operating
+system. Our compiler source code, the na¨ıve kernels, and the optimized kernels are
+available at Yang and Zhou [2010]. Among the na¨ıve kernels, reduction and strsm need
+to update the input array. Therefore we cannot take advantage of texture memories for
+these two benchmarks.
+
+6.2. Experimental Results
+In our ﬁrst experiment, we examine the effectiveness of our compiler optimizations.
+Figure 17 and Figure 18 show the speedups of the optimized global and texture memory
+kernels over the na¨ıve ones running on GTX 480 and AMD/ATI HD 5870, respectively.
+For GTX 285, we only show the performance of the optimized global memory kernels
+in Figure 19, as the texture support (i.e., texture cache) on GTX 285 is worse than
+GTX 480 as discussed in Section 2. These ﬁgures show that the compiler signiﬁcantly
+improves the performance using the proposed optimizations (7.6 times on GTX 285
+
+ACM Transactions on Architecture and Code Optimization, Vol. 9, No. 2, Article 9, Publication date: June 2012.
+
+9:24
+
+Y. Yang et al.
+
+Speedup on naïve kernel on HD 5870
+
+HD5870_Global
+
+HD5870_Tex
+
+p
+u
+d
+e
+e
+p
+S
+
+128
+
+64
+
+32
+
+16
+
+8
+
+4
+
+2
+
+1
+
+Fig. 18. The speedups of the optimized kernels over the naive ones. (the input to reduction is a vector of
+16M ﬂoats) on HD 5870.
+
+Input matrix size (4kx4k matrices or vector)
+
+Speedup on naïve kernel on GTX 285
+
+GTX285_Global
+
+p
+u
+d
+e
+e
+p
+S
+
+64
+
+32
+
+16
+
+8
+
+4
+
+2
+
+1
+
+Input matrix size (4kx4k matrices or vector)
+
+Fig. 19. The speedups of the optimized kernels over the naive ones. (the input to reduction is a vector of
+16M ﬂoats) on GTX 285.
+
+using global memories, 3.2 times on GTX 480 using global memories, 2.5 times on
+GTX 480 using texture memories, 4.9 times on HD 5870 using global memories, and
+7.2 times on HD 5870 using texture memories on average with the geometric mean).
+
+To better understand the achieved performance, we dissect the effect of each step
+of our compilation process and the results are shown in Figure 20 and Figure 21 for
+NVIDIA and AMD/ATI GPUs, respectively. The performance improvement achieved
+in each step is an average of all applications using the geometric mean. First, let us
+look at the texture memory version. On both HD 5870 and GTX 480, the vectorization
+has the highest impact on performance. Besides the beneﬁt of memory bandwidth, the
+inter thread vectorization is essentially the same as the thread merge optimization
+by merging the neighboring threads, thereby reducing the signiﬁcance of the thread
+merge step. Furthermore, for some benchmarks, the performance of the kernels after
+vectorization is very close to the theoretical peak performances as these algorithms
+are bounded by the bandwidth. The partition camping elimination deliver very little
+beneﬁt. This is expected as the texture caches are well utilized and the impact of
+memory accesses is not critical. In fact, the step of partition camping elimination may
+actually incur performance degradation on GTX 480 due to the additional computation
+for mapping thread ids/thread block ids.
+
+For the global memory version, since only intrathread vectorization is used for GTX
+480 and GTX 285, this step has no effect on most of the kernels under study. In contrast,
+HD 5870 beneﬁts signiﬁcantly from vectorization, because HD 5870 has better support
+
+ACM Transactions on Architecture and Code Optimization, Vol. 9, No. 2, Article 9, Publication date: June 2012.
+
+A Uniﬁed Optimizing Compiler Framework for Different GPGPU Architectures
+
+9:25
+
+Speedups over naive kernels 
+
+Speedups over naive kernels
+
+Coalescing
+
+Thread (Block) Merge
+
+PC EliminaƟon
+
+VectorizaƟon
+
+PC EliminaƟon
+
+Thread (Block) Merge
+
+p
+u
+d
+e
+e
+p
+S
+
+8
+
+7
+
+6
+
+5
+
+4
+
+3
+
+2
+
+1
+
+0
+
+p
+u
+d
+e
+e
+p
+S
+
+3
+
+2.5
+
+2
+
+1.5
+
+1
+
+0.5
+
+0
+
+GTX285_Global
+
+GTX480_Global
+
+GTX480_Texture
+
+(a) global memory version               (b) texture memory version 
+
+Fig. 20. Performance improvement along the compilation process on GTX 480 and GTX 285 with 4kx4k
+matrix/vector inputs.
+
+Speedups over naive kernels 
+
+Speedups over naive kernels
+
+VectorizaƟon
+
+Thread (Block) Merge
+
+PC EliminaƟon
+
+VectorizaƟon
+
+Thread (Block) Merge
+
+PC EliminaƟon
+
+p
+u
+d
+e
+e
+p
+S
+
+6
+
+5
+
+4
+
+3
+
+2
+
+1
+
+0
+
+p
+u
+d
+e
+e
+p
+S
+
+8
+
+7
+
+6
+
+5
+
+4
+
+3
+
+2
+
+1
+
+0
+
+HD5870_Global
+
+HD5870_Texture
+
+(a) global memory version               (b) texture memory version 
+
+Fig. 21. Performance improvement along the compilation process on HD 5870 with 4kx4k matrix/vector
+inputs.
+
+for ﬂoat2 and ﬂoat4 than ﬂoat. We ignore the results of memory coalescing for HD
+5870. The reason is that after the memory coalescing step, a thread block has only
+16 threads while one wavefront on HD 5870 has 64 threads. Such a small number of
+threads in a thread block results in severe resource underutilization and cannot show
+the actual impact of memory coalescing on HD5870. From the Figure 20(a), we can
+see that coalesced memory accesses are important for GTX 285, but not as much for
+GTX 480. The reason is due to the L1 data caches on GTX 480. The partition camping
+elimination has large impact on HD 5870 and GTX 285, but small impact on GTX
+480. The reason is due to the input data sizes used in our experiments. For example,
+there is signiﬁcant partition camping on HD 5870/GTX285 GPUs when transposing a
+4k × 4k matrix as they have 8 partitions. For the same input on GTX 480 which has
+6 partitions, the accesses become more evenly distributed and eliminating partition
+camping has little effect. When transposing a 3k × 3k matrix on GTX 480, however,
+eliminating partition camping results in a 29% performance improvement.
+
+ACM Transactions on Architecture and Code Optimization, Vol. 9, No. 2, Article 9, Publication date: June 2012.
+
+Y. Yang et al.
+
+Speedup on CUBLAS 3.2
+
+MM
+
+MV
+
+TMV
+
+VV
+
+ReducƟon
+
+Strsm
+
+Geomean
+
+9:26
+
+2.5
+
+2
+
+p
+u
+d
+e
+e
+p
+S
+
+1.5
+
+1
+
+0.5
+
+0
+
+4kx4k
+
+3kx3k
+
+2kx2k
+
+1kx1k
+
+Input matrix size
+
+Fig. 22. Performance improvement of our optimized kernels over CUBLAS 3.2 implementations on GTX
+285.
+
+Speedup over CUBLAS 3.2
+
+MM_Global
+TMV_Global
+RD_Global
+GEOMEAN_Global
+
+MV_Global
+VV_Global
+Strsm_Global
+
+p
+u
+d
+e
+e
+p
+S
+
+3
+
+2.5
+
+2
+
+1.5
+
+1
+
+0.5
+
+0
+
+Speedup over CUBLAS 3.2
+
+MM_Tex
+
+TMV_Tex
+
+GEOMEAN_Tex
+
+MV_Tex
+
+VV_Tex
+
+p
+u
+d
+e
+e
+p
+S
+
+3.5
+
+3
+
+2.5
+
+2
+
+1.5
+
+1
+
+0.5
+
+0
+
+4kx4k
+
+3kx3k
+
+2kx2k
+
+1kx1k
+
+4kx4k
+
+3kx3k
+
+2kx2k
+
+1kx1k
+
+Input matrix size
+
+Input matrix size
+
+(a) global memory version               (b) texture memory version 
+
+Fig. 23. Performance improvement of our optimized kernels over CUBLAS 3.2 implementations on GTX
+480.
+
+We did not include prefetching results, because prefetching shows little impacts[Yang
+et al. 2010]. The reason is that after thread/thread-block merge, the kernel consumes
+many registers. When allocating registers for prefetch, either the degree of thread
+merge must be reduced or the off-chip local memory may have to be used, resulting in
+degraded performance. Therefore, when registers are used up before prefetching, the
+prefetching step is skipped by our compiler.
+
+Among the algorithms in Table II, six are implemented in the CUDA CUBLAS
+library. In the next experiment, we compare our optimized kernel with the highly tuned
+CUBLAS v3.2 on GTX 285 and GTX 480. Figure 22 and Figure 23 show the performance
+comparison of the algorithms with different input sizes on GTX 285 and GTX 480,
+respectively. From Figure 23(a), we can see that the global memory version kernel
+optimized by our compiler achieves consistently better performance than CUBLAS 3.2
+for transpose matrix vector multiplication (tmv), matrix vector multiplication (mv),
+vector vector multiplication (vv), and matrix equation solver (strsm) for different input
+
+ACM Transactions on Architecture and Code Optimization, Vol. 9, No. 2, Article 9, Publication date: June 2012.
+
+A Uniﬁed Optimizing Compiler Framework for Different GPGPU Architectures
+
+9:27
+
+Matrix mulƟplicaƟon on HD 5870
+
+OpƟmized_Global
+
+OpƟmized_Tex
+
+Sdk_Tex
+
+Sdk_Global
+
+)
+s
+p
+o
+ﬂ
+G
+
+(
+ 
+e
+c
+n
+a
+m
+r
+o
+f
+r
+e
+P
+
+1600
+
+1400
+
+1200
+
+1000
+
+800
+
+600
+
+400
+
+200
+
+0
+
+4kx4k
+
+3kx3k
+
+2kx2k
+
+1kx1k
+
+Matrix size
+
+Fig. 24. Performance comparison between AMD/ATI Stream SDK and our optimized kernel on matrix
+multiplication.
+
+sizes on GTX 480. For matrix multiplication (mm) and reduction (rd), the performance
+of our optimized code is very close to CUBLAS 3.2 on GTX 480. On average (based
+on the geometric mean), our performance improvement of global memory version over
+CUBLAS varies from 17.5% to 41.4% for different input sizes on GTX 480 and varies
+from 7% to 17% on GTX 285. Since the shared memory and L1 caches have better
+bandwidth than texture caches on GTX 480, the optimized texture memory version
+typically cannot compete with our optimized global memory version on GTX480. One
+exception is matrix vector multiplication, in which the shared memory is utilized to
+meet memory coalescing requirement in the global memory version. However, since
+there is no data reuse among different threads in this application, the texture cache
+turns out to be a more efﬁcient way to achieve high bandwidth than coalesced memory
+accesses using the shared memory. In addition, the shared memory usage limits the
+number threads of each SM, which also limits the performance. Our texture memory
+version for vector-vector multiplication also outperforms CUBLAS v3.2 on GTX 480
+but it is not as good as our optimized global memory version.
+
+Customized matrix multiplication kernels for both the texture and global mem-
+ory are provided in the AMD/ATI Stream SDK for AMD/ATI GPUs. We compare the
+performance of our optimized versions to the AMD/ATI Stream SDK on HD5870, as
+shown in Figure 24. From the ﬁgure, we can see our optimized texture memory version
+‘Optimized tex’ achieves very similar performance of the AMD/ATI Stream SDK
+texture memory version ‘Sdk Tex’ and our optimized global memory version ‘Op-
+timized global’ outperforms the AMD/ATI Stream SDK global memory version
+‘Sdk Global’ for all the sizes. Between the texture and global memory versions, the
+texture memory versions achieve much higher performance than the global memory
+ones on HD5870 for matrix multiplication.
+
+Figure 25 presents the performances of the BLAS2 benchmarks on HD 5870. Among
+the benchmarks, matrix-vector multiplication (mv) suits better with the texture cache,
+similar to our discussion of mv on GTX480. For transpose-matrix-vector multiplication,
+the texture memory version is better than the global memory version when the data
+size is large. On the other hand, vector-vector multiplication favors the global memory
+version when the data size is small. Overall, we can see that the texture memory/cache
+can be a very effective way to eliminate the memory coalescing issue and provide data
+reuse across threads/warps. It is application and device dependent to choose between
+the global memory and the texture memory for higher performance.
+
+To study the effect of (intrathread) data vectorization for the global memory version
+on NVIDIA GPUs, we chose the reduction (rd) algorithm since rd is the only algorithm
+
+ACM Transactions on Architecture and Code Optimization, Vol. 9, No. 2, Article 9, Publication date: June 2012.
+
+9:28
+
+Y. Yang et al.
+
+BLAS2 on HD 5870
+
+MV_Global
+
+MV_Tex
+
+TMV_Global
+
+TMV_Tex
+
+VV_Global
+
+VV_Tex
+
+)
+s
+p
+o
+ﬂ
+G
+
+(
+ 
+e
+c
+n
+a
+m
+r
+o
+f
+r
+e
+P
+
+80
+
+70
+
+60
+
+50
+
+40
+
+30
+
+20
+
+10
+
+0
+
+)
+s
+p
+o
+ﬂ
+G
+
+(
+ 
+e
+c
+n
+a
+m
+r
+o
+f
+r
+e
+p
+
+35
+
+30
+
+25
+
+20
+
+15
+
+10
+
+5
+
+0
+
+4kx4k
+
+3kx3k
+
+2kx2k
+
+1kx1k
+
+Matrix or Vector Size
+
+Fig. 25. Blas2 Performances on HD 5870.
+
+ReducƟon on GTX 480 and GTX 285 (Global memory version)
+
+CUBLAS_480
+
+CUBLAS_285
+
+compiler_wo_vec_480
+
+compiler_wo_vec_285
+
+opƟmized_480
+
+opƟmized_285
+
+1m
+
+2m
+
+4m
+
+8m
+
+Input : 1 million to 8 million complex number
+
+Fig. 26. The effect of data vectorization on reduction with complex number inputs.
+
+in our study that has a corresponding version for complex numbers (CublasScasum)
+in CUBLAS. We changed the na¨ıve kernel of rd to process complex numbers by using
+two ﬂoat-type variables to read the real (A[2*idx]) and imaginary (A[2*idx+1]) parts
+of a complex number instead of a single ﬂoat2 variable. Then, we optimized this na¨ıve
+kernel with and without the data vectorization step. For different input sizes, we
+compared the performance of the two optimized kernels (labeled ‘optimized wo vec’
+and ‘optimized’, respectively) and the results are show in Figure 26.
+
+From Figure 26, we can see that data vectorization signiﬁcantly improves the per-
+formance. One reason is the improved memory bandwidth due to the use of ﬂoat2 data
+types as discussed in Section 2. Another reason is the side effect of memory coalescing.
+Without data vectorization, the compiler recognized that the array accesses to both real
+and imaginary parts (A[2*idx] and A[2*idx+1]) are not coalesced. So, it uses shared
+memory as temporary storage to generate coalesced memory accesses as discussed in
+Section 3.3. In comparison, the accesses in the kernel after data vectorization, A[idx],
+is coalesced. As a result, the data are directly loaded into registers for computation.
+Although the compiler uses the shared memory to improve memory reuse for both
+vectorized and un-vectorized versions, there are more shared memory accesses in the
+un-vectorized kernel optimized wo vec due to code transformation for coalescing. These
+extra shared memory accesses contribute to the performance differences between the
+optimized wo vec and optimized kernels.
+
+Among all the kernels, transpose (tp) and matrix-vector multiplications (mv) exhibit
+the partition camping problem. Ruetsch and Micikevicius [2009] proposed diagonal
+
+ACM Transactions on Architecture and Code Optimization, Vol. 9, No. 2, Article 9, Publication date: June 2012.
+
+A Uniﬁed Optimizing Compiler Framework for Different GPGPU Architectures
+
+9:29
+
+Matrix Transpose on GTX 480 and GTX 285 (Global memory version)
+
+OpƟ_pc_480
+
+OpƟ_pc_285
+
+OpƟmized_480
+
+OpƟmized_285
+
+Sdk_new_480
+
+Sdk_new_285
+
+Sdk_pre_480
+
+Sdk_pre_285
+
+)
+S
+/
+e
+t
+y
+b
+G
+
+(
+ 
+e
+c
+n
+a
+m
+r
+o
+f
+r
+e
+P
+
+140
+
+120
+
+100
+
+80
+
+60
+
+40
+
+20
+
+0
+
+4kx4k
+
+3kx3k
+
+Matrix size
+
+2kx2k
+
+1kx1k
+
+Fig. 27. Performance of matrix transpose using the optimized kernel for the global memory without partition
+camping elimination (labeled ‘Opti PC’), the optimized kernel for the global memory, and CUBLAS 3.2 on
+GTX 285 and GTX 480.
+
+Matrix Transpose on HD5870
+
+OpƟ_pc_Global
+
+OpƟmized_Global
+
+OpƟ_pc_Tex
+
+OpƟmized_Tex
+
+)
+S
+/
+B
+G
+
+(
+ 
+e
+c
+n
+a
+m
+r
+o
+f
+r
+e
+P
+
+100
+
+80
+
+60
+
+40
+
+20
+
+0
+
+4kx4k
+
+3kx3k
+
+Matrix Size
+
+2kx2k
+
+1kx1k
+
+Fig. 28. Performance of matrix transpose using the optimized kernel for the global memory without par-
+tition camping elimination (labeled Opti PC global), the optimized kernel for the global memory (labeled
+optimized global), the optimized kernel for the texture memory without partition camping elimination
+(labeled Opti PC tex), the optimized kernel for the texture memory (labeled ‘optimized tex’) on HD 5870.
+
+block reordering to address the issue with transpose and their implementation is in-
+cluded in the latest CUDA SDK. In Figure 27, we compare the performance of our
+optimized kernel (labeled ‘optimized’) with theirs (labeled ‘SDK new’) for tp on both
+GTX 285 and GTX 480 and we also include the previous CUDA SDK version for ref-
+erence (labeled ‘SDK pre’). Since tp does not have any ﬂoating point operations, the
+effective bandwidth is used. From Figure 27, it can be seen that although our compiler
+uses the same approach to eliminate partition camping, the remaining optimizations
+taken by our compiler result in better performance than the version in the latest SDK
+on both GTX 285 and GTX 480. Because GTX 480 has 6 partitions, the optimized ver-
+sion with partition camping elimination only outperforms the version without partition
+camping elimination when the input size is 3k by 3k. We also observed similar perfor-
+mance impacts of partition camping on tp running on HD 5870, as shown in Figure 28,
+since HD5870 has 8 partitions. Note that, due to the texture cache, partition camping
+has much smaller impact than the global memory version.
+
+In mv, the thread blocks are in one dimension. Therefore, diagonal block reorder-
+ing cannot be applied. Our compiler uses the address offset approach described in
+Section 3.7 and the results are shown in Figure 29, Figure 30 and Figure 31 for GTX
+285, GTX 480, and HD5870, respectively. It can be seen that for certain input sizes,
+
+ACM Transactions on Architecture and Code Optimization, Vol. 9, No. 2, Article 9, Publication date: June 2012.
+
+Y. Yang et al.
+
+Matrix Vector MulƟplicaƟon on GTX 285
+
+naïve
+
+OpƟ_PC
+
+opƟmized
+
+CUBLAS3.2
+
+9:30
+
+)
+s
+p
+o
+ﬂ
+G
+
+(
+ 
+e
+c
+n
+a
+m
+r
+o
+f
+r
+e
+P
+
+35
+
+30
+
+25
+
+20
+
+15
+
+10
+
+5
+
+0
+
+4K X 4K
+
+3K X 3K
+
+2K X 2K
+
+1K X 1K
+
+Matrix size
+
+Fig. 29. Performance of mv using the na¨ıve kernel, the optimized kernel without partition camping elimi-
+nation (labeled Opti PC), the optimized kernel, and CUBLAS 3.2 on GTX 285.
+
+Matrix Vector MulƟplicaƟon on GTX480
+
+naïve
+
+OpƟ_PC
+
+opƟmized
+
+cublas 3.2
+
+)
+s
+p
+o
+ﬂ
+G
+
+(
+ 
+e
+c
+n
+a
+m
+r
+o
+f
+r
+e
+P
+
+50
+
+45
+
+40
+
+35
+
+30
+
+25
+
+20
+
+15
+
+10
+
+5
+
+0
+
+4K X 4K
+
+3K X 3K
+
+2K X 2K
+
+1K X 1K
+
+Matrix size
+
+Fig. 30. Performance of mv using the na¨ıve kernel, the optimized kernel without partition camping elimi-
+nation (labeled Opti PC), the optimized kernel, and CUBLAS 3.2 on GTX 480.
+
+Matrix Vector MulƟplicaƟon on HD5870
+
+OpƟ_pc_Global
+
+OpƟmized_Global
+
+OpƟ_pc_Tex
+
+OpƟmized_Tex
+
+)
+s
+p
+o
+ﬂ
+G
+
+(
+ 
+e
+c
+n
+a
+m
+r
+o
+f
+r
+e
+P
+
+80
+
+70
+
+60
+
+50
+
+40
+
+30
+
+20
+
+10
+
+0
+
+4kx4k
+
+3kx3k
+
+2kx2k
+
+1kx1k
+
+Matrix Size
+
+Fig. 31. Performance of mv using the optimized kernel without partition camping elimination (labeled
+Opti PC), the optimized kernel on HD 5870.
+
+ACM Transactions on Architecture and Code Optimization, Vol. 9, No. 2, Article 9, Publication date: June 2012.
+
+A Uniﬁed Optimizing Compiler Framework for Different GPGPU Architectures
+
+9:31
+
+even without partition camping elimination, our optimized kernel (labeled Opti PC)
+already achieves better performance than CUBLAS and eliminating partition camping
+(labeled optimized) further improves the performance. Similar to transpose, the elimi-
+nating partition camping has biggest impact on GTX 480 when the input size is 3k by
+3k. On HD 5870 and GTX 285, as both GPUs have 8 partitions, eliminating partition
+camping has high performance impact due to the input data sizes being a multiple of
+2kB (partition size of 256B × 8 partitions).
+
+In summary, our experimental results show that our optimizing compiler generates
+very high quality code for different GPGPU architectures and often achieves superior
+performance even compared to the manually optimized code in CUDA CUBLAS, CUDA
+SDK and AMD/ATI Stream SDK.
+
+7. LIMITATIONS
+Although the proposed compiler can dramatically improve the performance over na¨ıve
+kernel functions, the fundamental limitation is that it cannot change the algorithm
+structure. Instead, our compiler can be used to facilitate algorithm-level exploration.
+The reasons are twofold. First, developers can leverage our aggressive compiler opti-
+mizations so that they do not need to optimize their implementations of each candidate
+algorithm. Second, the relatively good understandability of our optimized code may
+give a hint of what algorithms are better suited. Our compiler provides the generated
+code from each compilation step and it is relatively easy to understand what/how code
+transformations have been performed. Based on such understanding, a programmer
+may revise her na¨ıve code for higher performance. Taking 1D fast Fourier transform
+(FFT) as an example, when the na¨ıve kernel (50 lines of code) simply uses 2-point FFT
+in each step of the Cooley–Tukey algorithm [Cooley and Tukey 1965], the throughput
+is 24 GLOPS for computing the FFT of 220 complex numbers on GTX 285. Our com-
+piler optimizes the na¨ıve kernel by merging threads and the resulting kernel computes
+8-point FFT in each step, which delivers a throughput of 41 GFLOPS, signiﬁcantly
+better than CUFFT 2.2 (26GFLOPS). The compiler generated 8-point FFT version,
+however, is not as good as a na¨ıve implementation of 8-point FFT (113 lines of code
+with a throughput of 44 GFLOPS). The reason is that the compiler generated version
+uses multiple 2-point FFT calculations for an 8-point FFT. On the other hand, as our
+compiler generated code is reasonably understandable, it serves as a good guideline
+for algorithm exploration: changing the na¨ıve kernel from 2-point FFT to 8-point FFT,
+for which the compiler can further optimize the performance to achieve 59 GFLOPS.
+More elaborate algorithm-level development by Govindaraju et. al. [2008] as well as
+the one used in CUFFT2.3 achieves even higher performance (89 GFLOPS), indicating
+that our compiler facilitates but cannot replace intelligent algorithm-level exploration.
+Finally, in the present stage, our compiler assumes that the workload of each thread is
+similar and cannot handle the program very well if the workload can vary signiﬁcantly
+due to control ﬂow in different threads (i.e., index dependent workloads). One possible
+solution is a work item queue to balance the workload of each thread, which can be
+treated as another type of thread merge. We leave it as our future work.
+
+8. RELATED WORK
+CUDA [NVIDIA 2010] provides a relatively simple programming model to applica-
+tion developers. However, many hardware details are exposed since it is critical to
+utilize the hardware resources efﬁciently in order to achieve high performance. Given
+the nonlinear optimization space, optimizing GPGPU programs has been shown to
+be highly challenging [Ryoo et al. 2008a]. To relieve this task from developers, there
+has been some recent work on compiler support for GPGPU optimization. Ryoo et al.
+[2008b] deﬁned performance metrics to prune the optimization spaces. G-ADAPT
+
+ACM Transactions on Architecture and Code Optimization, Vol. 9, No. 2, Article 9, Publication date: June 2012.
+
+9:32
+
+Y. Yang et al.
+
+[Liu et al. 2009] is a compiler framework to search and predict the best conﬁguration
+for different input sizes for GPGPU programs. Compared to our proposed approach,
+this compiler takes the optimized code and aims to adapt the code to different input
+sizes, while ours optimizes the na¨ıve kernel functions.
+
+One closely related work to ours is the optimizing compiler framework for afﬁne
+loops by Baskaran et al. [2008]. Their compiler uses a polyhedral model to empirically
+search for best loop transformation parameters, including the loop tiling sizes and
+unrolling factors. It is reported that their compiler achieves similar performance to
+CUBLAS1.0 for matrix multiplication and better performance for other kernels. In
+comparison, our proposed compiler also uses empirical search to determine the best
+parameters to merge threads/thread blocks. The difference is that we propose a novel
+way to achieve the effect of loop tiling and loop unrolling. In our proposed approach,
+we start from the ﬁnest-grain work item and aggregate work items together to exploit
+data reuse through registers and share memory. This approach ﬁts particularly well
+with GPGPU programming models where work items are typically deﬁned in a 2D/3D
+grid and aggregating work items usually bears a clear physical meaning in terms of
+the workload of each thread and each thread block. In addition, we propose explicit
+rules to check memory coalescing and approaches to convert noncoalesced accesses into
+coalesced ones. For the applications that we studied, including matrix multiplication,
+our compiler achieves much better performance (superior or close to CUBLAS 3.2,
+which is signiﬁcantly improved over CUBLAS 2.2 and CUBLAS 1.0). In addition, the
+loop transformed code generated based on polyhedral models is often quite complex
+[Pouchet et al. 2007] while our optimized code has relatively good understandability.
+
+Our compiler shares a common goal with CUDA-lite [Ueng et al. 2008]: the user pro-
+vides a kernel function which only uses the global memory and the compiler optimizes
+its memory usage. In CUDA lite, the compiler uses the programmer provided annota-
+tion to improve memory coalescing. It also performs loop tiling to utilize shared mem-
+ory. In comparison, our compiler does not require user annotation. More importantly,
+not only does our compiler improve memory coalescing but also effectively achieves
+data sharing with the proposed thread/thread-block merge techniques. In addition, our
+compiler distinguishes memory reads based on their target, the register or the shared
+memory, to make best use of either type of resource for data reuse.
+
+One interesting way to automatically generate GPGPU programs is to translate
+OpenMP programs to CUDA programs [Lee et al. 2009]. Our proposed compiler is
+complementary to this work as it can be used to further optimize the CUDA kernel
+functions generated from OpenMP programs.
+
+9. CONCLUSIONS
+In this article, we present a compiler framework to optimize GPGPU programs. The
+key idea is to present a simpliﬁed GPU hardware abstraction model to application
+developers so that they can focus on extracting ﬁne-grain data-level parallelism from
+their applications rather than working on detailed performance optimizations. The
+extracted ﬁne-grain data-level parallelism is captured as the na¨ıve kernel input to
+our compiler. We propose a set of novel compiler techniques to improve GPU memory
+usage and distribute workload in threads and thread blocks. Our compiler generates
+two optimized kernels, one for global memories and the other for texture memories.
+Our experimental results show that the optimized code achieves very high performance,
+often superior to manually optimized programs.
+
+REFERENCES
+
+AHO, A. V., SETHI, R., AND ULLMAN, J. D. 1986. Compilers: Principles, Techniques, and Tools. Addison-Wesley,
+
+Upper Saddle River, NJ.
+
+ACM Transactions on Architecture and Code Optimization, Vol. 9, No. 2, Article 9, Publication date: June 2012.
+
+A Uniﬁed Optimizing Compiler Framework for Different GPGPU Architectures
+
+9:33
+
+AMD, INC. 2011. AMD Accelerated Parallel Processing OpenCL Programming Guide 2.4.
+BAGHSORKHI, S. S., DELAHAYE, M., PATEL, S. J., GROPP, W. D., AND HWU, W. W. 2010. An adaptive performance
+modeling tool for GPU architectures. In Proceedings of the 15th ACM SIGPLAN Symposium on Principles
+and Practice of Parallel Computing (PPOPP’10). ACM, 105–114.
+
+BASKARAN, M. M., BONDHUGULA, U., KRISHNAMOORTHY, S., RA-MANUJAM, J., ROUNTEV, A., AND SADAYAPPAN, P. 2008.
+A compiler framework for optimization of afﬁne loop nests for GPGPUs. In Proceedings of the 22nd
+Annual International Conference on Supercomputing (ICS’08). ACM. 225–345.
+
+COOLEY, J. AND TUKEY, J. W. 1965. An algorithm for the machine calculation of complex Fourier series. Math.
+
+Comput. 19, 297–301.
+
+FUJIMOTO, N. Faster matrix-vector multiplication on GeForce 8800 GTX. 2008. In Proceedings of the IEEE
+
+International Parallel & Distributed Processing Symposium (IPDPS’08). IEEE, 1–8.
+
+GOVINDARAJU, N., LLOYD, B., DOTSENKO, Y., SMITH, B., AND MANFERDELLI, J. 2008. High performance discrete
+Fourier transforms on graphics processors. In Proceedings of the International Conference for High
+Performance Computing, Networking, Storage and Analysis (SC’08). IEEE. 1–12.
+
+HONG, S. AND KIM, H. 2009. An analytical model for GPU architecture with memory-level and thread-level
+parallelism awareness. In Proceedings of the 36th International Symposium on Computer Architecture
+(ISCA’09). ACM.
+
+LEE, S.-I., JOHNSON, T., AND EIGENMANN, R. 2003. Cetus—An extensible compiler infrastructure for source-to-
+source transformation. In Proceedings of Workshops on Languages and Compilers for Parallel Computing
+(LCPC’03). 539–553.
+
+LEE, S., MIN, S.-J., AND EIGENMANN, R. 2009. OpenMP to GPGPU: A compiler framework for automatic
+translation and optimization. In Proceedings of the 14th ACM SIGPLAN Symposium on Principles and
+Practice of Parallel Computing (PPOPP’09). ACM, 101–110.
+
+LIU, Y., ZHANG, E. Z., AND SHEN, X. 2009. A cross-input adaptive framework for GPU programs optimization.
+In Proceedings of IEEE International Parallel & Distributed Processing Symposium (IPDPS’09). IEEE,
+1–10.
+
+NATH, R., TOMOV, S., AND DONGARRA, J. 2010. An improved MAGMA GEMM for Fermi GPUs. Tech. rep.
+
+UT-CS-10-655. University of Tennessee Computer Science.
+NVIDIA, Inc. 2010. NVIDIA CUDA C Programming Guide 3.2.
+OPENCL. http://www.khronos.org/opencl/.
+POUCHET, L.-N., BASTOUL, C., COHEN, A., AND VASILACHE, N. 2007. Iterative optimization in the polyhedral
+mode: Part I, On dimensional time. In Proceedings of International Symposium on Code Generation and
+Optimization (CGO’07). ACM, 144–156.
+
+RUETSCH, G. AND MICIKEVICIUS, P. 2009. Optimize matrix transpose in CUDA. http://developer.download.
+
+nvidia.com/compute/cuda/sdk/website/C/src/transpose/doc/MatrixTranspose.pdf.
+
+RYOO, S., RODRIGUES, C. I., BAGHSORKHI, S. S., STONE, S. S., KIRK, D. B., AND HWU, W. W. 2008a. Optimization
+principles and application performance evaluation of a multithreaded GPU using CUDA.In Proceedings
+of the 13th ACM SIGPLAN Symposium on Principles and Practice of Parallel Programming (PPOPP’08).
+ACM, 73–82.
+
+RYOO, S., RODRIGUES, C. I., STONE, S. S., BAGHSORKHI, S. S., UENG, S., STRATTON, J. A., AND HWU, W. W. 2008b.
+Optimization space pruning for a multithreaded GPU. In Proceedings of the International Symposium
+on Code Generation and Optimization (CGO’08). ACM.
+
+STRATTON, J. A., STONE, S. S., AND HWU, W. W. 2008. MCUDA: An efﬁcient implementation of CUDA kernels
+for multi-core CPUs. In Proceedings of the 21st International Workshop on Languages and Compilers for
+Parallel Computing (LCPC’08). 16–30.
+
+UENG, S., LATHARA, M., BAGHSORKHI, S. S., AND HWU, W. W. 2008. CUDA-lite: Reducing GPU programming
+Complexity, in Proceedings of the 21st International Workshop on Languages and Compilers for Parallel
+Computing (LCPC’08). 1–15.
+
+VOLKOV, V. AND DEMMEL, J. W. Benchmarking GPUs to tune dense linear algebra. 2008. In Proceedings of the
+
+International Conference for High Performance Computing (SC’08), ACM. 1–11.
+
+YANG, Y., XIANG, P., KONG, J., AND ZHOU, H. 2010. A GPGPU Compiler for Memory Optimization and Parallelism
+Management. In Proceedings of the ACM SIGNPLAN 2010 Conference on Programming Language
+Design and Implementation (PLDI’10). ACM, 86–97.
+
+YANG, Y. AND ZHOU, H. 2010. GPGPU compiler. http://code.google.com/p/gpgpucompiler/.
+
+Received March 2011; revised July 2011; accepted September 2011
+
+ACM Transactions on Architecture and Code Optimization, Vol. 9, No. 2, Article 9, Publication date: June 2012.
+
+

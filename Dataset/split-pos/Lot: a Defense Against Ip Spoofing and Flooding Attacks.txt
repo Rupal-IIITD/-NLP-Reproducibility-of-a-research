@@ -1,0 +1,1902 @@
+LOT: A Defense Against IP Spooﬁng and Flooding Attacks
+
+YOSSI GILAD and AMIR HERZBERG, Bar-Ilan University
+
+6
+
+We present LOT, a lightweight plug and play secure tunneling protocol deployed at network gateways. Two
+communicating gateways, A and B, running LOT would automatically detect each other and establish an
+efﬁcient tunnel, securing communication between them. LOT tunnels allow A to discard spoofed packets
+that specify source addresses in B’s network and vice versa. This helps to mitigate many attacks, including
+DNS poisoning, network scans, and most notably (Distributed) Denial of Service (DoS).
+
+LOT tunnels provide several additional defenses against DoS attacks. Speciﬁcally, since packets received
+from LOT-protected networks cannot be spoofed, LOT gateways implement quotas, identifying and blocking
+packet ﬂoods from speciﬁc networks. Furthermore, a receiving LOT gateway (e.g., B) can send the quota
+assigned to each tunnel to the peer gateway (A), which can then enforce near-source quotas, reducing waste
+and congestion by ﬁltering excessive trafﬁc before it leaves the source network. Similarly, LOT tunnels fa-
+cilitate near-source ﬁltering, where the sending gateway discards packets based on ﬁltering rules deﬁned by
+the destination gateway. LOT gateways also implement an intergateway congestion detection mechanism,
+allowing sending gateways to detect when their packets get dropped before reaching the destination gate-
+way and to perform appropriate near-source ﬁltering to block the congesting trafﬁc; this helps against DoS
+attacks on the backbone connecting the two gateways.
+
+LOT is practical: it is easy to manage (plug and play, requires no coordination between gateways), de-
+ployed incrementally at edge gateways (not at hosts and core routers), and has negligible overhead in terms
+of bandwidth and processing, as we validate experimentally. LOT storage requirements are also modest.
+Categories and Subject Descriptors: C.2.2 [Computer-Communication Networks]: Network Protocols
+General Terms: Security
+
+Additional Key Words and Phrases: IP spooﬁng, denial of service
+ACM Reference Format:
+Gilad, Y. and Herzberg, A. 2012. LOT: A defense against IP spooﬁng and ﬂooding attacks. ACM Trans. Inf.
+Syst. Secur. 15, 2, Article 6 (July 2012), 30 pages.
+DOI = 10.1145/2240276.2240277 http://doi.acm.org/10.1145/2240276.2240277
+
+1. INTRODUCTION
+Most packets sent on the Internet are not authenticated; attackers are often able
+to send spoofed packets, containing an incorrect sender IP address. The IETF rec-
+ommends that Internet Service Providers (ISPs) should block packets from their
+customers that specify a source IP address not assigned to that sender, i.e., ingress
+ﬁltering [Baker and Savola 2004; Ferguson and Senie 2000; Killalea 2000]. Indeed, the
+Advanced Network Architecture Group [2011] found that most surveyed clients were
+unable to send spoofed packets. However, there are still many ISPs that do not per-
+form ingress ﬁltering, especially in less developed countries; which, although highly
+populated, were under-represented among the volunteer-participants in the Advanced
+
+This work was supported by the Israeli Science Foundation grant 206703.
+Authors’ addresses: Y. Gilad; email: mail@yossigilad.com; A. Herzberg; email: amir.herzberg@gmail.com.
+Permission to make digital or hard copies of part or all of this work for personal or classroom use is granted
+without fee provided that copies are not made or distributed for proﬁt or commercial advantage and that
+copies show this notice on the ﬁrst page or initial screen of a display along with the full citation. Copyrights
+for components of this work owned by others than ACM must be honored. Abstracting with credit is permit-
+ted. To copy otherwise, to republish, to post on servers, to redistribute to lists, or to use any component of
+this work in other works requires prior speciﬁc permission and/or a fee. Permissions may be requested from
+the Publications Dept., ACM, Inc., 2 Penn Plaza, Suite 701, New York, NY 10121-0701, USA, fax +1 (212)
+869-0481, or permissions@acm.org.
+c(cid:2) 2012 ACM 1094-9224/2012/07-ART6 $10.00
+DOI 10.1145/2240276.2240277 http://doi.acm.org/10.1145/2240276.2240277
+
+ACM Transactions on Information and System Security, Vol. 15, No. 2, Article 6, Publication date: July 2012.
+
+6:2
+
+Y. Gilad and A. Herzberg
+
+Fig. 1. LOT is deployed on GWA and GWB and forms a tunnel between them.
+
+Network Architecture Group [2011]. In particular, Pang et al. [2004] and Beverly and
+Bauer [2005] found that IP spooﬁng and lack of ingress ﬁltering are quite common.
+
+IP spooﬁng is exploited in many attacks, including network scans [Peng et al.
+2007], DNS poisoning [Kaminsky 2008; Klein 2007], and other attacks, e.g., on SNMP
+[Aharoni and Hidalgo 2005; Jiang 2002]. In most of these attacks IP spooﬁng is essen-
+tial, since the attacker is required to impersonate a speciﬁc entity (e.g., the authorita-
+tive DNS server, for DNS poisoning).
+
+Finally, IP spooﬁng is often exploited to cause clogging, the generation of excessive
+amounts of network trafﬁc, resulting in severe congestion and disruption of Internet
+communication, i.e., a network-layer Denial of Service (DoS) attack. Clogging and
+other forms of DoS attacks are widespread [Moore et al. 2001] and facilitated by a
+huge number of hosts in the Internet (often in botnets), as well as by the widespread
+ability to send spoofed packets. In particular, the following clogging-DoS attacks ex-
+ploit spooﬁng: IP ﬂooding [Chang 2002], SYN-ﬂooding/clogging [Eddy 2007; Harris
+and Hunt 1999; Lemon 2002] and DNS and other reﬂection attacks [Paxson 2001].
+
+One reason that spooﬁng is often facilitated in these and other DoS attacks is that it
+allows evasion of ﬁlters and quotas based on sender IP address, makes tracing attacks
+harder, and allows reﬂection DoS attacks [Paxson 2001]. In reﬂection DoS attacks
+[Paxson 2001], each attacking bot B1, B2, . . . , Bn sends short/single requests to one or
+many reﬂecting hosts R1, R2, . . . , Rm. The requests are spoofed: their source address
+is of the victim V, instead of their real addresses. Hence, the reﬂecting hosts send the
+longer/multiple response(s) to the victim, ﬂooding it or links to it with excessive trafﬁc.
+DoS reﬂection attacks can signiﬁcantly amplify the abilities of the attacker, allowing a
+weak spoofer or a small number of spoofers to disrupt services.
+
+We present LOT, a lightweight opportunistic tunneling protocol, deployed on
+network gateways. LOT is designed to mitigate the two critical, widely exploited
+attack vectors, IP spooﬁng and clogging. Once installed on a gateway, say GWA, LOT
+begins probing remote connections to ﬁnd peer LOT gateways; when a peer gateway,
+GWB, is found, LOT establishes a tunnel between GWA and GWB. Once a tunnel is
+established, GWA adds a pseudo random tag to packets sent to GWB who discards
+packets without the tag if their source address is in the network block of GWA (and
+vice versa). This method resembles packet marking techniques such as Savage et al.
+[2000], Snoeren [2001], and Dean et al. [2002], but does not require deployment at
+ISPs and on Internet routers.
+
+The basic deployment topology for LOT is illustrated in Figure 1, where a tunnel
+is established between GWA and GWB, two gateways of communicating hosts Alice
+and Bob; the tunnel protects GWA and GWB’s networks from Eve, an outside attacker
+(e.g., on the Internet). LOT is opportunistic: it requires no coordination between the
+administrators of the two gateways; instead, once it is installed on both gateways, LOT
+automatically sets up a lightweight security tunnel between them.
+
+By blocking spoofed packets LOT defends against many DoS and other attacks;
+Figure 2 compares two clogging DoS attacks by a spooﬁng adversary, Eve: a simple
+ﬂood attack and a DNS reﬂection attack (ampliﬁcation ratio is 10). Both attacks are
+
+ACM Transactions on Information and System Security, Vol. 15, No. 2, Article 6, Publication date: July 2012.
+
+LOT: A Defense Against IP Spooﬁng and Flooding Attacks
+
+6:3
+
+Fig. 2. Comparison between DNS reﬂection attack and ﬂooding attack, with and without LOT. DNS re-
+quests are 55 bytes and responses are 550 bytes (ampliﬁcation ratio of 10). The graphs provide the conﬁ-
+dence interval at a level of 95% for each measurement.
+
+on the client, Bob, using the network topology in Figure 1. We compared data transfer
+time over a TCP connection and packet loss rates for different attacker bandwidths.
+Figure 2 describes the attacker bandwidth as a percentage of the link bandwidth al-
+located to all other links (100Mb/s). As expected, the reﬂection attack causes a more
+severe degradation in performance compared to the direct attack. Figure 2 also shows
+how LOT mitigates the reﬂection attack.
+
+Furthermore, LOT facilitates several additional defenses against Denial of Service
+
+(DoS) attacks.
+
+— Local and Remote Quotas. Since LOT prevents spooﬁng, receiving end gateways can
+now enforce quotas on trafﬁc without the risk of blocking trafﬁc from a legitimate
+source, s, due to excessive spoofed trafﬁc, falsely identiﬁed as coming from s. The
+gateway can enforce an additional quota for all destinations in network blocks with
+whom the gateway does not have a tunnel. Furthermore, LOT allows a receiving
+end gateway, GWB, to send to the sender’s gateway, GWA, the quota it allocates for
+GWA’s network, allowing GWA to block excessive trafﬁc before it leaves the source
+network.
+
+— Near-Source Filtering. Receiver’s gateway, GWB, can request the sender’s gateway,
+GWA, to block (ﬁlter) certain types of packets, permanently or temporarily. This
+can be useful to block network scans and other attacks that can be easily ﬁltered
+(e.g., DNS responses sent to a Web server, usually due to a DNS reﬂection attack).
+The ﬁltering rule can be deﬁned manually or automatically, by appropriate learning
+mechanisms and intrusion detection systems.
+
+— Inter-Gateway Congestion Detection. LOT gateways periodically measure the por-
+tion of packets that they have sent and were also received at the remote end of a
+particular tunnel. A signiﬁcant number of packets sent but not received, is an indi-
+cation of multiple packet losses, typically due to congestion. The sending gateways
+can react, e.g., drop packets from suspect senders behind them; this can help miti-
+gate DoS attacks against core Internet routers, such as the Coremelt attack [Studer
+and Perrig 2009] (see our simulations in Section 6) or the opt-ack attack [Sherwood
+et al. 2005].
+
+Many of LOT’s beneﬁts are signiﬁcant only when it is deployed in a considerable por-
+tion of Internet gateways. However, LOT provides incentives even for early deployers;
+see Section 2.2.
+
+The tunneling mechanism is lightweight and optimized for efﬁciency, much like
+GRE [Dommety 2000; Farinacci et al. 2000]. However, LOT provides a unique value
+
+ACM Transactions on Information and System Security, Vol. 15, No. 2, Article 6, Publication date: July 2012.
+
+6:4
+
+Y. Gilad and A. Herzberg
+
+by establishing transparent tunnels. Namely, LOT does not modify the source and des-
+tination addresses; this allows packets within a LOT tunnel to ﬂow in arbitrary routes
+to the destination, rather than forcing them to ﬂow via a speciﬁc gateway, as when
+using most existing tunneling mechanisms (which change the destination, typically to
+a particular network gateway, for decapsulation).
+
+LOT sets up hop by hop tunnels on a route between communicating hosts, which
+allows ﬁltering of spoofed or clogging trafﬁc near the source (at the nearest LOT sup-
+porting node on the route). However, opportunistic hop by hop design implies that a
+MitM attacker can impersonate a legitimate “next hop” gateway. Furthermore, since
+LOT is designed to be lightweight, it does not use cryptography for encapsulating or
+decapsulating packets. For these two reasons LOT is vulnerable to MitM attackers.
+
+1.1. Article Organization
+The remainder of this article is organized as follows. Section 2 presents an overview
+of LOT in which we discuss our design guidelines, deployment, and prototype imple-
+mentation. In Section 3 we deﬁne the communication and adversary models that we
+consider in this article and present our security requirements from LOT. The following
+two sections present the LOT handshake. In Section 4 we present the way in which
+potential tunnel endpoints (LOT gateways) opportunistically discover each other; and
+in Section 5, we provide a protocol to validate that a network block is behind a gate-
+way and discuss how the output of a successful run can be used to tag trafﬁc; we also
+provide a security and time analysis. In Section 6 we present mechanisms that, given
+tagged trafﬁc ﬂows, mitigate denial of service attacks. Section 7 presents LOT’s tun-
+neling mechanism and includes empirical measurements of performance. Section 8
+analyzes LOT security, it sketches the proofs for our security requirements. In Section
+9 we discuss related works and Section 10 presents our conclusions and directions for
+future work.
+
+2. OVERVIEW
+In this section we present an informal discussion of our design guidelines for LOT,
+discuss LOT deployment, and present our prototype implementation.
+
+2.1. Design Guidelines
+
+Do No Harm. LOT tunnels are designed to improve security, in particular protec-
+tion against IP-spooﬁng and DoS attacks. These goals are obviously important; how-
+ever, it is critical that such improvements will not result in signiﬁcant degradation of
+efﬁciency or reliability. Therefore, we require LOT to be a lightweight protocol. LOT
+tunnels should be established and operated with minimal overhead, including no or
+minimal impact on routing. Furthermore, LOT mechanisms should be designed care-
+fully, to make sure that LOT itself cannot be abused to perform DoS, spooﬁng or other
+attacks.
+
+Incremental Deployment. Deploying new mechanisms for Internet security can be
+challenging. In light of this, it is highly desirable for such new mechanisms to be
+incremental; i.e., provide value even when adoption is very limited in order to provide
+incentives for early adopters. The beneﬁts should gradually increase as the number of
+deployments grows.
+
+Simple, Easy, Plug and Play. Secure tunneling mechanisms, and in particular
+IPsec [Hoffman 2005; Kaufman 2005; Kent and Seo 2005], have established a reputa-
+tion of being overly complex to implement and difﬁcult to deploy. These problems may
+be the biggest obstacles preventing the wide-spread deployment of IPsec. It is there-
+fore desirable for LOT to return to the “KISS principle”: Keep It Simple Stupid. LOT
+
+ACM Transactions on Information and System Security, Vol. 15, No. 2, Article 6, Publication date: July 2012.
+
+LOT: A Defense Against IP Spooﬁng and Flooding Attacks
+
+6:5
+
+Fig. 3. Two LOT tunnels: From customer to ISP (Tunnel A), and from ISP to remote network (Tunnel B).
+
+Fig. 4. LOT deployment when a network is connected via multiple parallel gateways.
+
+should not depend on conﬁguring or extending external mechanisms such as DNS,
+and certainly avoid conﬁguring of mechanisms such as BGP or the reverse DNS tree.
+These were suggested in previous proposals for opportunistic, plug and play, tunnels
+(e.g., [Richardson and Redelmeier 2005]), but are often not controlled by managers of
+small to mid-sized networks.
+
+Scalable. LOT should be scalable to allow for potential large-scale deployment on
+
+the Internet.
+
+2.2. Deployment
+There are two typical deployment scenarios for LOT: network to network and network
+to provider. In the network to network scenario, illustrated as tunnel B in Figure 3, a
+LOT tunnel is established (opportunistically) between the edge gateway GWC of Bob’s
+network and the gateway GWB of Alice’s ISP. This ensures that when Bob receives a
+packet that speciﬁes any host behind the ISP as its source, it was really sent by such
+a host.
+
+The other typical scenario is network to provider, as illustrated by tunnel A in
+Figure 3. Here, a customer runs LOT at the gateway connecting it to the ISP (GWA),
+and automatically establishes a LOT tunnel, tunnel A, to another LOT gateway (GWB),
+installed by the ISP. This deployment can help ISPs with complex networks enforce
+ingress ﬁltering; note that ISPs often experience problems enforcing classical ingress
+ﬁltering on complex networks, see Baker and Savola [2004].
+
+Multiple tunnels may be established on the route between two networks, as illus-
+
+trated in Figure 3.
+
+A network may be connected to the Internet or other networks via multiple gate-
+ways. LOT supports this common scenario, illustrated in Figure 4. Speciﬁcally, as
+opposed to tunneling protocols such as IPsec [Hoffman 2005; Kaufman 2005; Kent
+and Seo 2005] or GRE [Dommety 2000; Farinacci et al. 2000], LOT avoids impact on
+routing efﬁciency. This is accomplished by encapsulating packets without changing
+their source or destination address to that of a particular gateway (see discussion in
+Section 7.2); LOT’s transparent tunnel provides better performance.
+
+2.2.1. Early Adopters. LOT, like any other tunneling mechanism, requires that both
+ends deploy in order to provide value. We present two scenarios where LOT provides
+value even for early adopters.
+
+ACM Transactions on Information and System Security, Vol. 15, No. 2, Article 6, Publication date: July 2012.
+
+6:6
+
+Y. Gilad and A. Herzberg
+
+The ﬁrst scenario is a large organization, with multiple branches connected over
+the Internet. The use of LOT prevents attackers (on the Internet, or inside a speciﬁc
+branch) from impersonating one branch in front of another. Furthermore, LOT pro-
+vides increased protection against clogging and DoS attacks. Namely, LOT isolates the
+source network of a DoS attack such that an attack against one branch, that origi-
+nates from another branch or the Internet, does not cripple its communication with
+other LOT-deploying branches. Moreover, LOT does not require its deployment to be
+immediate or synchronized between branches; this eases deployment even in a single
+organization. Later, clients and peer networks communicating with such organizations
+will also gain value when deploying, as their trafﬁc will less likely be hindered by DoS
+attacks.
+
+The second scenario is a server that has many clients, e.g., a top-level DNS server.
+LOT allows such a server to offer improved protection for clients that deploy LOT
+at negligible costs; in particular, LOT allows the server to avoid keeping per-client
+state by using a stateless one-way tunnel. The stateless one-way tunnel option allows
+the server to verify encapsulated packets and ﬁlter spoofed/congesting trafﬁc without
+keeping information on the client or its network (details in Section 7.2). This allows
+servers to establish tunnels with a vast number of clients, without risk of resource
+exhaustion. Furthermore, such tunnels allow servers to give higher priorities to tagged
+(LOT) trafﬁc, especially when there is high load. This foils DoS attacks on the server,
+and provides additional motivation for clients to deploy LOT.
+
+2.2.2. Limitations. We require that all of a set of gateways that controls all routes
+to a network block (e.g., GWA(1) and GWA(2) in Figure 4) deploys LOT and cooperates
+(speciﬁcally, shares a secret key). Additionally, each gateway must be conﬁgured with
+the network block associated with each of its physical interfaces.
+
+LOT tunnels can not pass over Network Address Translators (NATs) [Srisuresh and
+Egevang 2001]; since network blocks behind such devices are internal, corresponding
+addresses will not be speciﬁed on packets that an external LOT gateway receives and
+will therefore appear as spoofed. Thus, an external gateway cannot form a direct
+tunnel with a gateway that is behind a NAT. However, NAT devices do not prevent the
+use of LOT; if LOT is deployed on the NAT as well, then tunnels will be formed to and
+from the NAT device.
+
+2.3. Implementation
+We prototyped LOT for Linux-based network gateways and used the prototype to eval-
+uate LOT’s performance and security beneﬁts. Throughout this article, we present
+results of empirical measurements on our implementation to conﬁrm that deploying
+LOT is beneﬁcial. Our prototype is available online.1
+
+3. MODEL AND SECURITY PROPERTIES
+In this section we present our communication model, adversary model and security
+requirements.
+
+3.1. Communication Model
+An address space S of length l is {0, 1}l (for example, IPv4 [Postel 1981b] has the ad-
+dress space {0, 1}32). Each d ∈ S is an address. A set B ⊆ S is a network block in the
+, l(cid:4) ≤ l, such that for every
+address space S of length l, if there exists a preﬁx P ∈ {0, 1}l(cid:4)
+d ∈ S, it holds that d ∈ B if and only if d has a preﬁx P. This is similar to the CIDR
+notation.
+
+1http://lighttunneling.sourceforge.net
+
+ACM Transactions on Information and System Security, Vol. 15, No. 2, Article 6, Publication date: July 2012.
+
+LOT: A Defense Against IP Spooﬁng and Flooding Attacks
+
+6:7
+
+Fig. 5. A modeled topology. s, z, d are hosts in Net1 and Net3. A–F are gateways, each associated with a
+network block according to its location. Arrows from entity x mark the corresponding x.next(d) entities.
+
+Two entities e1, e2 are peers if one of the following holds.
+
+Network entities are either hosts, or LOT gateways that run LOT. In the follow-
+ing sections of the article, we often abbreviate and refer to LOT gateways simply as
+“gateways”. Each entity e is associated with a single network block NB(e) ⊆ S2: a host
+h is mapped to a network block of a single address, i.e., |NB(h)| = 1, a LOT gateway
+may be associated with a larger network block; see illustration in Figure 5. We often
+abbreviate the writing and use the host when referring to his address.
+— NB(e1) ⊂ NB(e2) and there is no LOT gateway G such that NB(e1) ⊂ NB(G) ⊂
+NB(e2) (e.g., LOT gateways A , B in Figure 5 are peers).
+— NB(e2) (cid:7)⊂ NB(e1), NB(e1) (cid:7)⊂ NB(e2) and there is no LOT gateway G such that either
+NB(e1) ⊂ NB(G) or NB(e2) ⊂ NB(G), but not both (e.g., LOT gateways B, E in
+Figure 5 are peers).
+Network entities can send and receive messages; each message speciﬁes data to-
+gether with source and destination addresses: src, dst. When a message is sent from
+an entity e to a destination address dst, it reaches one of the peer e.next(dst) entities,
+which are determined according to the ﬁrst nonempty set of the following.
+(1) LOT gateways associated with the smallest network block that contains, but does
+
+not equal, NB(e).
+
+(2) Entities associated with the largest nonempty network block that contains dst, but
+
+not NB(e).
+In Figure 5 the arrows mark for an entity x, all the entities in the set x.next(d).
+We assume bounds 0 ≤  < 1, δ on the loss and delay on network channels: a mes-
+sage sent from entity e1 to address dst reaches a peer e2 ∈ e1.next(dst) with probability
+of at least 1− > 0; and given that the message reached e2, the delay until the message
+was received is at most δ.
+Let hops(e1, e2) denote the number of hops between two entities e1, e2, which is the
+number of subsequent x.next(e2) operations required until a set that contains e2 is
+returned. Where initially, x = e1, and in following calls x is an element in the set
+returned by the previous call. For example, in Figure 5, hops(s, d) = 4.
+
+2In reality, a host/gateway can be associated with multiple network blocks, e.g., a gateway connecting multi-
+ple networks to the Internet. However, in our model, we treat this scenario as multiple machines associated
+with single network blocks.
+
+ACM Transactions on Information and System Security, Vol. 15, No. 2, Article 6, Publication date: July 2012.
+
+6:8
+
+Y. Gilad and A. Herzberg
+
+Fig. 6. α-neighborhood adversary. Eve controls only NetE but tries to form a tunnel specifying that she
+controls the entire NetA (α = 1
+
+2 ).
+
+LOT gateways are also able to perform LOT-broadcast(m). When a gateway G per-
+forms this operation, then m reaches any gateway ˜G such that NB(G) = NB( ˜G) (e.g.,
+in Figure 5, B can send a broadcast message that would reach C, D). Broadcast mes-
+sages are encrypted and authenticated, e.g., by a shared key provided by the network
+administrator.
+
+LOT uses existing communication between network blocks to detect the potential
+for creating a tunnel (see Section 4). The rationale is that without communication,
+there is no proﬁt in establishing a tunnel. Thus, we deﬁne the following.
+Deﬁnition 3.1. Two network blocks Net1, Net2 are τ -periodically communicating if
+in any interval of length τ, at least one message is sent from s ∈ Net1 to a destination
+d ∈ Net2 or vice versa.
+3.2. Adversary Model
+LOT is designed to provide security against blind adversaries, who are able to send
+spoofed messages (messages with forged source addresses), but do not learn anything
+about the contents of messages sent to others. LOT assumes α-neighborhood adver-
+saries. Informally, we say that an adversary Adv is an α-neighborhood adversary with
+respect to a network block netblock, if the adversary can only receive messages sent to
+the α ∈ [0, 1) portion of the addresses in netblock (wishes to take over a larger network
+block), as illustrated in Figure 6.
+Let Addr(Adv) denote the set of addresses that the adversary Adv controls. For any
+network block netblock we assume that either netblock ⊆ Addr(Adv), i.e., the entire
+≤ α, i.e., the adversary controls at most an α
+block is corrupt, or
+portion of the addresses in the block, where α is typically 1
+4 . This assumption ap-
+pears reasonable since network addresses are typically assigned either in consecutive
+blocks or as random samples from a large set (e.g., by DHCP).
+
+|netblock ∩ Addr(Adv)|
+
+|netblock|
+
+2 or 3
+
+Formally, the adversary, Eve, controls a set of corrupt hosts and receives a message
+only if its destination is one of the corrupt hosts (i.e., adversary is blind). The adversary
+can send a message from any corrupt host and specify any source (i.e., a spooﬁng
+adversary). Similarly to messages sent by noncorrupt entities, a message sent from a
+corrupt host, s, to a destination, d, would reach s.next(d). Note that adversary control
+of the network gateway, as illustrated in Figure 6, is equivalent to control of all hosts
+in its network, i.e., all hosts in NetE are corrupt.
+
+Deﬁnition 3.2. We say that two network blocks Net1, Net2 are τ well-connected if
+
+the following hold.
+(1) Net1, Net2 are τ-periodically communicating.
+(2) Eve is an α-neighborhood adversary w.r.t. every network block (not necessarily
+
+assigned to a LOT gateway) that contains either Net1 or Net2, but not both.
+Two LOT gateways, G1, G2, are τ well-connected if NB(G1), NB(G2) are τ well-
+connected. Two hosts, h1, h2, are τ well-connected if they are not corrupt, and for
+
+ACM Transactions on Information and System Security, Vol. 15, No. 2, Article 6, Publication date: July 2012.
+
+LOT: A Defense Against IP Spooﬁng and Flooding Attacks
+6:9
+every two LOT gateways, G1, G2, such that G1 ∈ h1.next(h2), G2 ∈ h2.next(h1): G1, G2
+are τ well-connected.
+
+3.3. Security Requirements
+We list the security properties that we require from LOT; Section 8 presents the corre-
+sponding proofs.
+
+Figure 5 where Gs = A and Gd = E.
+
+3.3.1. Packet Source Authentication (No Spooﬁng). Consider a run of LOT with a blind
+α-neighborhood probabilistic polynomial time (PPT) adversary. Let s, d be two τ well-
+connected hosts such that s.next(d) ∩ d.next(s) = ∅, and there exist two LOT gateways
+Gs ∈ s.next(d), Gd ∈ d.next(s).
+Let n denote a LOT security parameter; there exists a polynomial function t(n) such
+that if d receives a message m that was sent by a host h, and speciﬁes a source address
+s after time t(n), then except with negligible probability in n, the following holds.
+(1) If s ∈ NB(Gs), d ∈ NB(Gd), then h ∈ NB(Gs) ∪ NB(Gd). This condition holds in
+(2) Otherwise, h (cid:7)∈ (NB(Gs)∪NB(Gd))\(NB(Gs)∩NB(Gd)). Consider a modiﬁed version
+of Figure 5 where E does not run LOT. For this network topology, the condition
+holds and Gs = A and Gd ∈ {B, C, D}.
+3.3.2. Conﬁdentiality. Intuitively, this requirement ensures that use of LOT does not
+leak information on the content of communication between two hosts. We follow the
+cryptographic approach and require that a blind adversary will not be able distinguish
+which of two messages is sent from one host to another: the conﬁdentiality require-
+ment is satisﬁed if for every blind PPT adversary and two noncorrupt hosts, s, d, the
+following indistinguishability experiment returns 1 with probability at most 1
+2 +negl(n),
+where n is a security parameter and negl is a negligible function.
+(1) The adversary chooses two messages, m0, m1, and sends them to s.
+(2) s chooses uniformly, a bit b, and sends d the message mb .
+(3) Protocol and adversary execution.
+(4) The adversary outputs b(cid:4).
+
+The experiment returns 1 if b = b(cid:4), otherwise 0.
+3.3.3. Availability. Let s, d be two τ well-connected hosts. For every α-neighborhood
+PPT adversary, and a message m sent from s to d at time t, it holds that: the probability
+that d does not receive m until time t + δ · hops(s, d) is at most 1 − (1 − )hops(s,d) +
+negl(n), where negl is a negligible function and n is a security parameter.
+
+4. OPPORTUNISTIC GATEWAY DISCOVERY
+A stateless handshake precedes establishment of every LOT tunnel. The handshake
+protocol consists of two main phases.
+— Hello Phase. The two gateways detect the potential for establishing a LOT tunnel,
+and each gateway identiﬁes the network block behind it. In this section we present
+this phase.
+
+— Network Block Validation Phase. Each gateway proves that it can intercept packets
+sent to the network block behind it, i.e., the gateway controls that network block.
+The network block validation phase is presented in Section 5.
+At the end of the handshake, each gateway receives a proof from the other gateway
+
+that the validation succeeded, and a tunnel is established.
+
+ACM Transactions on Information and System Security, Vol. 15, No. 2, Article 6, Publication date: July 2012.
+
+6:10
+
+Y. Gilad and A. Herzberg
+
+Fig. 7. Hello phase. The dashed arrow marks a packet blocked from the destination.
+
+Perhaps the ﬁrst question about an opportunistic tunneling protocol design is how
+two protocol-supporting parties discover each other without signiﬁcant overhead (since
+there is no preliminary tunnel conﬁguration). In this section we answer this question.
+Derived from our guidelines presented in Section 2, we have three requirements
+
+from the discovery method.
+
+— Early discovery. A LOT gateway must be able to detect peer LOT gateways efﬁ-
+
+ciently, within a reasonable time after setup.
+
+— Efﬁcient discovery. LOT gateways must not misspend much of their resources trying
+
+to establish tunnels with networks whose gateways do not support LOT.
+
+— Prevention of DoS attacks. The discovery mechanism is done with unauthenticated,
+arbitrary, peers. Therefore we must design it to be resilient to DoS attacks. In
+particular, the discovery protocol must not amplify an attacker’s capabilities (e.g., by
+providing disproportionately long responses) to prevent abuse in reﬂection attacks.
+
+4.1. Design
+LOT is triggered by a single gateway, GWA, when it forwards a packet from HostA
+behind it, to HostB, whose IP address does not belong to one of the network blocks with
+whom GWA has already established a LOT tunnel; see message A in Figure 7. GWA
+begins the handshake by sending a Hello Request message to HostB. This allows GWB,
+the ﬁrst LOT gateway on the Hello message route, to intercept the Hello Request and
+respond; see messages B and C in Figure 7. To limit LOT’s overhead due to handshake
+requests, GWA sends a Hello Request only with rather low probability p (e.g., 0.01 or
+0.001) per forwarding of packet to a destination (HostB) without an established tunnel.
+The Hello Request contains a description of the network block behind GWA and
+a cryptographic cookie—cookieA, which is the output of a pseudo random function
+(e.g., AES [Daemen and Rijmen 2002]) computed over the destination address and
+the current time. A network block is described by a tuple (base-address, l) where base-
+address is a network address (32 bits for IPv4, e.g., 128.1.2.3), l is the number of bits
+in the network part of the address; the address block contains all addresses with the
+same l most-signiﬁcant bits as the base address. We use the familiar CIDR notation,
+base-address/l.
+
+A direction ﬂag d extends the network block description to specify whether the ad-
+dress block is indeed base-address/l or its complement—the entire address space ex-
+cept base-address/l and Martian addresses (see IANA [2002]). This extension allows
+establishment of tunnels between GWA and GWB as in Figure 8, where GWA is GWB’s
+gateway to the Internet, but trafﬁc from GWB to GWC is not routed via GWA. In this
+scenario GWA informs GWB that it controls the entire address space except its internal
+address block, 76.42.0.1/16 (Martian addresses are excluded automatically).
+
+When GWB intercepts the Hello Request message, it replies with a constant con-
+ﬁgurable probability q, which is typically close to 1. This implies that the expected
+
+ACM Transactions on Information and System Security, Vol. 15, No. 2, Article 6, Publication date: July 2012.
+
+LOT: A Defense Against IP Spooﬁng and Flooding Attacks
+
+6:11
+
+Fig. 8. An example of a network topology where a direction ﬂag is necessary.
+
+number of packets forwarded by GWA to the network behind GWB or vice versa until
+the Hello phase initiates, is 1
+
+pq (assume similar p, q values in both gateways).
+
+A value of q < 1 makes abuse of LOT detection mechanism as an ampliﬁer in reﬂec-
+tion DoS attacks nonattractive for attackers since even TCP servers provide a better
+ampliﬁcation ratio when the attacker sends a spoofed SYN packet. Therefore, we be-
+lieve that abusing LOT for such indirect attacks is not a vivid threat.
+
+When GWB decides to respond,3 it sends a Hello Response; see message C in
+Figure 7. The Hello Response, similarly to the Hello Request, contains a descrip-
+tion of GWB’s network block. The response is authenticated by GWA’s cookie, which
+is attached. Furthermore, the response echoes the arguments used by GWA to create
+the cookie (HostB, timeA); this allows the initiator (GWA) to authenticate the cookie by
+reconstructing it, without keeping state. Additionally, GWA veriﬁes that the response
+is not too old: timeA ∈ [current time − max delay, current time]. The stateless approach
+provides protection against denial of service attacks by resource exhaustion (such as
+SYN clogging on TCP servers [Eddy 2007; Harris and Hunt 1999; Lemon 2002]).
+
+Additionally, as an optimization, the response contains cookieB, a cryptographic
+cookie created by GWB. cookieB is used in the following network block validation phase,
+which we present in Section 5.
+
+When a series of LOT gateways exists on the route between two communicating
+hosts (HostA, HostB), LOT would establish hop by hop tunnels (see tunnel A and tunnel
+B in Figure 3)—a tunnel between every two sequential LOT gateways. This property
+follows from our design: since the node that handles the hello messages, and conducts
+the reminder of the handshake (see Section 5), is the nearest LOT gateway.
+
+4.2. Empirical Measurements
+We investigated the effect on performance when a LOT gateway is ﬂooded with
+spoofed handshake Hello Request messages that specify false network blocks. Such
+a DoS attack would cause the gateway to send Hello response messages. As we noted
+earlier, when q < 1, other network services (e.g., TCP servers) are better ampliﬁers
+for reﬂection DoS attacks. However, such a ﬂooding attack may still be used as a
+DoS attack vector on the LOT gateway and its network, since the responding gateway
+(victim) would still create cookies (output of a cryptographic function, in our prototype
+AES [Daemen and Rijmen 2002]) and send Hello Response messages (message C
+in Figure 7). This is the maximum per-packet processing that an unauthenticated
+attacker can cause a LOT gateway to perform; therefore, the discovery mechanism is
+the most DoS-vulnerable mechanism on LOT gateways.
+
+Consider the network topology in Figure 1, assume that only GWA deployed LOT
+and use Eve to ﬂood GWA with spoofed Hello Requests that specify a random network
+block. Eve’s bandwidth varies between measurements and was at most 1
+10 of other
+
+3GWB also veriﬁes that there is not an already existing tunnel to HostA.
+
+ACM Transactions on Information and System Security, Vol. 15, No. 2, Article 6, Publication date: July 2012.
+
+6:12
+
+Y. Gilad and A. Herzberg
+
+Fig. 9. Effect on existing connection when a LOT gateway ﬂooded with spoofed hello requests. The graph
+provides the conﬁdence interval at a level of 95% for each measurement.
+
+links’ bandwidth, which is 100Mbit/second. In addition to the processing that these
+messages caused GWA to perform, they also loaded the link between GWA and GWB.
+To isolate the effect caused by the Hello Request messages ﬂood on GWA itself, we
+also tested the effect of the attack when q = 0, when every one of Eve’s requests was
+discarded; we use this measurement as a baseline for comparison. We measured the
+transfer time of constant data over a TCP connection (from Alice—server, to Bob—
+client) and used it as indication of the effect of the attack.
+
+Initially we measured the attack’s inﬂuence when q = 1; when GWA responds to
+every LOT Hello message that it receives; then, we conducted the test again when q =
+0.7, where GWA responds only to one of several LOT Hello messages that it receives.
+Figure 9 illustrate our results. We also compared these results with those of a weak
+DNS reﬂection attack (1-1 ratio), where Eve sends a SYN packet to a TCP server that
+also runs on GWA (e.g., SSH), Figure 9 indicates that when q < 1 common network
+services can be abused by attackers to amplify their abilities better than LOT.
+
+5. NETWORK BLOCK VALIDATION
+LOT validates that a gateway controls a network block by ensuring that it is able
+to intercept trafﬁc sent to that network block. The validation process is a challenge
+response protocol with several iterations; each iteration ensures that the responder
+controls a speciﬁc random address within the network block. However, the protocol
+validates only a portion of the addresses and not the entire network block (to avoid
+a signiﬁcant overhead), later in this section we analyze the security and efﬁciency of
+this approach.
+
+The protocol simultaneously validates both endpoints; when it completes success-
+fully, each gateway (e.g., GWA) is provided with proof, issued by the other gateway
+(GWB) that it controls a particular network block. Later, this proof is used as a credit
+to establish a tunnel between the validated gateways. Once a tunnel is formed, each
+gateway tags trafﬁc that it forwards to the peer gateway’s network block; this tag
+proves that the packet was not spoofed. In Section 7 we provide the details of this
+method.
+
+The network block validation protocol is designed to avoid possible DoS attacks. In
+particular, LOT gateways do not keep state when validating a network block and send
+at most a single packet in response for every packet that they receive.
+
+5.1. Design
+We now present the network block validation protocol performed by two peer LOT
+gateways. Assume that each gateway is aware of the network block that the other
+gateway claims to control and that both gateways agreed on n, the number of
+
+ACM Transactions on Information and System Security, Vol. 15, No. 2, Article 6, Publication date: July 2012.
+
+LOT: A Defense Against IP Spooﬁng and Flooding Attacks
+
+6:13
+
+Fig. 10. Network block validation phase. The function Time() returns the current time and max is the
+maximal time interval allowed for the validation session.
+
+1
+
+2nmax
+
+iterations required.4 To avoid DoS threats we set a global constant nmax, and require
+that n ≤ nmax. Additionally, in order to avoid loading the network, we require that
+the probability to initiate the handshake, p (see Section 4), is at most
+, since the
+number of packets sent during the handshake (by both gateways) is no more than
+2nmax. Figure 10 illustrates the validation process for GWA and GWB, behind the
+gateways are NetblockA and NetblockB respectively.
+
+The network block validation protocol consists of n steps. At every step of the valida-
+tion, each gateway sends one packet to a random address in the network block claimed
+to be of the other gateway. The packet also contains a random cookie, which is the
+challenge: if the gateway indeed controls the network block, then it can intercept the
+challenge (packets A and B in Figure 10) and respond with the cookie back to the
+source. The destination address and cookie are derived using a pseudo-random-based
+function, F, according to the network block description, the time that the network
+block validation began, the iteration number, i, and the total number of iterations, n.
+Details of the derivation function are available in an online technical report [Gilad and
+Herzberg 2011b].
+
+Each challenge message also provides a response to the previous challenge: a chal-
+lenge message contains the two cookies used as challenge and response as well as the
+arguments used as inputs for the function F to create them. When a gateway inter-
+cepts a challenge message it ﬁrst validates the response speciﬁed therein, i.e., checks
+that its own cookie is correct by reconstructing it (the cookie is not saved to avoid keep-
+ing state during the handshake). In order to reconstruct the cookie, the gateway uses
+its secret key and the parameters used to create the cookie, which are also extracted
+from the response (see Figure 10). This ensures that the sender received the previous
+
+4A gateway speciﬁes the number of iterations it demands, n(cid:4); in the Hello Response message. The receiving
+gateway (the initiator) then decides the number of iterations it requires according to the network block
+speciﬁed in the Hello Response and sets n to be the maximum between them. The partner veriﬁes that
+indeed n ≥ n(cid:4).
+
+ACM Transactions on Information and System Security, Vol. 15, No. 2, Article 6, Publication date: July 2012.
+
+6:14
+
+Y. Gilad and A. Herzberg
+
+challenge. The responder also compares the current time with the time speciﬁed in the
+challenge (the time that the validation session begun), validating that the challenge is
+not too old.
+
+After the responder successfully validates the response, it chooses a destination
+address in the remote network (using the function F) and sends a new challenge that
+speciﬁes the destination host of the previous challenge as source. The new challenge
+message also echoes the previous cookie (is a response to the previous challenge) and
+the corresponding parameters (time, n and i), to allow the recipient to validate the
+response. See packets A and B in Figure 10.
+
+This process of challenge and response is repeated n times, where n is chosen as
+analyzed in Section 5.2. A gateway may require a different number of iterations for
+different networks (e.g., depending on their size). The values of n and the current
+iteration number are extracted from the response (see packets A and B in Figure 10);
+since they are inputs of F, they cannot be forged.
+
+5.2. Analysis
+We now provide a security analysis for the network block validation protocol with re-
+gards to the α-neighborhood adversary (see deﬁnition in Section 3.2). We calculate the
+probability that an attacker running against a LOT gateway successfully completes
+the validation process for some network block of size x, while in reality the attacker
+only controls l ≤ x · α of the addresses in the network block.
+
+The probability that the attacker’s fraud is not discovered in a single step, is the
+
+≤ α.
+
+probability of choosing a host controlled by the attacker: l
+x
+
+Furthermore, F’s arguments are constant per iteration within a speciﬁc validation
+session. Namely, ci, the i’th challenge within a validation session, does not depend
+on the responses sent by the gateway being validated. This ensures that the respon-
+der is unable to inﬂuence the challenges. Moreover, even if the responder convinces
+the validator to send multiple challenges to the same round, e.g., by sending multiple
+responses to the previous round, all challenges (c1
+i, ...) would be identical. There-
+fore, if the responder is unable to intercept a challenge in a round, then it is unable to
+intercept any challenge of that round.
+The probability p f that the attacker’s fraud is not discovered after n steps is: p f =
+(cid:2)
+(cid:3)n ≤ αn. Hence, n = (cid:12)logα
+(cid:3)(cid:13) iterations are required to obtain the probability of
+l
+x
+failure p f .
+For example, if α = 0.5 and p f = 0.00001, then n = 17. Namely, 17 iterations (17
+challenges) are required to verify a gateway’s claim with probability of 0.99999, even
+if it controls up to half of the addresses in the network.
+
+i, c2
+
+(cid:2)
+
+p f
+
+5.2.1. Time Analysis. Network block validation iterations are asynchronous and each
+iteration requires one gateway to gateway round trip time (RTT) to complete. Assume
+that RTT is 200ms as typical for the Internet and 17 iterations (as in the previous
+example); then this phase completes in less than 3.5 seconds. We stress that the LOT
+handshake does not halt communication between peers; LOT only starts to actively
+inﬂuence communication (and ﬁlter spoofed trafﬁc) when the handshake completes
+and a tunnel is established.
+
+6. MECHANISMS AGAINST DENIAL OF SERVICE
+In this section we present mechanisms that utilize prevention of address spooﬁng to
+protect against DoS attacks. Throughout this section we assume that participating
+LOT gateways have successfully completed the network block validation protocol de-
+scribed in Section 5. Additionally, we assume that trafﬁc from one gateway to the other
+
+ACM Transactions on Information and System Security, Vol. 15, No. 2, Article 6, Publication date: July 2012.
+
+LOT: A Defense Against IP Spooﬁng and Flooding Attacks
+
+6:15
+
+is tagged; this allows the receiving gateway to ﬁlter spoofed packets and to distinguish
+between different source networks.
+6.1. Local and Remote Quotas, Priorities, and Filters
+LOT packet encapsulation identiﬁes the source network, which allows the receiving
+gateway to establish per-network queues and quotas. When a DoS attack occurs, only
+the quota allocated to the attacker’s network is exceeded.5 Consequently, only trafﬁc
+routed from networks where the attacker is present may be hindered.
+
+Furthermore, when under a DoS attack, a LOT gateway is able to give priorities
+to incoming trafﬁc; encapsulated LOT trafﬁc will be given high priority and will not
+undergo aggressive one-sided ﬁltering (since LOT ensures that it is not spoofed). This
+provides an additional incentive for network administrators to deploy LOT.
+
+Moreover, LOT allows gateways to establish near-source quotas. Namely, GWA is
+able to send GWB the quota that it allocates to trafﬁc originating from GWB’s network
+block and request GWB to enforce that quota as well. If the remote gateway (GWB)
+accepts the request, then it will shape the trafﬁc itself and excess trafﬁc will be dropped
+by its source; hence, the load on the link between the two gateways will be reduced.
+Once GWA notiﬁes GWB of the quota it allocates for GWB’s network block, GWB has an
+incentive to enforce the quota as well and save its resources since excess trafﬁc will in
+any case be ﬁltered by GWA.
+
+Ingress ﬁltering and near-source quotas ﬁlter packets before leaving the origin
+network; however, these techniques differ in essence. First, ingress ﬁltering copes
+only with spoofed trafﬁc, while near-source quotas cope with excess trafﬁc regardless
+of the speciﬁed source; second, ingress ﬁltering is deployed without support of the
+destination network while near-source ﬁltering relays upon gateways’ cooperation.
+Finally, near-source ﬁltering allows the sending gateway to avoid waste of bandwidth,
+thereby providing local beneﬁts to deployers; ingress ﬁltering provides a global beneﬁt:
+the more ISPs that deploy ingress ﬁltering, the harder it is to perform IP spooﬁng, but
+until almost all ISPs perform ingress ﬁltering, attackers will often be able to perform
+it. These two mechanisms can and should be deployed together.
+
+The near-source ﬁltering mechanism provides signiﬁcant beneﬁts (see the following
+empirical results), but is vulnerable for abuse by attackers who were able to obtain
+LOT credentials or complete the LOT handshake. Therefore, requests for near-source
+quotas/ﬁltering must be handled with excess care. First, such requests are more
+strongly authenticated using cryptographic authentication mechanisms, and not only
+by attachment of temporary tags (like other encapsulated packets). The requests
+contain a cryptographic MAC [Goldreich 2001] computed using the session key that is
+the last cookie exchanged during the network block validation phase.
+
+Furthermore, the two gateways must have established credentials for a substan-
+tial amount of time (e.g., one week) to ensure that the requester does not have only
+short-term possession of its network block. During that time period, a gateway ﬁlters
+spoofed packets and shapes incoming trafﬁc according to the speciﬁed tunnel tag; how-
+ever, it does not conduct near-source trafﬁc shaping for outgoing trafﬁc. LOT detects
+when a peer gateway loses control over its network block with the tunnel revalidation
+mechanism (see details in Section 7.1); in this case the tunnel is torn down.
+
+Last, these remote ﬁltering and trafﬁc shaping rules expire after a short time period
+(e.g., few hours); this provides additional protection from network block possession loss
+and reduces the ﬁltering overhead at the peer gateway.
+
+Similarly, a gateway can request, in the form of a ﬁrewall rule, to ﬁlter speciﬁc traf-
+ﬁc by its source, destination port, or other characteristics. The near-source ﬁltering
+
+5Separate quotas and queues are allocated to all network blocks with whom there is no tunnel.
+
+ACM Transactions on Information and System Security, Vol. 15, No. 2, Article 6, Publication date: July 2012.
+
+6:16
+
+Y. Gilad and A. Herzberg
+
+Fig. 11. Environment for testing DoS mitiga-
+tion techniques. Each link speciﬁes its capac-
+ity in Mbit/second, except for Eve’s link whose
+capacity varies throughout measurements and
+marked by c.
+
+Fig. 12. Effect of ﬂooding attack on a TCP con-
+nection when different mitigation mechanisms
+are employed.
+
+technique is used when a gateway identiﬁes an attack on its network, either by moni-
+toring the trafﬁc (e.g., with IDS) or by insights on the network topology (e.g., identify
+DNS requests sent to arbitrary entities). Near-source ﬁltering mechanisms were pro-
+posed in several previous works, including Ioannidis and Bellovin [2002], Huici and
+Handley [2007], and Wang et al. [2007b]; we discuss these mechanisms in Section 9.3.
+Near-source trafﬁc shaping/ﬁltering techniques allow the receiving-end gateway
+(GWA), not the network, to decide which packets will be dropped, as recommended
+in Lakshminarayanan et al. [2004]. By pushing trafﬁc ﬁltering nearer to the source,
+we signiﬁcantly reduce the trafﬁc over the entire route, and reduce the total number
+of ﬁlters required at the gateway, protecting a network from a DDoS attack.
+
+We investigated how effectively these mechanisms mitigate DoS attacks. Figure 11
+illustrates the network topology we used in our measurements. We measured the
+transfer time of a ﬁle from Alice to Bob while Bob is ﬂooded with packets sent by the
+attacker (Eve). Three scenarios were considered.
+— First, GWD does not deploy LOT (i.e., normal conditions).
+— Second, GWD deploys LOT and establishes two tunnels: one with GWS and another
+with GWE. In this scenario, GWD allocates a quota of 20Mbit/sec for incoming trafﬁc
+from each tunnel.
+
+— Third, GWD also requests GWE to enforce the quota allocated to its network block
+
+(20Mbit/second).
+The results, illustrated in Figure 12, indicate that placing quotas at the destination
+gateway moves the bottleneck from the link between GWD and Bob to the link
+between R and GWD. Placing the quota near the congesting source, at GWE, limits
+Eve’s bandwidth to only 20Mbits/second and mitigates the attack. Furthermore,
+Figure 12 shows that when there is no attack (i.e., Eve’s capacity is 0 mbps), LOT
+encapsulation has a small overhead; this is also veriﬁed in our performance evaluation
+in Section 7.4. To further limit LOT’s overhead under normal conditions, one can set
+up potential LOT tunnels in advance (when the network is not under attack); only
+when a gateway suspects a DoS attack (e.g., notices excess trafﬁc) will it employ the
+proposed mitigations and notify the remote party to encapsulate trafﬁc.6
+
+6.2. Intergateway Congestion Detection
+LOT employs a mechanism to detect congestion; this may be due to legitimate trafﬁc
+load or a deliberate DoS attack, such as the Coremelt attack [Studer and Perrig 2009].
+
+6When using this setup LOT does not satisfy the no-spooﬁng requirement as deﬁned in Section 3.3.1 since
+the tunnels are not established.
+
+ACM Transactions on Information and System Security, Vol. 15, No. 2, Article 6, Publication date: July 2012.
+
+LOT: A Defense Against IP Spooﬁng and Flooding Attacks
+
+6:17
+
+Fig. 13. Coremelt simulation results when simulating an attacker with 128 kbps per bot. The graph pro-
+vides the conﬁdence interval at a level of 95% for each measurement.
+
+The Coremelt attack generates excessive trafﬁc between zombies located in various
+points on the Internet, overloading a speciﬁc core router.
+
+A LOT gateway monitors the amount of trafﬁc it receives7 from each tunnel and
+periodically informs the corresponding peer gateway; when a gateway receives a valid
+notiﬁcation (validity check is similar to that of near-source quota requests), it compares
+the speciﬁed amount with the amount of data sent to the notiﬁer’s network block.
+If the notiﬁcation indicates that a signiﬁcant portion of the trafﬁc did not reach the
+destination, then a congestion on the route is detected; in this event a gateway can
+actively relieve the congested route.
+
+So far, we have only experimented with a simple method where the sending gate-
+way reduces congestion within the tunnel by arbitrarily discarding packets sent to the
+notiﬁer’s network block.8 When the sending gateway identiﬁes congestion, it measures
+the portion of trafﬁc that does not reach the receiving-end gateway; this portion equals
+the probability that the gateway will discard an outgoing packet.
+
+We used the Coremelt attack simulator generously provided by the authors of
+Studer and Perrig [2009] to test the effect of this method during the attack. Similarly
+to their measurements, we assumed that bots distribute between ASs as in the GT-
+DDoS attack, and used the portion of ASs that experience packet loss as an indication
+of the destructiveness of the attack. We integrated LOT into the Coremelt simulator:
+random ASs deployed LOT, when a LOT deploying AS identiﬁes a congestion on a
+tunnel to some other LOT deploying AS it randomly discards exiting trafﬁc on that
+tunnel as described in the preceding.
+
+We conducted our measurements for different LOT penetration rates. Our results,
+illustrated in Figure 13, indicate that when the penetration rate is signiﬁcant, it is
+much harder to perform the Coremelt attack. For example, when LOT is deployed on
+70% of ASs, in order to cause loss at 80% of the ASs, the attack requires triple the
+number of bots.
+
+7. DESIGN AND IMPLEMENTATION: ENCAPSULATION AND FILTERING
+When the handshake completes and a tunnel is established, LOT begins to provide
+security beneﬁts. In this section we ﬁrst describe how LOT derives the parameters for
+the tunnel: the tag and the minimal MTU across the tunnel. Then we describe LOT
+packet structure and discuss how LOT encapsulates and decapsulates trafﬁc. Last, we
+present an empirical performance assessment of LOT’s tunneling mechanism.
+
+7If there are multiple gateways to a network, the gateway must query all other gateways for the trafﬁc they
+received.
+8Further research is required to determine the appropriate reaction when congestion is detected.
+
+ACM Transactions on Information and System Security, Vol. 15, No. 2, Article 6, Publication date: July 2012.
+
+6:18
+
+Y. Gilad and A. Herzberg
+
+7.1. Tunnel Establishment, Maintenance, and Revalidation
+When the handshake completes, the last cookies that the participating gateways ex-
+change are saved and used as session keys. LOT derives outgoing and incoming peri-
+odic tags from the two session keys (the last cookie sent and received). The periodic
+tags are derived simply by: PeriodicTag = PRFSessionKey(i), where PRF is a pseudoran-
+dom function and i is the current period index (calculated according to the difference
+between the current time and the tunnel creation time).
+
+7.1.1. Credentials Expiration and Renewal. Every constant time interval, T, the tunnel
+is revalidated and the session key is refreshed. This happens only if during the inter-
+val T the tunnel was active; otherwise, the credentials expire and the tunnel is torn
+down. Namely, the network block validation is repeated, but only if at least a constant
+number of π encapsulated packets were sent between the peers during the last pe-
+riod. The n challenges that each participating gateway sends during the revalidation
+session contain an additional authentication, ﬁeld which speciﬁes the current (outgo-
+ing) periodic tag. This allows the recipient to validate that the remote peer does not
+change. When a challenge is not provided with a valid response within a reasonable
+delay it is resent (in contrast to the initial handshake, the sender keeps state); we
+allow up to r(n) ∈ (n) retransmissions of the same challenge, before terminating this
+iteration of network block validation. If the periodic network block validation fails,
+a new validation session starts immediately; we allow up to R(n) ∈ (n) consecutive
+failed validation sessions before terminating the renewal process.9 When the process
+completes, new session keys are established (the current periodic tag is still used until
+it expires).
+
+7.1.2. Tunnel Maximum Transfer Unit Discovery. Once periodic tags are created, the gate-
+ways perform an authenticated tunnel maximum transfer unit (TMTU) discovery pro-
+tocol to detect the minimal MTU across the tunnel. This is similar to the classic path
+MTU discovery process described in Mogul and Deering [1990]. However, in the au-
+thenticated version each packet begins with the periodic tag. This allows the recipient
+of the ICMP [Postel 1981a] type 3 code 4 (host unreachable, fragmentation needed)
+feedback to validate its authenticity, since the feedback will also contain an echo of the
+periodic tag.
+
+ICMP messages are often blocked; therefore, LOT also supports an authenticated
+binary search to discover the minimal MTU along the route. In this process, gateways
+detect the TMTU by sending packets of different lengths (binary search) and detecting
+the longest size packet that receives a response from the remote gateway; packets and
+their responses are authenticated using LOT credentials to foil spoofed responses. The
+TMTU discovery process is repeated periodically to adjust the TMTU for changes in
+the network.
+
+When a packet that requires encapsulation reaches the gateway, it ﬁrst checks
+whether the size of the packet with the addition of the encapsulation header would
+exceed the TMTU. In this case, if the do not fragment (DF) ﬂag is set, then the gateway
+sends back to the host an ICMP fragmentation needed feedback, allowing the sender
+to learn the maximal size allowed (TMTU minus encapsulation header size). If the
+DF ﬂag is cleared, then the gateway fragments the packet before encapsulation and
+sets the DF in each encapsulated fragment. This approach is known as prefragmen-
+tation and is adopted by some vendors (e.g., Cisco Systems [2007]); it avoids in-tunnel
+fragmentation and related problems (e.g., see Kent and Mogul [1987], Kaufman et al.
+[2003], Heffner et al. [2007], and Gilad and Herzberg [2011a]).
+
+9The lower asymptotic bounds on r(n), R(n) allow proof that LOT tunnels are torn down because of packet
+loss with negligible probability, see Section 8 and online technical report Gilad and Herzberg [2011b].
+
+ACM Transactions on Information and System Security, Vol. 15, No. 2, Article 6, Publication date: July 2012.
+
+LOT: A Defense Against IP Spooﬁng and Flooding Attacks
+
+6:19
+
+7.1.3. Tunnel Revalidation. An attacker that obtains temporary control over a network
+block can set up tunnels with other LOT peers. When the attacker loses control over
+the network block, communication to and from the network block is disrupted until
+LOT tunnels are torn down at the next periodic tunnel validation. Furthermore, in this
+case, the attacker will still be able to send spoofed packets specifying source addresses
+within that network block.
+
+This threat is especially critical for small network blocks, where it is possible to
+obtain short-term DHCP leases over all or most of the consecutive addresses; this
+allows an attacker to pass the network block validation successfully. The tiny network
+block attack is also relevant for other opportunistic protocols, e.g., BTNS [Williams
+and Richardson 2008; Touch et al. 2008] that form IPsec tunnels with single hosts.
+
+We provide a solution to this threat by revalidating LOT tunnels when a nonen-
+capsulated packet arrives from a host within a small network block. In this case the
+receiving gateway, GWA, discards the packet, but with probability q (the same prob-
+ability of sending a Hello Response; see Section 4) GWA also sends a challenge to
+the source address. If the tunnel is still valid, then the remote gateway (GWB) can
+intercept the challenge and respond. If it does not reply after r(n) retransmissions,
+as would be the case in the “tiny network block” attack, GWA tears down the LOT
+tunnel. We allow only one revalidation session for a particular tunnel every  > 0 sec-
+onds; in practice,  is usually short and similar to the round trip time between tunnel
+endpoints.
+
+7.2. Encapsulated Packet Structure
+LOT tunnels are transparent: encapsulated trafﬁc keeps the original source and
+destination addresses. This allows load distribution between multiple gateways of a
+network such as NetblockA in Figure 4. However, the IP header and data are modiﬁed
+when LOT encapsulates a packet. The notable changes to the original packet are
+described in the following.
+
+IP ﬂags. LOT does not allow fragmentation of encapsulated packets within a tun-
+
+nel. Therefore, in encapsulated packets, the DF is set and the MF ﬂag is unset.
+
+Transport layer protocol. The ﬁeld (speciﬁed in the IP header) is modiﬁed to indi-
+cate that the packet is encapsulated by LOT. Encapsulation is not always mandatory:
+at certain times LOT gateways may pass incoming nonencapsulated trafﬁc even if it
+speciﬁes a source address that belongs to a validated network block (e.g., to eliminate
+LOT’s overhead while not under DoS attack). The protocol ﬁeld distinguishes between
+such non-LOT trafﬁc and encapsulated packets that should be decapsulated ﬁrst.
+Furthermore, the change in the protocol ﬁeld ensures that if an encapsulated packet
+reaches its destination without proper decapsulation, it will be discarded and will not
+reach the application.
+
+LOT header. A LOT header is attached to the packet, its most signiﬁcant ﬁeld is
+the outgoing periodic tag. Additional ﬁelds include data required for reconstruction of
+the original packet (original IP ﬂags and transport protocol) and optionally, parame-
+ters that allow the receiving-end gateway to reconstruct the session key (using PRF
+and his secret key) and the speciﬁed tag. Tag reconstruction allows the gateway to val-
+idate that the packet is not spoofed without keeping state (stateless one-way tunnel)
+similarly to challenge-reconstruction during the network block validation phase.10 We
+provide a full description of the LOT header as well as further details on the stateless
+option in an online technical report [Gilad and Herzberg 2011b].
+
+10When using this setup, LOT does not satisfy the nonspooﬁng requirement as deﬁned in Section 3.3.1 since
+only one side can ﬁlter spoofed trafﬁc.
+
+ACM Transactions on Information and System Security, Vol. 15, No. 2, Article 6, Publication date: July 2012.
+
+6:20
+
+Y. Gilad and A. Herzberg
+
+Fig. 14. Performance evaluation environment. Link capacities are speciﬁed in Mbit/second, except for Al’s
+capacity, which is speciﬁed as c, since it varies between measurements.
+
+7.3. Tunneling
+This section describes LOT encapsulation and decapsulation mechanisms.
+
+7.3.1. Encapsulation. When a gateway forwards a packet from a host in its network, it
+ﬁrst identiﬁes whether there is a tunnel established with the packet’s destination. If
+found, the gateway checks whether the packet matches a near-source quota or ﬁlter re-
+quest of the receiving-end gateway (see details in Section 6.1). If there is a match, then
+the gateway processes the packet according to the quota or ﬁlter; otherwise, the gate-
+way veriﬁes that the corresponding encapsulated packet would not exceed the TMTU.
+If the packet is too long, the gateway either sends an ICMP feedback to the host or
+performs prefragmentation, depending on the DF ﬂag.
+
+If the destination IP address is not included in any validated address block (see
+Section 5), then LOT forwards the packet as it was received and sends a Hello Request
+with probability p (see Section 4 for details).
+
+7.3.2. Decapsulation. When a gateway receives a packet to forward to a host in its
+own network block, it checks whether a tunnel is established with the packet’s source.
+If there is no tunnel, or encapsulation is not mandatory (and the packet is not en-
+capsulated), then it forwards the packet to the destination. Otherwise, the gateway
+decapsulates the packet, and forwards to the destination only if it speciﬁes a valid tag.
+If the packet is not encapsulated, but should be, then LOT revalidates the tunnel with
+probability q.
+
+7.4. Performance Evaluation
+We used our prototype implementation to evaluate the performance of the LOT tun-
+neling mechanism in the network environment as illustrated in Figure 14. Our evalu-
+ation compares LOT tunneling with plain communication (no tunnel) and IPsec tunnel
+(Linux built-in implementation) with HMAC SHA1 for authentication and null encryp-
+tion (i.e., authentication only).
+
+We tested the effect of using LOT, Ipsec, and plain communication on a TCP con-
+nection when the link between the networks is loaded with legitimate trafﬁc. Both
+gateways, GWA and GWB in Figure 14, encapsulated the communication using LOT,
+IPsec (HMAC authentication), or simply forwarded it without encapsulation (plain
+communication). In order to load the bandwidth, we sent UDP packets at different
+rates from Al to Barbara; we used two different packet lengths: ﬁrst, we tested with
+1400-byte-long packets (to avoid fragmentation-related overheads); second, we tested
+for 300-byte-long packets to illustrate what we consider a typical deployment scenario
+for LOT: DNS servers, which usually send and receive rather short packets. We eval-
+uated the performance by timing the transfer time of a ﬁle from Alice to Bob.
+
+Our LOT prototype uses the netﬁlter open source package in order to capture and
+handle (encapsulate/decapsulate) packets. The use of this package comes with a cer-
+tain overhead as it is not built into Linux packet processing. In order to measure
+LOT’s overhead, we used netﬁlter to capture and immediately forward (without han-
+dling) packets when testing the plain communication scenario. Before running the
+
+ACM Transactions on Information and System Security, Vol. 15, No. 2, Article 6, Publication date: July 2012.
+
+LOT: A Defense Against IP Spooﬁng and Flooding Attacks
+
+6:21
+
+Fig. 15. Plain communication, LOT, and IPsec performance comparison.
+
+tests on LOT and IPsec, we ensured that the tunnels were already set up to avoid the
+initial overhead.
+
+The results, illustrated in Figure 15, show that LOT’s overhead is rather small
+comparing with IPsec, but is slightly larger than with no tunneling at all.11 The more
+packets sent between the networks, the higher the load on the network gateways and
+the more distinct is the difference in performance between plain communication, LOT,
+and IPsec.
+
+When the packet size increases, all mechanisms perform better, since there are
+fewer packets. However, LOT and plain communication improve better than IPsec
+since they perform constant time processing on each packet while IPsec performs
+HMAC authentication; i.e., processes all packet bytes.
+
+Finally, we measured the average latency that LOT encapsulation and decapsula-
+tion add and found that it is less than 10 microseconds per packet on 3GHz dual core
+PC processors used as the tunnel gateways.
+
+8. SECURITY ANALYSIS
+In this section we discuss the security properties of LOT. The following sections
+sketch the proofs for the requirements presented in Section 3.3, according to the
+communication and adversary model presented in Sections 3.1 and 3.2. The main
+ideas are presented here; the full proofs are in an online technical report [Gilad and
+Herzberg 2011b].
+
+8.1. Packet Source Authentication (No Spooﬁng)
+The proof that LOT meets the no-spooﬁng requirement (see Section 3.3.1) has three
+steps: ﬁrst, in Lemma 8.1 we show that there is almost always a LOT tunnel estab-
+lished between two τ well-connected peer LOT-gateways (see deﬁnition in Section 3.2).
+Second, we show in Lemmas 8.2 and 8.3 that if Gs and Gd ∈ Gs.next(d) are two τ
+well-connected peer LOT-gateways that established a tunnel, then a message m that
+speciﬁes a source s ∈ NB(Gs) and reaches its destination d ∈ NB(Gd) can be sent by
+hosts in one of two speciﬁc address sets. Last, Theorem 8.4 proves the requirement.
+
+LEMMA 8.1. If G1, G2 are two τ well-connected peer LOT-gateways, then there exists
+a polynomial t(n) such that the probability that there is no tunnel between G1 and G2 at
+time τ t(n) from beginning of execution is negligible in n, the number of iterations during
+the network block validation phase.
+
+11The relative overall improvement in results from those presented in Figure 12 (e.g., compare when Al and
+Eve’s capacities are 0) is due to transition to a full physical model for the performance evaluation.
+
+ACM Transactions on Information and System Security, Vol. 15, No. 2, Article 6, Publication date: July 2012.
+
+6:22
+
+Y. Gilad and A. Herzberg
+
+PROOF. The run time is divided into periods where there is and is not a tunnel
+established between G1 and G2. In the ﬁrst part of the proof we show that there exists
+a polynomial t(n) ∈ O(n) such that a tunnel was established after time τ t(n) with
+overwhelming probability12 in n. The second part of the proof shows that after a tunnel
+was established once between two gateways, the probability that it is not established
+(torn down) at a particular later time, is negligible. For simplicity, we assume that G1
+and G2 are the only gateways of their network blocks and that they use identical p, q
+probabilities to initiate the handshake; we avoid these assumptions in the technical
+report.
+
+The tunnel is established when the handshake completes. The handshake initiates
+when a message is sent from one gateway to the other with probability of at least
+pq(1 − )2; i.e., both Hello Request and Response messages are sent and neither of
+them is lost.13 Next, the network block validation phase takes place: G1, G2 exchange
+2n messages (challenges and responses), this phase completes if no message is lost,
+i.e., with probability of at least (1 − )2n. Thus, the probability pest, that a message
+initiates a successful handshake, and a tunnel is established, is at least pq(1 − )2n+2.
+Since G1 and G2 are τ well-connected, NB(G1) and NB(G2) are τ periodically com-
+municating (see Deﬁnitions 3.1, 3.2), therefore in every interval of length τ, at least
+one message is sent from G1 to G2 or vice versa. Let ˜t(n) = n; at time τ˜t(n) there have
+been at least nτ
+τ = n messages sent between G1 and G2. The handshake takes up to 2nδ
+seconds to complete; let t(n) = t(n) + 2nδ
+τ , the probability that no tunnel was established
+until time τ t(n) = nτ +2nδ is at most (1− pq(1−)2n+2)n. It holds that 1− pq(1−)2n+2 < 1
+(since 0 ≤  < 1); therefore, there exists a 0 < c < 1 such that (1 − pq(1 − )2n+2)n < cn;
+i.e., the probability that no tunnel was established is negligible in n.
+Once established, the tunnel is torn down if a periodic validation session that is
+repeated every T seconds, fails. Additionally, the adversary can initiate a tunnel
+revalidation every  seconds, that tears down the tunnel if it fails (see Section 7.1).
+We analyze these scenarios in the technical report Gilad and Herzberg [2011b], where
+we also bound pprd and padv, the probabilities that a periodic validation and tunnel
+revalidation fail (respectively).
+
+Tunnel establishment, periodic validations, and tunnel revalidation are discrete
+events that may occur once every τ, T, and  seconds respectively. We assume that
+T, τ ≥  and that there exist two integers k1, k2 such that T = k1, τ = k2 (the
+full proof in the technical report avoids these assumptions). We view the tunnel state
+as a Markov process that transits between states every  seconds, see illustration
+in Figure 16.14 Let πt, πnt denote the probabilities that there is and is not a tunnel
+between G1, G2; i.e., the probability that the tunnel is in T.∗ and NT.∗ states (see
+Figure 16); the following invariant equations hold.
+(1) πt + πnt = 1
+(2) πnt = πt · padv + 1
+
+πnt · (1 − pest)
+
+πt · pprd + 1
+
+k1
+
+k2
+
+From the two invariant equations, we conclude that πnt =
+
+. The
+remainder of this proof uses the bounds for pest, pprd, padv to bound πnt and shows that
+πnt is negligible in n. The technical report Gilad and Herzberg [2011b] includes the
+details.
+
+1− 1
+k2
+
+pprd
+
+pprd
+
+padv+ 1
+k1
+(1−pest)+padv+ 1
+k1
+
+12An event occurs with overwhelming probability if the probability that it does not occur is negligible.
+13The inequality exists since  bounds, but does not necessarily equal, the loss probability.
+14We conduct a worst case analysis, where we assume that the adversary initiates tunnel revalidation every
+ seconds (to tear down the tunnel) and exactly one packet is sent between the gateways every τ seconds
+(to initiate the handshake).
+
+ACM Transactions on Information and System Security, Vol. 15, No. 2, Article 6, Publication date: July 2012.
+
+LOT: A Defense Against IP Spooﬁng and Flooding Attacks
+
+6:23
+
+Fig. 16. A Markov chain that represents the tunnel state.
+where a tunnel is not established.
+
+In T.∗ a tunnel is established, NT.∗ are states
+
+LEMMA 8.2. Let s, d be two hosts, and Gs, Gd be two τ well-connected peer LOT-
+gateways, such that Gd ∈ Gs.next(d) and the following holds: d ∈ NB(Gd) ∧ s ∈ NB(Gs);
+e.g., see gateways Gs = B, Gd = E in Figure 5.
+Let η denote the security parameter of the PRF used to create the tunnel session
+key and tags (see Section 7.1) and let λ denote the length of the tag. There exists a
+polynomial t(n) such that the following holds: assume that d receives a message m after
+time τ t(n) with source address s, then the probability that m was sent by a host in
+NB(Gs) ∪ NB(Gd) is overwhelming in n, η and λ.
+
+PROOF. Let h be a corrupt host such that h (cid:7)∈ NB(Gs) ∪ NB(Gd). Assume by con-
+tradiction that h, who is controlled by an α-neighborhood PPT adversary, Eve, is able
+to send the spoofed message m with source s that d will receive with nonnegligible
+probability.
+
+By Lemma 8.1, there exists a polynomial t(n) such that Gs and Gd have a tunnel
+established after time τ t(n) except with negligible probability in n; in the remainder
+of this discussion we assume that such a tunnel is established. Since h (cid:7)∈ NB(Gs) ∪
+NB(Gd), no gateway associated with NB(Gs) receives m (to encapsulate); but a gateway
+associated with NB(Gd) receives m before d. According to our construction of LOT in
+Section 7.3.2, that gateway does not discard m only if it speciﬁes a valid PeriodicTag =
+PRFSessionKey(i); where SessionKey = PRFk(remote netblock||time||n||n).
+We assume for simplicity that the length of SessionKey equals η. Let r ∈R {0, 1}η; it
+follows that Eve can either distinguish between the session key and r, or that Eve can
+distinguish between PRFr(i) and f (i), where f is a random function with output length
+identical to PRF. These events are negligible in the security parameters η, λ. The
+technical report Gilad and Herzberg [2011b] includes the formal proof of this claim.
+
+LEMMA 8.3. Let s, d be two hosts, and Gs, Gd be two τ well-connected peer LOT-
+gateways, s.t. Gd ∈ Gs.next(d) and the following holds: either s (cid:7)∈ NB(Gs) or d (cid:7)∈ NB(Gd)
+(but not both), e.g., see gateways Gs = A, Gd = B in Figure 5.
+There exists a polynomial t(n) such that the following holds: assume that d receives
+a message m after time τ t(n) with source address s, then the probability that m was
+sent by a host in NB(Gs) \ NB(Gd) ∪ NB(Gd) \ NB(Gs) is negligible in n, η and λ (see
+deﬁnition of η, λ in Lemma 8.3).
+
+The proof of Lemma 8.3 is similar to that of Lemma 8.2, see technical report Gilad
+
+and Herzberg [2011b].
+
+THEOREM 8.4. LOT satisﬁes the packet source authentication requirement (see
+
+Section 3.3.1).
+
+ACM Transactions on Information and System Security, Vol. 15, No. 2, Article 6, Publication date: July 2012.
+
+6:24
+
+Y. Gilad and A. Herzberg
+
+i=1, where G1 ∈ s.next(d), Gi+1 ∈
+PROOF. Let l = hops(s, d) − 1; G denote the set {Gi}l
+Gi.next(d). During the proof, we conduct a handful of set operations on network blocks
+associated with gateways in the set G; we omit the NB notation for readability. By our
+deﬁnition of the “next” operation, there exists 0 ≤ l(cid:4) ≤ l such that for every 1 ≤ i <
+l(cid:4), Gi ⊂ Gi+1 and for every l(cid:4) < i < l, Gi+1 ⊂ Gi (e.g., l(cid:4) = 2 in Figure 5).
+Let h denote the sender of a message with source address s, that reaches d. If d /∈ Gd,
+then l(cid:4) = l. In this case G1 ⊂ G2 ⊂ ··· ⊂ Gl. We apply Lemma 8.3 on every pair of
+sequential gateways and get that h /∈ Gl \ G1. Similarly, if s /∈ Gs, then l(cid:4) = 0 and
+h /∈ G1 \ Gl. Namely, in these cases no-spooﬁng is satisﬁed.
+Therefore, we assume that s ∈ Gs and d ∈ Gd; in this case, 0 < l(cid:4) < l and by Lemma
+8.3: h /∈ Gl(cid:4) \ G1 and h /∈ Gl(cid:4)+1 \ Gl. Consider the gateways Gl(cid:4) , Gl(cid:4)+1 (gateways B, E in
+Figure 5): by our construction, s ∈ Gl(cid:4) , d ∈ Gl(cid:4)+1; from Lemma 8.2 we obtain another
+restriction on h: h ∈ Gl(cid:4) ∪ Gl(cid:4)+1.
+We combine the restrictions on h: h ∈ (Gl(cid:4) ∪ Gl(cid:4)+1)\ ((Gl(cid:4) \ G1)∪ (Gl(cid:4)+1 \ Gl)) = G1 ∪ Gl.
+Since NB(G1) = NB(Gs) and NB(Gl) = NB(Gd), we get that h ∈ Gs ∪ Gd.
+Since we use Lemmas 8.2 and 8.3, all restrictions on h hold except with negligible
+probability in LOT security parameters (n, η, λ), as the requirement allows.
+
+8.2. Conﬁdentiality
+In this section we sketch the proof of the conﬁdentiality requirement presented in
+Section 3.3.2.
+Consider a run of the protocol and let V be the adversary’s view; i.e., the set of all
+messages that the he receives. For every message m sent from one host to another,
+LOT does not change the destination address; the only hosts that receive mb are s, d,
+which are not corrupt. Since the adversary only receives messages that reach corrupt
+hosts, his view is identical for either value of b (for either message sent; see conﬁ-
+dentiality experiment in Section 3.3.2). The adversary is blind and does not learn
+anything on messages he does not receive; thus, the probability that the experiment
+for the conﬁdentiality requirement returns 1 (adversary outputs b) is 1
+
+2 as required.
+
+8.3. Availability
+In this section we sketch the proof of the conﬁdentiality requirement presented in
+Section 3.3.3.
+
+LOT does not change the number of hops that a message traverses from its source
+to the destination, since the tunnel is transparent. Thus, if a message sent at time t
+from source s arrives at a destination d, then it arrives at time t + δhops(s, d), at the
+latest.
+
+Let m be a message sent by s to d and let LOT(m) denote the encapsulated version
+of m. We calculate the probability that m does not arrive at d. This happens if one of
+the two following events occurs.
+(1) m or LOT(m) is lost on a link between s and d;
+(2) a LOT-gateway discards LOT(m).
+
+Since  bounds the loss probability between two peers, the ﬁrst event occurs with
+
+probability of at most 1 − (1 − )hops(s,d).
+We compute the probability that the second event occurs and show that it is negli-
+gible. Let G be a LOT-gateway; G discards LOT(m) only in the case that both of the
+following hold.
+(1) There is a tunnel between NB(G) and a network block, netblock, and s ∈ netblock;.
+(2) LOT(m) does not specify a valid periodic tag (according to the tunnel).
+
+ACM Transactions on Information and System Security, Vol. 15, No. 2, Article 6, Publication date: July 2012.
+
+LOT: A Defense Against IP Spooﬁng and Flooding Attacks
+
+6:25
+
+By our construction of LOT, the preceding occurs if and only if the adversary has es-
+tablished the tunnel between netblock and NB(G). For any α-neighborhood adversary,
+the probability that the adversary completes the handshake with G is negligible in n,
+the number of iterations during the network block validation protocol (see analysis in
+Section 5.2). This argument is true for any of the hops(s, d)−1 peer LOT-gateways that
+a message from s to d traverses.
+Therefore, there exists a negligible function negl such that the probability that any
+LOT-gateway discards LOT(m) before it reaches d, is at most negl(n). The probability
+that a message sent from s does not arrive at d is at most 1 − (1 − )hops(s,d) + negl(n),
+as required.
+
+9. RELATED WORKS
+LOT is secured only against noneavesdropping adversaries; there are several works on
+preventing attackers from obtaining such abilities, many of whom suggest mechanisms
+deployed on BGP routers, including Heffernan [1998], Kent et al. [2000], White [2003],
+Aiello et al. [2003], Karlin et al. [2006], and Lad et al. [2006].
+
+Our work is related to previous works on lightweight and opportunistic security
+protocols, including methods for tagging trafﬁc and identifying spoofed packets. LOT
+is also related to methods for identifying and mitigating network-level DoS attacks.
+
+9.1. Opportunistic Tunnels
+Two notable opportunistic protocols to establish IPsec tunnels have been proposed:
+Opportunistic IKE and BTNS. Both use methods different from LOT to validate the
+remote peer. We brieﬂy discuss both of these proposals below.
+
+Opportunistic IKE was proposed by the FreeS/WAN project [Gilmore 2003] and is
+documented in Richardson and Redelmeier [2005] and Richardson [2005]. The speci-
+ﬁcation requires the network administrator to place a reverse DNS record that maps
+to the network’s gateway address and its public key. The initiator retrieves the DNS
+record and uses the fetched conﬁguration to start the IKE negotiation.
+
+The opportunistic IKE proposal has several shortcomings. First, each connection
+initiation requires a reverse DNS query resolution, which presents a signiﬁcant
+overhead for connections with legacy systems that do not implement Richardson and
+Redelmeier [2005]; this may even be exploited as a DDoS vector. Second, deploying
+opportunistic IKE requires control over the reverse DNS server and additional
+management effort, which is not always feasible (e.g., for home networks).
+
+The Better Than Nothing Security (BTNS) group proposed another solution to
+IPsec’s deployment problem, using a concept they call Leap of Faith. Namely, the
+BTNS protocol is an unauthenticated mode of IPsec [Touch et al. 2008; Williams and
+Richardson 2008], where the identity of the remote peer is never validated; however,
+it remains the same throughout the entire connection. This means that the protocol
+is vulnerable to MitM attacks upon the negotiation of the connection; but once the
+handshake completes successfully, the connection is secure.
+
+The BTNS protocol is rather different from LOT. It is designed to be deployed at
+hosts, as compared to LOT, which is gateway to gateway. Additionally, as opposed to
+LOT, BTNS is not designed to be resilient to DoS attacks due to increased compu-
+tation, as recognized in Touch et al. [2008]. Moreover, an attacker may form BTNS
+tunnels from ephemeral IP addresses (e.g., with DHCP), disrupting communication
+with a host that obtains the same IP address in the future. However, as long as the
+handshake completes successfully, BTNS uses cryptography (IPsec) to protect against
+a MitM attacker, while LOT only protects against spooﬁng adversaries.
+
+ACM Transactions on Information and System Security, Vol. 15, No. 2, Article 6, Publication date: July 2012.
+
+6:26
+
+Y. Gilad and A. Herzberg
+
+9.2. Spoofed Trafﬁc Filtering
+LOT attaches a random identiﬁer (tag) to packets to identify their source; this is much
+like IKE and TCP cookies [Bernstein 1996; Kaufman 2005], Stateless Internet Flow
+Filter (SIFF) [Yaar et al. 2004], and the φ-ﬁltering mechanism [Badishi et al. 2007,
+2008]. However, LOT’s opportunistic and hop by hop mechanisms are innovative.
+IPsec [Kent and Seo 2005] can also be employed as a lightweight mechanism to pre-
+vent (just) IP spooﬁng by using randomly-chosen SPI values, and without encryption
+or message authentication. However, during the handshake phase, using IPsec results
+in signiﬁcantly more overhead than LOT.
+
+There are different approaches for identifying and discarding spoofed trafﬁc. The
+ﬁrst approach that we discuss is route-based. SAVE [Ehrenkranz et al. 2010; Li et al.
+2008] and RBF [Park and Lee 2001] follow this approach and identify spoofed pack-
+ets according to their incoming interface and previous hop (respectively). Another
+route-based ﬁlter is Hop-Count Filtering (HCF) [Wang et al. 2007a], which identiﬁes
+spoofed packets according to their TTL value. Note that once an attacker learns a
+valid value for a TTL (for a speciﬁc source), he can adjust the initial TTL value in
+the spoof packets that he sends (which specify the address of that source) and pass
+HCF defenses. In SAVE, RBF, and HCF, a router ﬁrst observes and studies network
+trafﬁc and then ﬁlters unwanted (spoofed) packets. These methods identify spoofed
+packets according to local information available to the deploying router, while LOT
+requires tagging at the source network. This eases their deployment, but reduces
+their accuracy, since packets from a source to a destination may traverse different
+routes.
+
+Ingress and egress ﬁltering [Killalea 2000] are usually deployed at ISPs to discard
+spoofed trafﬁc based on physical interfaces as well. These ﬁlters are very accurate,
+but are only effective against spoofed trafﬁc that originates from the ISP’s own clients
+(ingress ﬁltering), or trafﬁc that arrives from the outside, but speciﬁes a source address
+within the ISP’s network (egress ﬁltering). LOT ﬁlters spoof trafﬁc that originates out-
+side of a gateway’s network and speciﬁes an arbitrary source address, but cooperates
+with the gateway of the speciﬁed source. LOT is complementary to, and can be de-
+ployed with, route-based ﬁlters.
+
+The Spooﬁng Prevention Method (SPM) [Bremler-Barr and Levy 2005] relies on
+capabilities. A unique key is associated with each pair of source and destination
+networks, and each packet is tagged with the corresponding key. This allows receiving-
+end gateways to verify the key and thereby the authenticity of a packet’s source ad-
+dress. This is contrary to LOT, which allows the ﬁrst LOT router on the path to ﬁlter
+the spoofed packet.
+9.3. Mitigation Techniques for Network Level Denial of Service
+In this article we proposed near-source ﬁltering techniques to mitigate DoS attacks.
+Argyraki and Cheriton [2005a, 2005b] suggest a technique of that type as well; their
+method uses the route record IP option [Postel 1981b] to identify and ﬁlter malicious
+ﬂows by their source. This method is similar to packet-marking techniques (e.g.,
+Snoeren [2001] and Dean et al. [2002]) which where ﬁrst considered in [Savage et al.
+2000] and later improved [Song and Perrig 2001]. In these techniques, nodes along the
+route attach marks to traversing trafﬁc. The marks allow the recipient to identify and
+ﬁlter malicious ﬂows. However, these methods require deployment at core Internet
+routers and ISPs (c.f. LOT); as a result, there has been much reluctance to deploy
+them.
+
+Bellovin [2003] proposed ICMP traceback, a mechanism deployed on routers; the
+routers occasionally send an ICMP indication when forwarding a packet to its destina-
+tion. This allows the recipient to infer a packet’s route and ﬁlter trafﬁc that appears
+
+ACM Transactions on Information and System Security, Vol. 15, No. 2, Article 6, Publication date: July 2012.
+
+LOT: A Defense Against IP Spooﬁng and Flooding Attacks
+
+6:27
+
+to be spoofed. However, ICMP is prone to abuse and is therefore often blocked; fur-
+thermore, this mechanism requires deployment on Internet routers. These prevent
+widespread deployment of ICMP traceback.
+
+Capability-based mechanisms [Anderson et al. 2004; Bremler-Barr and Levy 2005;
+Yaar et al. 2004; Yang et al. 2008] only allow sources that obtained capabilities for a
+speciﬁc destination to send data to it. Such approaches are subject to DoS attacks, as
+pointed out in Argyraki and Cheriton [2005b]. Namely, the attacker ﬂoods the recip-
+ient with capability-request messages, thereby exhausting the control channel, hence
+preventing legitimate senders from obtaining capabilities. Furthermore, these do not
+prevent authorized, but malicious, hosts from passing massive amounts of trafﬁc be-
+tween them. Such attacks were considered in Sherwood et al. [2005] and Studer and
+Perrig [2009]; these attacks congest a link on the route between malicious entities
+with “legitimate” trafﬁc, denying others from using that link. LOT addresses these
+issues, as its opportunistic approach implies that tunneling is not mandatory for send-
+ing data; furthermore, LOT employs mechanisms to detect and mitigate congestion
+along the route.
+
+LOT allows ﬁltering of malicious trafﬁc near its source (see Section 6.1); this ap-
+proach was previously suggested by Ioannidis and Bellovin [2002], Huici and Handley
+[2007], and Wang et al. [2007b]. We brieﬂy discuss these suggestions in the following.
+Ioannidis and Bellovin [2002] propose a push-back methodology, where routers de-
+tect and discard malicious packets by heuristics. Then, the routers notify upstream
+routers to do the same (hence push-back), allowing legitimate trafﬁc to pass through
+the congested link. In LOT, which works hop by hop, the ﬁrst router that encounters
+a spoofed packet, is able to identify and ﬁlter it. Furthermore, LOT employs mecha-
+nisms that allow upstream gateways to identify congestion on their own, and does not
+require deployment on core Internet routers.
+
+A scheme presented in Huici and Handley [2007] suggests an IP-in-IP tunneling
+mechanism deployed at the ISP level. Packets from one ISP to the other are encapsu-
+lated and the new IP header speciﬁes the decapsulator at the receiving ISP as the new
+destination. When an attack is identiﬁed at the receiving end, the decapsulator sends
+a ﬁlter request to the corresponding source of the tunnel (encapsulator). LOT tunnels
+are unique in the sense that they are transparent; i.e., do not change the source and
+destination addresses, and network routing, in order to ﬁlter unwanted trafﬁc.
+
+PATRICIA [Wang et al. 2007b] is a cooperative mechanism where participating ASs
+share information about suspected malicious trafﬁc; this allows ﬁltering of such trafﬁc
+near its source.
+
+The latter two suggestions (Wang et al. [2007b] and Huici and Handley [2007]) are
+not opportunistic (cf. LOT): relations between cooperative parties (ISPs or ASs) must
+be set up in advance. Furthermore, these suggestions require signiﬁcant changes to
+deploying nodes: Huici and Handley [2007] require deployment at ISPs and Wang
+et al. [2007b] require trafﬁc regulators in ASs, deployment at BGP routers, and tunnel-
+aware end hosts. LOT is designed to be effective even when deployed only on edge
+gateways.
+
+10. CONCLUSIONS AND FUTURE WORK
+Despite substantial efforts to mitigate IP spooﬁng, it is still a signiﬁcant threat; many
+ISPs do not enforce ingress ﬁltering, and many clients are still able to send packets
+with spoofed source IP address. We showed that this problem can be solved efﬁciently,
+only requiring changes to edge networks and not at the ISP or core Internet router
+level; once the source of a packet is authenticated, different mechanisms can be em-
+ployed to effectively mitigate DoS attacks.
+
+ACM Transactions on Information and System Security, Vol. 15, No. 2, Article 6, Publication date: July 2012.
+
+6:28
+
+Y. Gilad and A. Herzberg
+
+We believe that our results show the potential of opportunistic mechanisms in im-
+proving security against realistic attackers. Many questions and challenges remain
+for future research, including the following.
+
+Trafﬁc quotas. We suggested the use of per-ﬂow quotas to mitigate DoS attacks. In
+our experiments we used speciﬁc parameters to deﬁne a per-ﬂow leaky bucket arrival
+curve. While we showed this method to be effective, further analysis is required as to
+how to deﬁne optimal parameters and change them dynamically with consideration of
+the current incoming trafﬁc.
+
+Near-source quotas/ﬁltering analysis. Analysis needs to be made as to the over-
+head of near-source mechanisms. Speciﬁcally, do they result in signiﬁcant overhead
+on the sender’s gateway? Should receiving-end gateways enforce these as well, or does
+relying on negative feedback (e.g., by the sender’s gateway) perform better?
+
+Congestion countermeasures. We showed how two LOT gateways can detect a
+congestion on the route between them. In our simulations, once detected, sending
+gateways discard packets probabilistically until congestion is relieved. However,
+this is only a basic mechanism; further research is required as to the appropriate
+countermeasure.
+
+Hardware implementation. We made efforts for LOT to be simple and efﬁcient.
+However, we only provide a software implementation. Can it be efﬁciently imple-
+mented in hardware to allow deployment on routers?
+
+Integration with existing ﬁrewalls. We consider our implementation a prototype; it
+
+would be very desirable to integrate LOT into an existing ﬁrewall product.
+
+ACKNOWLEDGMENTS
+
+Thanks to Amit Klein, Yaron Sheffer and the anonymous referees for their comments and suggestions, to
+Ahren Studer and Adrian Perrig for giving us their simulator code for the Coremelt attack. Special thanks
+to Yehoshua Gev for helping test LOT with the Coremelt attack and solve technical problems.
+
+REFERENCES
+ADVANCED NETWORK ARCHITECTURE GROUP. 2011. ANA Spoofer Project.
+
+http://spoofer.csail.mit.edu/index.php.
+
+AHARONI, M. AND HIDALGO, W. M. 2005. Cisco SNMP conﬁguration attack with a GRE tunnel. In Security
+
+Focus. http://www.securityfocus.com/infocus/1847.
+
+AIELLO, IOANNIDIS, AND MCDANIEL. 2003. Origin authentication in interdomain routing. In Proceedings
+
+of the 10th ACM Conference on Computer and Communications Security (SIGSAC). 165–178.
+
+ANDERSON, T. E., ROSCOE, T., AND WETHERALL, D. 2004. Preventing Internet denial-of-service with ca-
+
+pabilities. Comput. Comm. Rev. 34, 1, 39–44.
+
+ARGYRAKI, K. AND CHERITON, D. 2005a. Active Internet trafﬁc ﬁltering: Real-time response to denial-of-
+
+service attacks. In Proceedings of the USENIX Annual Technical Conference, General Track. 135–148.
+
+ARGYRAKI, K. AND CHERITON, D. 2005b. Network capabilities: The good, the bad and the ugly. In Proceed-
+
+ings of the 4th Workshop on Hot Topics in Networks.
+
+BADISHI, G., HERZBERG, A., AND KEIDAR, I. 2007. Keeping Denial-of-Service Attackers in the Dark. IEEE
+
+Trans. Depend. Secur. Comput. 4, 3, 191–204.
+
+BADISHI, G., HERZBERG, A., KEIDAR, I., ROMANOV, O., AND YACHIN, A. 2008. An empirical study of
+denial of service mitigation techniques. In Proceedings of the IEEE Symposium on Reliable Distributed
+Systems (SRDS). 115–124.
+
+BAKER, F. AND SAVOLA, P. 2004. Ingress ﬁltering for multihomed networks. RFC 3704 (Best Current Prac-
+
+tice). The Internet Society.
+
+BELLOVIN, S. 2003. ICMP traceback messages. http://tools.ietf.org/html/draft-ietf-itrace-04.
+BERNSTEIN, D. 1996. TCP SYN cookies. http://cr.yp.to/syncookies.html.
+BEVERLY, R. AND BAUER, S. 2005. The Spoofer Project: Inferring the extent of source address ﬁltering on
+the Internet. In Proceedings of Steps to Reducing Unwanted Trafﬁc on the Internet Workshop (SRUTI).
+BREMLER-BARR, A. AND LEVY, H. 2005. Spooﬁng Prevention Method. In Proceedings of the Annual Joint
+
+Conference of the IEEE Computer and Communications Societies (INFOCOM). 536–547.
+
+CHANG, R. 2002. Defending against ﬂooding-based distributed denial-of-service attacks: A tutorial. IEEE
+
+Comm. Mag. 40, 42–51.
+
+ACM Transactions on Information and System Security, Vol. 15, No. 2, Article 6, Publication date: July 2012.
+
+DEAN, D., FRANKLIN, M., AND STUBBLEFIELD, A. 2002. An algebraic approach to IP traceback. ACM Trans.
+
+Inform. Syst. Secur. 5, 2, 119–137.
+
+DOMMETY, G. 2000. Key and sequence number extensions to GRE. RFC 2890 (Proposed Standard). The
+
+EDDY, W. 2007. TCP SYN ﬂooding attacks and common mitigations. RFC 4987 (Informational). The Internet
+
+Springer Verlag.
+
+Internet Society.
+
+Society.
+
+LOT: A Defense Against IP Spooﬁng and Flooding Attacks
+
+6:29
+
+CISCO SYSTEMS. 2007. Pre-Fragmentation for IPsec VPNs. http://www.ciscosystems.cd/en/US/docs
+
+/ios/sec_secure_connectivity/configuration/guide/sec_pre_frag_vpns.pdf.
+
+DAEMEN, J. AND RIJMEN, V. 2002. The Design of Rijndael: AES–the Advanced Encryption Standard.
+
+EHRENKRANZ, T., LI, J., AND MCDANIEL, P. 2010. Realizing a source authentic Internet. In Proceedings of
+the International ICST Conference on Security and Privacy in Communication Networks (SecureComm)
+217–234.
+
+FARINACCI, D., LI, T., HANKS, S., MEYER, D., AND TRAINA, P. 2000. Generic routing encapsulation (GRE).
+
+RFC 2784 (Proposed Standard). Updated by RFC 2890. The Internet Society.
+
+FERGUSON, P. AND SENIE, D. 2000. Network ingress ﬁltering: Defeating denial of service attacks which
+employ IP Source Address Spooﬁng. RFC 2827 (Best Current Practice 38). Updated by RFC 3704. The
+Internet Society.
+
+GILAD, Y. AND HERZBERG, A. 2009. Lightweight opportunistic tunneling (LOT). In Proceedings of the Eu-
+
+ropean Symposium on Research in Computer Security (ESORICS). 104–119.
+
+GILAD, Y. AND HERZBERG, A. 2011a. Considered vulnerable: blindly intercepting and discarding fragments.
+
+In Proceedings of the USENIX Workshop on Offensive Technologies.
+
+GILAD, Y. AND HERZBERG, A. 2011b. Lightweight opportunistic tunneling. Tech. rep.
+
+http://u.cs.biu.ac.il/~herzbea/security/TR/11_02.pdf.
+
+GILMORE, J. 2003. FreeS/WAN Project. www.freeswan.org.
+GOLDREICH, O. 2001. Foundations of Cryptography. Vol. 1: Basic Tools. Cambridge University Press.
+HARRIS, B. AND HUNT, R. 1999. TCP/IP security threats and attack methods. Comput. Comm. 22, 885–897.
+HEFFERNAN, A. 1998. Protection of BGP Sessions via the TCP MD5 Signature Option. RFC 2385 (Proposed
+
+HEFFNER, J., MATHIS, M., AND CHANDLER, B. 2007. IPv4 reassembly errors at high data rates. RFC 4963
+
+Standard). The Internet Society.
+
+(Informational). The Internet Society.
+
+HOFFMAN, P. 2005. Cryptographic suites for IPsec. RFC 4308 (Proposed Standard). The Internet Society.
+HUICI, F. AND HANDLEY, M. 2007. An edge-to-edge ﬁltering architecture against DoS. Comput. Comm. Rev.
+
+37, 2, 39–50.
+
+IANA. 2002. Special-use IPv4 addresses. RFC 3330 (Informational). The Internet Society.
+IOANNIDIS, J. AND BELLOVIN, S. M. 2002. Implementing Pushback: Router-based defense against DDoS
+
+attacks. In NDSS. The Internet Society.
+
+JIANG, G. 2002. Multiple vulnerabilities in SNMP. Comput. 35, 4, 2–4.
+KAMINSKY, D. 2008. It’s the end of the cache as we know it. In Proceedings of the Black Hat Conference.
+
+http://www.doxpara.com/DMK BO2K8.ppt.
+
+KARLIN, J., FORREST, S., AND REXFORD, J. 2006. Pretty good BGP: Improving BGP by cautiously adopt-
+ing routes. In Proceedings of the IEEE International Conference on Network Protocols (ICNP). IEEE
+Computer Society, 290–299.
+
+KAUFMAN, C. 2005. Internet key exchange (IKEv2) protocol. RFC 4306 (Proposed Standard). Updated by
+
+RFC 5282. The Internet Society.
+
+KAUFMAN, C., PERLMAN, R. J., AND SOMMERFELD, B. 2003. DoS protection for UDP-based protocols. In
+
+Proceedings of the 10th ACM Conference on Computer and Communications Security (CCS). 2–7.
+
+KENT, C. A. AND MOGUL, J. C. 1987. Fragmentation Considered Harmful. Res. rep. 87/3, Western Research
+
+Laboratory.
+
+KENT, S. AND SEO, K. 2005. Security architecture for the Internet protocol. RFC 4301 (Proposed Standard).
+
+The Internet Society.
+
+KENT, S., LYNN, C., AND SEO, K. 2000. Secure border gateway protocol (S-BGP). IEEE J. Sel. Areas Comm.
+
+18, 4, 582–592.
+
+KILLALEA, T. 2000. Recommended Internet service provider security services and procedures. RFC 3013
+
+(Best Current Practice). The Internet Society.
+
+KLEIN, A. 2007. BIND 9 DNS cache poisoning. Tech. rep., Trusteer, Ltd.
+LAD, M., MASSEY, D., PEI, D., WU, Y., ZHANG, B., AND ZHANG, L. 2006. PHAS: A preﬁx hijack alert
+
+system. In Proceedings of the 15th Conference on USENIX Security Symposium.
+
+ACM Transactions on Information and System Security, Vol. 15, No. 2, Article 6, Publication date: July 2012.
+
+6:30
+
+Y. Gilad and A. Herzberg
+
+LAKSHMINARAYANAN, K., ADKINS, D., PERRIG, A., AND STOICA, I. 2004. Taming IP packet ﬂooding at-
+
+tacks. Comput. Comm. Rev. 34, 1, 45–50.
+
+LEMON, J. 2002. Resisting SYN ﬂood DoS attacks with a SYN cache. In Proceedings of BSDCo., S. J. Lefﬂer,
+
+Ed., USENIX, 89–97.
+
+LI, J., MIRKOVIC, J., EHRENKRANZ, T., WANG, M., REIHER, P., AND ZHANG, L. 2008. Learning the valid
+
+incoming direction of IP packets. Comput. Netw. 52, 2, 399–417.
+
+MOGUL, J. AND DEERING, S. 1990. Path MTU discovery. RFC 1191 (Draft Standard). The Internet Society.
+MOORE, D., VOELKER, G., AND SAVAGE, S. 2001. Inferring internet denial of service activity. In Proceedings
+
+of the 10th USENIX Security Symposium.
+
+PANG, R., YEGNESWARAN, V., BARFORD, P., PAXSON, V., AND PETERSON, L. 2004. Characteristics of Inter-
+net background radiation. In Proceedings of the 4th ACM SIGCOMM Conference on Internet Measure-
+ment. 27–40.
+
+PARK, K. AND LEE, H. 2001. On the effectiveness of route-based packet ﬁltering for distributed DoS at-
+tack prevention in power-law Internets. In Proceedings of the ACM SIGCOMM Conference on Internet
+Measurement. 15–26.
+
+PAXSON, V. 2001. An analysis of using reﬂectors for distributed denial-of-service attacks. Comput. Comm.
+
+Rev. 31, 3, 38–47.
+
+PENG, T., LECKIE, C., AND RAMAMOHANARAO, K. 2007. Survey of network-based defense mechanisms
+
+countering the DoS and DDoS problems. ACM Comput. Surv. 39, 1, 1–42.
+
+POSTEL, J. 1981a. Internet control message protocol. RFC 792 (Standard). Updated by RFCs 950, 4884. The
+
+Internet Society.
+
+POSTEL, J. 1981b. Internet protocol. RFC 791 (Standard). Updated by RFC 1349. The Internet Society.
+RICHARDSON, M. 2005. A method for storing IPsec keying material in DNS. RFC 4025 (Proposed Standard).
+
+The Internet Society.
+
+RICHARDSON, M. AND REDELMEIER, D. 2005. Opportunistic encryption using the Internet Key Exchange
+
+(IKE). RFC 4322 (Informational). The Internet Society.
+
+SAVAGE, S., WETHERALL, D., KARLIN, A. R., AND ANDERSON, T. E. 2000. Practical network support for
+
+IP traceback. In Proceedings of the ACM SIGCOMM Conference on Internet Measurement. 295–306.
+
+SHERWOOD, R., BHATTACHARJEE, B., AND BRAUD, R. 2005. Misbehaving TCP receivers can cause
+Internet-wide congestion collapse. In Proceedings of the 12th ACM Conference on Computer and Com-
+munications Security (CCS). 383–392.
+
+SNOEREN, A. C. 2001. Hash-based IP traceback. In Proceedings of the ACM SIGCOMM Conference on
+
+Internet Measurement. 3–14.
+
+SONG, D. X. AND PERRIG, A. 2001. Advanced and authenticated marking schemes for IP traceback. In
+Proceedings of the Annual Joint Conference of the IEEE Computer and Communications Societies (IN-
+FOCOM). 878–886.
+
+SRISURESH, P. AND EGEVANG, K. 2001. Traditional IP Network Address Translator (Traditional NAT).
+
+RFC 3022 (Informational). The Internet Society.
+
+STUDER, A. AND PERRIG, A. 2009. The coremelt attack. In Proceedings of the European Symposium on
+
+Research in Computer Security (ESORICS). 37–52.
+
+TOUCH, J., BLACK, D., AND WANG, Y. 2008. Problem and applicability statement for Better-Than-Nothing
+
+Security (BTNS). RFC 5387 (Informational). The Internet Society.
+
+WANG, H., JIN, C., AND SHIN, K. G. 2007a. Defense against spoofed ip trafﬁc using hop-count ﬁltering.
+
+IEEE/ACM Trans. Netw. 15, 1, 40–53.
+
+WANG, L., WU, Q., AND LUONG, D. 2007b. Engaging edge networks in preventing and mitigating undesir-
+able network trafﬁc. In Proceedings of the 3rd IEEE Workshop on Secure Network Protocols (NPSec).
+1–6.
+
+WHITE, R. 2003. Securing BGP through secure origin BGP. Internet Protocol J. 6, 15–22.
+WILLIAMS, N. AND RICHARDSON, M. 2008. Better-Than-Nothing security: An unauthenticated mode of
+
+IPsec. RFC 5386 (Proposed Standard). The Internet Society.
+
+YAAR, A., PERRIG, A., AND SONG, D. X. 2004. SIFF: A stateless Internet ﬂow ﬁlter to mitigate DDoS
+
+ﬂooding attacks. In Proceedings of the IEEE Symposium on Security and Privacy. 130–143.
+
+YANG, X., WETHERALL, D., AND ANDERSON, T. E. 2008. TVA: A DoS-limiting network architecture.
+
+IEEE/ACM Trans. Netw. 16, 6, 1267–1280.
+
+Received September 2010; revised March 2011, September 2011; accepted November 2011
+
+ACM Transactions on Information and System Security, Vol. 15, No. 2, Article 6, Publication date: July 2012.
+
+

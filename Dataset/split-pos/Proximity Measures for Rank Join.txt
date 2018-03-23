@@ -1,0 +1,7533 @@
+Proximity Measures for Rank Join
+
+DAVIDE MARTINENGHI and MARCO TAGLIASACCHI, Politecnico di Milano
+
+2
+
+We introduce the proximity rank join problem, where we are given a set of relations whose tuples are
+equipped with a score and a real-valued feature vector. Given a target feature vector, the goal is to return
+the K combinations of tuples with high scores that are as close as possible to the target and to each other,
+according to some notion of distance or dissimilarity. The setting closely resembles that of traditional rank
+join, but the geometry of the vector space plays a distinctive role in the computation of the overall score of a
+combination. Also, the input relations typically return their results either by distance from the target or by
+score. Because of these aspects, it turns out that traditional rank join algorithms, such as the well-known
+HRJN, have shortcomings in solving the proximity rank join problem, as they may read more input than
+needed. To overcome this weakness, we deﬁne a tight bound (used as a stopping criterion) that guarantees
+instance optimality, that is, an I/O cost is achieved that is always within a constant factor of optimal. The
+tight bound can also be used to drive an adaptive pulling strategy, deciding at each step which relation to
+access next. For practically relevant classes of problems, we show how to compute the tight bound efﬁciently.
+An extensive experimental study validates our results and demonstrates signiﬁcant gains over existing
+solutions.
+
+Categories and Subject Descriptors: H.2.4 [Database Management]: Systems
+
+General Terms: Design, Algorithms, Experimentation, Performance
+
+Additional Key Words and Phrases: Top-k, rank-aware processing, proximity
+
+ACM Reference Format:
+Martinenghi, D. and Tagliasacchi, M. 2012. Proximity measures for rank join. ACM Trans. Datab. Syst. 37,
+1, Article 2 (February 2012), 46 pages.
+DOI = 10.1145/2109196.2109198 http://doi.acm.org/10.1145/2109196.2109198
+1. INTRODUCTION
+Imagine a smartphone user wishing to organize the evening by ﬁnding a restaurant,
+a movie theater, and a hotel that are nearby, close to each other, and recommended
+in terms of, respectively, price, user rating, and number of stars. This can be done by
+suitably collecting and assembling different pieces of information. Here, one could, for
+example, exploit the current geographical position available on the smartphone, as
+well as local information obtained from speciﬁc search services on the Internet (such
+as Yahoo! Local, IMDB, etc.).
+
+This simple example captures the essence of proximity rank join problems, in which
+the best combinations of objects coming from different services (here: restaurants,
+theaters, and hotels) are sought, and each object is equipped with both a score and a
+real-valued feature vector. The aggregation function assigning a score to a combination
+
+The authors acknowledge support from the Search Computing (SeCo) project, funded by the European
+Research Council.
+Authors’ addresses: D. Martinenghi (corresponding author) and M. Tagliasacchi, Departimento di Elet-
+tronica e Informazione, Politecnico di Milano, Piazza Leonardo da Vinci, 32-20133 Milano, Italy; email:
+martinen@elet.polimi.it.
+Permission to make digital or hard copies of part or all of this work for personal or classroom use is granted
+without fee provided that copies are not made or distributed for proﬁt or commercial advantage and that
+copies show this notice on the ﬁrst page or initial screen of a display along with the full citation. Copyrights for
+components of this work owned by others than ACM must be honored. Abstracting with credit is permitted.
+To copy otherwise, to republish, to post on servers, to redistribute to lists, or to use any component of this
+work in other works requires prior speciﬁc permission and/or a fee. Permissions may be requested from
+Publications Dept., ACM, Inc., 2 Penn Plaza, Suite 701, New York, NY 10121-0701 USA, fax +1 (212)
+869-0481, or permissions@acm.org.
+c(cid:2) 2012 ACM 0362-5915/2012/02-ART2 $10.00
+DOI 10.1145/2109196.2109198 http://doi.acm.org/10.1145/2109196.2109198
+
+ACM Transactions on Database Systems, Vol. 37, No. 1, Article 2, Publication date: February 2012.
+
+2:2
+
+D. Martinenghi and M. Tagliasacchi
+
+depends on the individual scores, on the proximity of the individual vectors to a given
+vector (called query), and on their mutual proximity, according to some notion of
+distance or dissimilarity in the feature space. Typically, objects are retrieved sorted by
+either distance1 from a given vector or by score.
+
+The interest in proximity rank join is motivated by its generality and broad appli-
+cability. Indeed, it covers multidomain search, as in the previous example, as well as
+several other scientiﬁc ﬁelds, such as:
+
+(i) information retrieval, for example, ﬁnding similar documents in different data
+collections given a set of keywords; (ii) multimedia databases, for example, requesting
+similar images from different repositories given a sample image; (iii) bioinformatics,
+for example, discovering orthologous genes from different organisms given a target
+annotation proﬁle; and many others. In all these cases, proximity (typically based on
+Euclidean distance or cosine similarity) plays a crucial role, as it captures the mutual
+relationships between the objects in the feature space.
+
+In the conventional rank join problem [Ilyas et al. 2008], instead, the overall score
+of a combination depends only on the scores of the single objects. Existing algorithms,
+such as HRJN [Ilyas et al. 2004], may be used to address proximity rank join. However,
+as will be shown in this article, they fail to achieve optimality as they are completely
+oblivious of the proximity aspect.
+
+Our contributions. We formally deﬁne the proximity rank join problem and propose
+algorithms that solve it. We identify the main differences with traditional rank join and
+revisit existing algorithms and templates in the new setting in order to assess their
+limitations and potential. To this end, as customary in top-k query answering, we refer
+to the notion of instance optimality [Fagin et al. 2003] to characterize I/O efﬁciency. We
+show that, for the proximity rank join problem, no algorithm using a stopping criterion
+based on the so-called corner bound (such as HRJN and HRJN∗) is instance optimal,
+even with only two input relations.
+
+We then introduce a different bound that is tight [Schnaitter and Polyzotis 2008] and
+can thus be used in order to guarantee instance optimality. We show how to compute the
+tight bound efﬁciently for practically relevant instances of the problem, in particular
+when the proximity measure in use is based on either Euclidean distance or cosine
+similarity.
+
+In order to further improve efﬁciency in terms of I/O as well as CPU cost, we reﬁne
+the exploration strategy used by the algorithm to pull tuples from the inputs. Also, we
+exploit geometrical properties to conclude that part of the search space is dominated
+and thus need not be explored.
+
+Finally, we provide a thorough experimental evaluation of our approach by analyzing
+performance with regard to the main operating parameters. These include the number
+of desired top combinations, the number of dimensions of the feature space, the density
+of tuples in the space, its skewness, and the number of relations in the join. Our
+empirical study is carried out both on real and on synthetic data.
+
+A preliminary version of this work was published in Martinenghi and Tagliasacchi
+[2010]. While that short version focuses on Euclidean distance, in the current article
+we also provide efﬁcient solutions for rank join under cosine similarity, both with
+distance-based and score-based access. In addition, we explore a new, more powerful
+notion of dominance that applies to all cases at hand. Finally, we include the extra
+empirical results corresponding to the new solutions, and further deepen our analysis
+by considering new parameters for our experiments, including spatial skewness, join
+selectivity, and weights in the aggregation functions.
+
+1With a slight abuse of terminology, from now on we shall use the word “distance” also when the underlying
+dissimilarity measure is not a metric, as when using cosine similarity.
+
+ACM Transactions on Database Systems, Vol. 37, No. 1, Article 2, Publication date: February 2012.
+
+S(τ ) = f (S(τ1), . . . ,S(τn)),
+
+S(τi) = gi(σ (τi), δ(x(τi), q), δ(x(τi), μ(τ ))),
+
+(1)
+
+(2)
+
+Proximity Measures for Rank Join
+
+2:3
+
+2. PRELIMINARIES
+
+Consider a set of relations R1, . . . , Rn where each tuple τi ∈ Ri is composed of named
+attributes, a real-valued feature vector x(τi) ∈ Rd, and a score σ (τi) ∈ R. Let q ∈ Rd
+denote a constant vector representing the query, and δ(x(τ ), q) a distance measure
+between vectors x(τ ) and q. We consider the two most common access kinds that arise
+in practice.
+
+(A) Distance-based access: The relations R1, . . . , Rn are accessed sequentially in in-
+
+(B) Score-based access: The relations R1, . . . , Rn are accessed sequentially in decreasing
+
+creasing order of δ(·, q).
+order of σ (·).
+We indicate with τ
+i = Ri[ri] the ri-th tuple extracted from Ri according to the available
+access kind, and with Pi ⊆ Ri the ordered relation containing the tuples already
+extracted from Ri. The number pi = |Pi| of such tuples is called depth.
+Let τ = τ1 × · · · × τn ∈ R1 × · · · × Rn denote an element of the cross-product of the n
+relations, hereafter called combination. The aggregate score S(τ ) of τ is deﬁned as
+
+(ri )
+
+where
+
+δ(x(τi), ω).
+
+arguments.
+
+nondecreasing in x and monotonically nonincreasing in y and z.
+
+and
+—the function f (x1, . . . , xn) : Rn → R is monotonically nondecreasing in all of its
+—the functions gi(x, y, z) : R × R+ × R+ → R, for i = 1, . . . , n, are monotonically
+—the vector μ(τ ) ∈ Rd denotes the centroid of a combination, deﬁned as arg. minω(cid:2)n
+We refer to the functions gi as the proximity weighting functions since they compute
+the proximity weighted score S(τi) of the tuple τi participating in the combination τ .
+Intuitively, the proximity weighted score increases with the score and decreases with
+the distance from the query vector q and from the combination centroid μ(τ ). Therefore,
+the top combinations are those whose constituent tuples: (i) have high scores; (ii) are
+close to the query vector; (iii) are close to each other. We note that (1) generalizes the
+Maximize-Over-Location scoring function recently deﬁned in Thonangi et al. [2009].
+
+i=1
+
+Example 2.1. As a concrete example, we consider
+
+n
+
+(cid:3)i=1
+ws ln(σ (τi))−wq(cid:6)x(τi)−q(cid:6)2−wµ(cid:6)x(τi)−μ(τ )(cid:6)2
+S(τ )=
+
+(3)
+
+n(cid:2)n
+
+which is obtained by setting f (x1, . . . , xn) = (cid:2)n
+i=1 xi and gi(x, y, z) = ws ln(x) − wq y2 −
+wµz2, that is, adopting a Euclidean distance. The centroid μ(τ ) can be computed as
+μ(τ ) = 1
+i=1 x(τi). The weights ws, wq and wµ ∈ R+ can be used to tune the proximity
+weighting functions based on user’s preferences. Note that if the scores σ (τi) ∈ [0, 1]
+then S(τ ) ∈ (−∞, 0]. Alternatively, one might take eS(τ ) to obtain an aggregate score in
+the range [0, 1]. Table I illustrates an example with three relations, when two tuples
+have been retrieved from each of them, and tuples are sorted according to the distance
+from the query q = 0. Figure 1(a) shows the location x(τi) of the tuples in R2 represented
+as discs whose radius is proportional to the score (blue for R1, red for R2, green for R3).
+Figure 1(a) also shows three circles, whose radius is equal to the distance of the last
+
+ACM Transactions on Database Systems, Vol. 37, No. 1, Article 2, Publication date: February 2012.
+
+2:4
+
+D. Martinenghi and M. Tagliasacchi
+
+(1)
+τ
+1
+(2)
+τ
+1
+· · ·
+
+R3
+
+xT
+3
+
+· · ·
+
+(2)
+
+R2
+
+R1
+
+xT
+1
+
+σ1
+0.5
+1.0
+· · ·
+
+[0, −0.5]
+[0, 1]
+· · ·
+
+Table I. Three Relations with Distance-Based Access and the Formed Combinations with Their Scores
+S(τ )
+−7.0
+−8.4
+−13.9
+−16.3
+−21.0
+−22.6
+−28.9
+−29.5
+
+τ = τ1 × τ2 × τ3
+1 × τ
+τ
+1 × τ
+τ
+1 × τ
+τ
+1 × τ
+τ
+1 × τ
+τ
+1 × τ
+τ
+1 × τ
+τ
+1 × τ
+τ
+
+xT
+2
+[1, 1]
+[−2, 2]
+
+[−1, 1]
+[−2, −2]
+
+(1)
+3
+(1)
+3
+(1)
+3
+(1)
+3
+(2)
+3
+(2)
+3
+(2)
+3
+(2)
+3
+
+(1)
+τ
+3
+(2)
+τ
+3
+· · ·
+
+(1)
+τ
+2
+(2)
+τ
+2
+· · ·
+
+σ3
+1.0
+0.4
+· · ·
+
+(1)
+
+(2)
+
+(1)
+
+(1)
+
+(2)
+
+2 × τ
+2 × τ
+2 × τ
+2 × τ
+2 × τ
+2 × τ
+2 × τ
+2 × τ
+
+(2)
+
+(2)
+
+(1)
+
+σ2
+1.0
+0.8
+· · ·
+
+(2)
+
+(1)
+
+(1)
+
+(2)
+
+(1)
+
+(2)
+
+(1)
+
+· · ·
+
+3
+
+2
+
+1
+
+0
+
+−1
+
+−2
+
+−3
+−3
+
+τ (1)
+3
+
+τ (1)
+2
+
+τ (2)
+1
+q
+τ (1)
+1
+
+τ (2)
+2
+
+τ (2)
+3
+
+1
+
+0.5
+
+0
+0
+
+−2
+
+−1
+
+0
+
+1
+
+2
+
+3
+
+(2)
+2
+
+τ
+
+(1)
+2
+
+τ
+(2)
+1
+
+τ
+
+(1)
+3
+
+τ
+
+q
+
+(1)
+1
+
+τ
+
+(2)
+3
+
+τ
+
+0
+
+0.5
+
+0.5
+
+1
+
+1
+
+(a) Tuples of Table I
+
+(b) Tuples of Example 2.2
+
+Fig. 1.
+(b) Location of the tuples of Example 2.2.
+
+(a) Location of the tuples of Table I, represented as discs whose radius is proportional to the score.
+
+accessed tuple from each relation. The cross-product consists of 8 combinations, also
+reported in Table I, sorted by their aggregate score computed using (3), by setting
+ws = wq = wµ = 1.
+
+Example 2.2. As another concrete example, consider
+
+S(τ ) =
+
+n
+
+(cid:3)i=1
+
+wsσ (τi) + wq
+
+qT x(τi)
+(cid:6)qT (cid:6)(cid:6)x(τi)(cid:6) + wµ
+
+μ(τ )T x(τi)
+(cid:6)μ(τ )(cid:6)(cid:6)x(τi)(cid:6)
+
+(4)
+
+which is obtained from (1) and (2) by setting f (x1, . . . , xn) =(cid:2)n
+i=1 xi−2n and gi(x, y, z) =
+wsx + wq y+ wµz. Here, we have adopted cosine similarity between feature vectors, that
+is, we pose δ(x(τi), q) = 1−cs(q, x(τi)) and δ(x(τi), μ) = 1−cs(μ, x(τi)), where cs indicates
+cosine similarity and is computed as follows.
+
+cs(x(τi), x(τ j)) =
+
+x(τi)T x(τ j)
+(cid:6)x(τi)(cid:6)(cid:6)x(τ j)(cid:6)
+
+(5)
+
+ACM Transactions on Database Systems, Vol. 37, No. 1, Article 2, Publication date: February 2012.
+
+Proximity Measures for Rank Join
+
+2:5
+
+The centroid μ(τ ) can be computed as in Example 2.1. The weights ws, wq and wµ ∈ R+
+play the same role as in Example 2.1. Without loss of generality, both the query and
+the feature vectors can be assumed normalized to lie on the unit sphere. We give an
+example in three dimensions in Figure 1(b), showing locations of tuples extracted from
+three different relations R1, R2, and R3 (in blue, red, and green, respectively). For
+ease of illustration, the points are obtained from those in Table I by setting azimuth
+and elevation as x(τi)[θ, φ] ← q[θ, φ]+ π/20· x(τi)[θ, φ], where q[θ, φ] = [π/4, π/4]. The
+ﬁgure also shows three circles on the unit sphere corresponding to the loci of points with
+the same cosine similarity with the query as the last accessed tuple from each relation.
+Deﬁnition 2.3. The proximity rank join problem is an (n+2)-tuple (R1, . . . , Rn,S, K)
+such that S is an aggregation function deﬁned as in (1), all the relations R1, . . . , Rn are
+accessed sequentially either in: (A) increasing order of δ(·, q), or (B) decreasing order
+of σ (·), and 1 ≤ K ≤ |R1 × · · · × Rn|.
+
+A solution is an ordered relation O containing the top K combinations from R1×· · ·×
+Rn ordered by S (score ties are resolved using a tie-breaking criterion). A proximity
+rank join algorithm that on input (R1, . . . , Rn,S, K) returns the corresponding O upon
+termination is said to be correct.
+Proximity rank join closely resembles rank join [Ilyas et al. 2004]. Unlike the latter,
+the former assumes that: (i) each tuple is equipped with a feature vector, (ii) the
+aggregation function depends both on the score and on the feature vector, and (iii) the
+relations are accessed as speciﬁed in Deﬁnition 2.3.
+
+The proximity rank join problem can be tackled by adopting the ProxRJ template
+reported in Algorithm 1, which adapts the Pull/Bound Rank Join (PBRJ) template
+originally introduced for rank join in Schnaitter and Polyzotis [2008]. The chooseInput
+function (line 4) of a given pulling strategy PS decides at each step the next relation
+to be accessed. The update Bound function (line 9) of a given bounding scheme BS
+computes an upper bound on the aggregate score of the unseen combinations. The
+unseen combinations are those that can be formed with at least an unseen tuple τi ∈
+Ri − Pi.
+ALGORITHM 1: ProxRJ(R1, . . . , Rn,S, K)
+
+Input : relations R1, . . . , Rn; function S as in (1); result size K
+Output: K combinations with highest aggregate score
+Data
+1 begin
+2
+
+: input buffers P1, . . . , Pn; output buffer O
+
+t ← ∞;
+while |O| < K or minω∈O S(ω) < t do
+
+i ← PS.chooseInput();
+τi ← next unseen tuple of Ri;
+R← P1×· · ·× Pi−1×{τi}× Pi+1×· · ·× Pn;
+Add each member of R to O, retaining only the top K combinations;
+Add τi to Pi;
+t ← BS.update Bound(τi);
+
+3
+
+4
+
+5
+
+6
+
+7
+
+8
+
+9
+
+10
+
+end
+return O
+
+11
+12 end
+
+The aforementioned differences between rank join and proximity rank join on the
+assumptions regarding the relations and the aggregation function have an impact on
+the computation of the upper bound (and, consequently, on the pulling strategy). This
+will be further discussed in Section 3.
+
+ACM Transactions on Database Systems, Vol. 37, No. 1, Article 2, Publication date: February 2012.
+
+2:6
+
+D. Martinenghi and M. Tagliasacchi
+
+Unlike the general PBRJ template, ProxRJ focuses on cross-product (line 6), the
+notion of join being here implicitly captured by the proximity between the objects [Silva
+et al. 2010]. Yet, the results of this article also hold when an additional join predicate
+is used to select a subset of the cross-product.
+
+An algorithm complying with the ProxRJ template is correct (as PBRJ is for rank
+join [Schnaitter and Polyzotis 2008]) if: (i) update Bound returns a correct upper bound
+on the aggregate scores of the combinations that use at least one unread tuple; (ii)
+chooseInput returns an index of an unexhausted relation.
+
+We deﬁne the notion of tight bounding scheme as in Schnaitter and Polyzotis [2008],
+but we drop their condition (C3), which is only relevant when tuples may have multiple
+scores and when the behavior of S is only assumed known on the observed tuples.
+
+Deﬁnition 2.4. Let I = (R1, . . . , Rn,S, K) be a proximity rank join problem and let
+
+Pi be the extracted portion of Ri, 1 ≤ i ≤ n.
+—A continuation of I is a problem (R′1, . . . , R′n,S, K) that satisﬁes the following condi-
+
+—If τ is a combination for some continuation of I, and τ uses at least one unseen tuple,
+
+tions.
+(C1) The ﬁrst |Pi| tuples in R′i and Ri are identical.
+(C2) |R′i| = |Ri| for all i.
+then we say τ is a potential result and S(τ ) is a potential score of I.
+|P1 × · · · × Pn| ≥ K.
+
+—A bounding scheme is tight if updateBound returns a potential score or −∞ whenever
+
+In order to characterize the performance of proximity rank join algorithms, we in-
+troduce the sumDepths cost metric and the notion of instance optimality, which are
+common in top-k query answering. Let depth(A, I, i) be the depth on input relation Ri
+explored by algorithm A on problem I = (R1, . . . , Rn,S, K) before returning a solution.
+We deﬁne sumDepths(A, I) as (cid:2)n
+i=1 depth(A, I, i), which provides an indication of the
+amount of I/O performed by A to solve I. Let A be the class of correct, deterministic prox-
+imity rank join algorithms, and let I be the class of problems satisfying Deﬁnition 2.3.
+We say that A is instance optimal with respect to A and I for the sumDepths cost metric
+if there exist constants c1 and c2 such that sumDepths(A, I) ≤ c1 · sumDepths(A′, I)+ c2
+for all A′ ∈ A and I ∈ I.
+
+3. BOUNDING SCHEMES FOR DISTANCE-BASED ACCESS
+In this section, we carry out our analysis for the case of distance-based access. First, we
+consider a simple bounding scheme that does not leverage the geometrical constraints
+imposed by the problem formulation; this bounding scheme is equivalent to that of
+HRJN [Ilyas et al. 2004]. Then, we show how to deﬁne a tight upper bound for the
+score of unseen combinations, which is of paramount importance in order to guarantee
+instance optimality, as proved in Schnaitter and Polyzotis [2008].
+
+Similar results and algorithms are available for the simpler case of score-based
+
+access, as shown in Section 5.
+
+3.1. Corner Bound
+Under distance-based access, it is possible to compute a correct upper bound tc by
+keeping track of the distance from the query q of the ﬁrst and last accessed tuple from
+each relation, that is, δ(x(Ri[1]), q) and δ(x(Ri[ pi]), q), respectively.
+tc = max{t1, . . . , tn}, with ti = f ( ¯S1, . . . ,S i, . . . , ¯Sn)
+
+(6)
+
+ACM Transactions on Database Systems, Vol. 37, No. 1, Article 2, Publication date: February 2012.
+
+Proximity Measures for Rank Join
+
+2:7
+
+3
+
+2
+
+1
+
+0
+
+−1
+
+−2
+
+−3
+−3
+
+τ (2)
+2
+
+√1.5
+
+q
+τ (1)
+1
+
+τ (2)
+1
+
+τ (1)
+2
+
+−2
+
+−1
+
+0
+
+1
+
+2
+
+3
+
+Fig. 2. Geometry of the example used in the proof of Theorem 3.1.
+
+In (6), ¯S j is an upper bound on the proximity weighted score that can be attained by a
+tuple τ j ∈ Rj, that is,
+
+j
+
+j
+
+i
+
+, δ(x(Rj[1]), q), 0(cid:5) ,
+
+¯S j = g j(cid:4)σ max
+S i = gi(cid:4)σ max
+
+(7)
+where σ max
+is the maximum score possible for Rj. Similarly S i denotes an upper bound
+on the proximity weighted score that can be attained by an unseen tuple τi ∈ Ri − Pi.
+(8)
+Note that when no object has been extracted from a relation Ri, that is, pi = 0, both
+δ(x(Ri[1]), q) and δ(x(Rj[ pi]), q) are conventionally set to zero.
+The bound in (6), corresponding to the one used by HRJN, is a corner bound
+[Schnaitter and Polyzotis 2008]. Bound (6) is not tight, since a possible combination
+whose aggregate score is equal to the bound might not exist. Here, nontightness
+precludes instance optimality.
+
+, δ(x(Ri[ pi]), q), 0(cid:5)
+
+THEOREM 3.1. Let A be an algorithm complying with the ProxRJ template for
+distance-based access using the corner bound (6). Then A is not instance optimal for
+problems with at least two relations.
+
+PROOF. Consider S as in (3) with ws = 0, wq = 1, wµ = 1, and q = 0, and a problem
+
+I = (R1, R2,S, 1) with
+
+x(cid:4)τ (1)
+1 (cid:5) = [0, −0.5]T x(cid:4)τ (1)
+2 (cid:5) = [0, 2]T
+x(cid:4)τ (2)
+x(cid:4)τ (2)
+1 (cid:5) = [0, 1]T
+2 (cid:5) = [−2, 2]T .
+These points are shown in Figure 2. (Tuple scores are immaterial to S as ws = 0.)
+When p1 = 2 and p2 = 1, by reasoning on the geometry of the seen tuples, an
+algorithm may correctly return τ = τ (2)
+1 × τ (1)
+2 as the top combination for I, since no
+formable combination can have a higher score than S(τ ) = −5.5. The same conclusion
+can also be drawn by ﬁnding a tight bound as shown in Section 4.1.
+Conversely, we show that, in order to terminate, A needs to explore R1 until a depth
+that is a priori unbounded. Indeed, when p1 = p2 = 2, A would compute the upper
+
+ACM Transactions on Database Systems, Vol. 37, No. 1, Article 2, Publication date: February 2012.
+
+2:8
+
+D. Martinenghi and M. Tagliasacchi
+
+bounds t1 = −5, t2 = −8.25, and thus tc = −5. With this, τ cannot be guaranteed to
+be the top combination for I, as tc > S(τ ). Since deepening on R2 cannot lower tc, we
+discuss how tc varies as p1 grows. Indeed, tc remains above −5.5 until the ﬁrst tuple
+√1.5. Since
+( j)
+τ
+1
+there can be an arbitrary number of tuples in R1 between τ (2)
+(which would fall
+on the dashed circumference in Figure 2), the value of depth(A, I, 1) upon termination
+of A is unbounded, hence the claim.
+
+in R1 is seen whose distance from q is at least(cid:6)5.5 − (cid:6)x(τ (1)
+
+2 ) − q(cid:6)2 =
+
+( j)
+1 and τ
+1
+
+A similar result was shown in Schnaitter and Polyzotis [2008] for PBRJ algorithms
+using the corner bound on the rank join problem. However, Theorem 3.1 does not
+descend from their results. Indeed, the lack of tightness in rank join derives from
+failure of the join predicate, whereas here we have cross-products, and the geometry
+of the problem (absent in rank join) contributes to determining the bounds. Moreover,
+unlike theirs, our result also holds with two input relations (n = 2), as the corner bound
+turns out to be tight only in the extreme case n = 1.
+
+3.2. Tight Bound
+
+Let M = {i1, . . . , im} denote a proper subset of {1, . . . , n} and m = |M|, 0 ≤ m < n. Let
+PC(M) = Pi1 ×· · ·× Pim denote the set of partial combinations that can be formed using
+seen tuples from Pi, i ∈ M. Clearly, |PC(M)| = (cid:7)i∈M pi. Given a partial combination
+τ ∈ PC(M), we want to ﬁnd the maximum aggregate score that can be achieved by
+completing τ with unseen tuples from Ri − Pi, i ∈ {1, . . . , n}− M. Distance-based access
+imposes that δ(x(Ri[ri]), q) ≥ δi, for ri > pi, where δi = δ(x(Ri[ pi]), q) is the distance
+from the query of the last accessed tuple from Ri. The goal is to ﬁnd the feasible locations
+yi = x(τi), i ∈ {1, . . . , n} − M of the unseen tuples that maximize the aggregate score,
+that is,
+
+maximize f (S1, . . . ,Sn)
+subject to δ(yi, q) ≥ δi, i ∈ {1, . . . , n} − M
+
+where
+
+Si =(cid:8)gi(cid:4)σ (τi), δ(x(τi), q), δ(x(τi), μ)(cid:5) ,
+
+, δ(yi, q), δ(yi, μ)(cid:5) ,
+
+gi(cid:4)σ max
+
+i
+
+i ∈ M
+
+i ∈ {1, . . . , n} − M.
+
+Note that all the n− m optimization variables yi inﬂuence the functions Si, i = 1, . . . , n,
+since they participate in the computation of the combination centroid μ.
+Let y∗i , i ∈ {1, . . . , n}− M, denote a solution of (9) for a partial combination τ ∈ PC(M),
+and f ∗ the value of the objective function computed at y∗i . Thus, the upper bound t(τ )
+on the aggregate score of the possible combinations formed by completing τ is given by
+t(τ ) = f ∗.
+
+Then, for each proper subset M of {1, . . . , n}, we compute
+
+(9)
+
+(10)
+
+(11)
+
+(12)
+
+and we obtain the ﬁnal upper bound as
+
+tM = max{t(τ )|τ ∈ PC(M)}
+
+t = max{tM|M ⊂ {1, . . . , n}}.
+
+Algorithm 2 provides the pseudocode of the function update Bound that is executed
+for updating the value of the tight bound after each retrieved tuple τi. The loop at
+line 3 evaluates (12). The loop at line 5 evaluates (11) for all partial combinations
+τ ′ ∈ PC(M). When M = ∅, the set PC(M) conventionally contains exactly one tuple
+(the so-called empty tuple (cid:15)(cid:16)) and the algorithm may proceed as in all other cases,
+since the corresponding combinations are those formed using unseen tuples from all
+
+ACM Transactions on Database Systems, Vol. 37, No. 1, Article 2, Publication date: February 2012.
+
+Proximity Measures for Rank Join
+
+2:9
+
+relations. Note that, when invoking update Bound after accessing a tuple τi ∈ Ri, these
+operations need not be performed for all partial combinations. Indeed, the upper bound
+t(τ ′) is computed only if: either τ ′ is a newly formed partial combination that uses τi or
+τ ′ is a seen partial combination that can be completed with tuples from Ri (line 6). In
+all other cases, the value of t(τ ′) is not recomputed; instead, we reuse the previously
+computed value, that we store as a global variable.
+
+ALGORITHM 2: update Bound(τi) distance-based case
+
+Input : last seen tuple τi = Ri[ pi]; seen tuples Pj, j = 1, . . . , n, curr. values of t(·) for all
+Output: Tight upper bound t
+
+seen combinations
+
+1 begin
+2
+
+t ← −∞;
+for M ⊂ {1, . . . , n} do
+tM ← −∞;
+for τ ′ ∈ PC(M) do
+
+Compute t(τ ′) solving (9);
+
+if (i ∈ M ∧ τ ′i = τi) ∨ i (cid:19)∈ M then
+end
+tM ← max{tM, t(τ ′)};
+
+3
+
+4
+
+5
+
+6
+
+7
+
+8
+
+9
+
+10
+
+11
+
+12
+
+end
+t = max{t, tM};
+
+end
+return t
+
+13
+14 end
+
+THEOREM 3.2. The bounding scheme (12) is tight.
+
+PROOF. In order to verify Deﬁnition 2.4 for any given proximity rank join problem
+I and extracted portions of the relations, it sufﬁces to exhibit a continuation of I in
+which a combination using at least one unseen tuple has a score that equals the bound
+given by (12). To do that, let y∗i , i ∈ {1, . . . , n} − M, denote a solution of problem (9) for
+the partial combination τ ∈ PC(M) maximizing (11) with the set M maximizing (12).
+It sufﬁces then to extend each relation Ri, i ∈ {1, . . . , n} − M, with a tuple with score
+σ max
+and feature vector y∗i . With this, (i) the value of the aggregation function for the
+i
+combination made by τ and the new tuples equals by construction the bound (12),
+and (ii) the requirements posed by distance-based access are met by satisfaction of the
+constraints in (9).
+
+The simplest pulling strategy is the one that accesses the inputs in a round-robin
+fashion (e.g., in the order R1, . . . , Rn). Tightness and a round-robin strategy are sufﬁ-
+cient to guarantee instance optimality.
+
+THEOREM 3.3 (THEOREM 5.1 OF SCHNAITTER AND POLYZOTIS [2008]). Let F be an instan-
+tiation of PBRJ with the round-robin pulling strategy and a tight bounding scheme.
+Then F is instance optimal with optimality ratio n within instances with n input rela-
+tions.
+
+This result seamlessly adapts to our case, as stated in Theorem 3.4 next.
+
+THEOREM 3.4. ProxRJ with the tight bounding scheme (12) and a round-robin pulling
+
+strategy is instance optimal for proximity rank join with distance-based access.
+
+ACM Transactions on Database Systems, Vol. 37, No. 1, Article 2, Publication date: February 2012.
+
+2:10
+
+D. Martinenghi and M. Tagliasacchi
+
+Table II. Partial Combinations Formed with
+
+M
+∅
+{1}
+
+{2}
+
+{3}
+
+{1, 2}
+
+{1, 3}
+
+{2, 3}
+
+the Tuples of Table I
+τ ∈ PC(M)
+
+(cid:15)(cid:16)
+(1)
+τ
+1
+(2)
+τ
+1
+(1)
+τ
+2
+(2)
+τ
+2
+(1)
+τ
+3
+(2)
+τ
+3
+(1)
+
+(1)
+
+(2)
+
+(2)
+
+(1)
+
+(2)
+
+(1)
+
+(2)
+
+1 × τ
+τ
+1 × τ
+τ
+1 × τ
+τ
+1 × τ
+τ
+1 × τ
+τ
+1 × τ
+τ
+1 × τ
+τ
+1 × τ
+τ
+2 × τ
+τ
+2 × τ
+τ
+2 × τ
+τ
+2 × τ
+τ
+
+(1)
+
+(1)
+
+(2)
+
+(2)
+
+(1)
+2
+(2)
+2
+(1)
+2
+(2)
+2
+(1)
+3
+(2)
+3
+(1)
+3
+(2)
+3
+(1)
+3
+(2)
+3
+(1)
+3
+(2)
+3
+
+−12.8
+
+−12.8
+
+t(τ )
+tM
+−19.2 −19.2
+−20.6
+−19.2
+−19.2
+−12.8
+−19.4
+−12.8
+−20.1
+−16.0
+−24.0
+−13.5
+−20.4
+−16.0
+−22.0
+−13.5
+−26.4
+−7.0
+−21.0
+−13.1
+−26.8
+
+−13.5
+
+−13.5
+
+−7.0
+
+PROOF. Follows immediately from tightness of (12) and Theorem 3.3, as ProxRJ is a
+
+specialization of PBRJ.
+
+We observe that the computation of the tight upper bound (12) comes at a cost
+that is polynomial under data complexity (i.e., with respect to the number of retrieved
+tuples). In fact, it sufﬁces to solve the problem (9) a number of times equal to C =
+(cid:2)n−1
+m=0(cid:4) n
+
+m(cid:5)(cid:7) j∈M,M⊂{1,...,n},|M|=m pj, and it is easily shown that
+
+(13)
+
+n−1
+
+(cid:3)m=0(cid:9) n
+
+m(cid:10) = 2n − 1 ≤ C ≤ pn
+
+n−1
+
+(cid:3)m=0(cid:9) n
+
+m(cid:10) = pn(2n − 1),
+
+where p = max{ p1, . . . , pn}. This is aligned with the ﬁndings in Schnaitter and Polyzotis
+[2008], where the authors also show polynomial data complexity of tight bounding for
+rank join. Observe that, here too, the number of relations n weighs exponentially on
+the cost.
+
+In addition, solving each instance of the problem in (9) might be difﬁcult, depending
+on the aggregation function and the proximity measure in use. In Section 4, we show
+that, for some relevant cases, such as when using the aggregation function in (3) or
+in (4), the problem in (9) can be addressed in an efﬁcient way.
+
+Example 3.5. For the relations in Table I, Table II shows the partial combinations
+that need to be examined, for each of the subsets M of {1, 2, 3}. For each partial
+combination τ , we also report the value of t(τ ), which is obtained by solving (9) with
+the aggregation function (3) (an effective solution of the problem will be shown in
+Section 4.1). The values of tM are computed as in (11). Thus, the upper bound t,
+using (3), is −7, which can be potentially achieved by an unseen combination formed
+by completing the seen partial combination τ (1)
+3 with an unseen tuple from R1.
+Therefore, the seen combination τ (2)
+2 × τ (1)
+in Table I can be guaranteed to be
+the top-1, since its aggregate score −7 is as high as t. Note that none of the seen
+
+1 × τ (1)
+
+2 × τ (1)
+
+3
+
+ACM Transactions on Database Systems, Vol. 37, No. 1, Article 2, Publication date: February 2012.
+
+Proximity Measures for Rank Join
+
+2:11
+
+combinations in Table I can be guaranteed to be the top-1 using the corner bound,
+since, by (6), we have tc = max{−5, −10.25, −10.25} = −5.
+
+3.2.1. Dominance. The solution of problem (9) for a partial combination τ ∈ PC(M)
+depends on the current distance lower bounds δi, i ∈ {1, . . . , n} − M, and needs to
+be recomputed whenever any of these lower bounds may change, that is, after every
+access to Ri, i ∈ {1, . . . , n} − M. Nevertheless, in order to determine tM as of (11), it is
+unnecessary to solve (9) for all partial combinations τ ∈ PC(M). Indeed, some of them
+might be dominated, in the sense that, for a dominated partial combination τ , it will
+never happen that tM = t(τ ).
+In order to determine whether a partial combination is dominated, we consider the
+score of the K-th object stored in O. That is, we check the dominance if |O| = K, and
+ﬂag a partial combination as dominated whenever
+
+t(τ ) ≤ min
+
+ω∈O S(ω).
+
+(14)
+
+Indeed, as more distance-based accesses are made, the values δi, i = 1, . . . , n, are
+nondecreasing. Therefore, the feasible region of problem (9) shrinks and the value
+of the objective function at the optimum, that is, t(τ ), decreases. If, at some point
+during the execution, the upper bound on the score of a partial combination does not
+exceed the score of the combination with the least score in O, it will never do so.
+
+Algorithm 3 reﬁnes Algorithm 2 by adding the dominance check in the computation
+of the tight bound. Within the loop at line 5, the computation of the upper bound t(τ ′)
+for any partial combination τ ′ ∈ PC(M) is avoided, in addition to the cases already
+discussed for Algorithm 2, also if τ ′ has been ﬂagged as dominated (line 6). In such a
+case, the value of t(τ ′) is not recomputed. The dominance test is executed by checking
+the condition in (14) immediately after computing the upper bound t(τ ′), whenever at
+least K combinations have been formed (line 9).
+
+ALGORITHM 3: update Bound(τi) distance-based case with dominance check
+
+Input : last seen tuple τi = Ri[ pi]; seen tuples Pj, j = 1, . . . , n, curr. values of t(·) for all
+Output: Tight upper bound t
+
+seen combinations
+
+1 begin
+2
+
+t ← −∞;
+for M ⊂ {1, . . . , n} do
+tM ← −∞;
+for τ ′ ∈ PC(M) do
+
+if τ ′ is not dominated then
+
+if (i ∈ M ∧ τ ′i = τi) ∨ i (cid:19)∈ M then
+
+Compute t(τ ′) solving (9);
+if |O| = K ∧ t(τ ′) ≤ minω∈O S(ω) then
+end
+
+Flag τ ′ as dominated;
+
+end
+tM ← max{tM, t(τ ′)};
+
+end
+
+3
+
+4
+
+5
+
+6
+
+7
+
+8
+
+9
+
+10
+
+11
+
+12
+
+13
+
+14
+
+15
+
+16
+
+17
+
+end
+t = max{t, tM};
+
+end
+return t
+
+18
+19 end
+
+ACM Transactions on Database Systems, Vol. 37, No. 1, Article 2, Publication date: February 2012.
+
+2:12
+
+D. Martinenghi and M. Tagliasacchi
+
+4. TIGHT BOUNDS FOR SPECIAL CASES WITH DISTANCE-BASED ACCESS
+
+4.1. A Case with Euclidean Distance
+In this section, we focus on aggregation functions of the form given in (3). We show
+that, in this case, the computation of the upper bound can be performed by solving a
+set of quadratic programs.
+
+Initially, we make the simplifying assumption that the access kind allows retrieving
+all tuples within a target maximum distance δ from the query q. Thus, all unseen tuples
+in Ri − Pi are constrained to be at a distance of at least δ. Without loss of generality, let
+us assume M = {1, . . . , m} and consider a partial combination τ ∈ PC(M). The upper
+bound t(τ ) is obtained by solving the following instance of (9). We have
+
+m
+
+n
+
+i
+
+max.
+
+ws ln(σ (τi)) − wq(cid:6)x(τi) − q(cid:6)2 − wµ(cid:6)x(τi) − μ(cid:6)2+
+ws ln(cid:4)σ max
+where μ = 1
+i=m+1 yi(cid:5). Problem (15) is a nonconvex QCQP (Quadrati-
+cally Constrained Quadratic Program). Let ν = 1
+i=1 x(τi) denote the centroid of the
+partial combination τ . The solution can be easily found in closed form observing that
+the problem is symmetric in the optimization variables yi. Thus, the optimal solution
+must satisfy y∗m+1 = · · · = y∗n = y∗. We have (see Appendix A.1)
+
+(cid:3)i=1
+(cid:3)i=m+1
+(cid:6)yi − q(cid:6) ≥ δ, i ∈ {m+ 1, . . . , n}
+m(cid:2)m
+
+(cid:5) − wq(cid:6)yi − q(cid:6)2 − wµ(cid:6)yi − μ(cid:6)2
+
+i=1 x(τi) +(cid:2)n
+
+n(cid:4)(cid:2)m
+
+(15)
+
+s.t.
+
+y∗ =(cid:11) q + (ν − q) mwµ
+
+q + (ν − q)
+
+mwµ+nwq
+(cid:6)ν−q(cid:6)
+
+δ
+
+if (cid:6)(ν − q) mwµ
+otherwise
+
+mwµ+nwq (cid:6) ≥ δ
+
+.
+
+Note that y∗ lies on the ray from the query through ν.
+
+In general, however, we need to solve the problem
+
+m
+
+max.
+
+s.t.
+
+n
+
+ws ln(σ (τi)) − wq(cid:6)x(τi) − q(cid:6)2 − wµ(cid:6)x(τi) − μ(cid:6)2+
+ws ln(cid:4)σ max
+
+(cid:3)i=1
+(cid:3)i=m+1
+(cid:6)yi − q(cid:6) ≥ δi, i ∈ {m+ 1, . . . , n}
+
+(cid:5) − wq(cid:6)yi − q(cid:6)2 − wµ(cid:6)yi − μ(cid:6)2
+
+i
+
+(16)
+
+(17)
+
+which differs from (15) because the distances δi are not constrained to be equal. This
+may occur, for example, when the access kind enables retrieving a target number of
+tuples from each relation Ri. Although the problem is no longer symmetric in the
+optimization variables, the following holds.
+
+THEOREM 4.1.
+
+(17) all the y∗i ’s, i = m + 1, . . . , n,
+are collinear and lie on the ray from the query through the centroid of the partial
+combination.
+
+In the optimal solution of
+
+PROOF. Without loss of generality, let q = 0. We prove the claim by contradiction.
+Assume that the optimal solution is such that y∗m+1, . . . , y∗n are not collinear. We show
+that there is a feasible solution of (17) that attains a larger value of the objective
+function, thus contradicting the statement that y∗m+1, . . . , y∗n is the optimal solution.
+The objective function of problem (17) can be rewritten as a function f (ym+1, . . . , yn)
+
+ACM Transactions on Database Systems, Vol. 37, No. 1, Article 2, Publication date: February 2012.
+
+Proximity Measures for Rank Join
+
+2:13
+
+given by
+
+m
+
+f (ym+1, . . . , yn) =
+
+=
+
+ws ln(σ (τi)) − wq(cid:6)xi(cid:6)2 − wµ(cid:6)xi − μ(cid:6)2 +
+
+m
+
+(cid:3)i=1
+− wq(cid:6)yi(cid:6)2 − wµ(cid:6)yi − μ(cid:6)2
+(cid:3)i=m+1
+(cid:3)i=1
+− wq(cid:6)yi(cid:6)2 − wµh(ym+1, . . . , yn)
+
+ws ln(σ (τi)) − wq(cid:6)xi(cid:6)2 +
+
+n
+
+ws ln(cid:4)σ max
+
+i
+
+(cid:5)+
+
+n
+
+(cid:3)i=m+1
+
+ws ln(cid:4)σ max
+
+i
+
+(cid:5)+
+
+n
+
+(cid:3)i=m+1
+
+m2
+n
+
+m
+
+(cid:3)i=1
+
+ν
+(cid:6)ν(cid:6)
+
+where we adopt the shorthand notation xi = x(τi) and h(ym+1, . . . , yn) is given by
+
+h(ym+1, . . . , yn) =
+
+(cid:6)xi − μ(cid:6)2 +
+
+(cid:6)yi − μ(cid:6)2.
+
+(18)
+
+As shown in Appendix A.2, we can rewrite h(ym+1, . . . , yn) as follows.
+
+m
+
+n
+
+h(ym+1, . . . , yn) =
+
+(cid:3)i=1
+xT
+i xi +
+n⎛
+−
+⎝
+
+ν T ν+
+y j⎞
+⎠ − 2
+Let y∗m+1, . . . , y∗n denote the optimal solution, consisting of noncollinear points. Let
+y′m+1, . . . , y′n denote a possible solution deﬁned as follows.
+for m+ 1 ≤ i ≤ n
+
+(cid:3)i=m+1
+yT
+i yi −
+T ⎛
+y j⎞
+⎝
+⎠
+
+ν T ⎛
+⎝
+
+y j⎞
+⎠
+
+y′i = (cid:6)y∗i (cid:6)
+
+(cid:3)j=m+1
+
+(cid:3)j=m+1
+
+(cid:3)j=m+1
+
+m
+n
+
+(19)
+
+(20)
+
+1
+
+n
+
+n
+
+n
+
+Thus, y′i has the same distance from the origin as y∗i (and thus is feasible) but it lies
+along the direction of ν.
+
+We can observe that
+
+since
+
+n
+
+(cid:3)j=m+1
+
+ν T ⎛
+⎝
+(cid:3)j=m+1
+
+n
+
+⎠ > ν T ⎛
+y′j⎞
+⎝
+(cid:3)j=m+1
+
+n
+
+ν T y′j >
+
+n
+
+(cid:3)j=m+1
+
+y∗j⎞
+⎠
+
+ν T y∗j ,
+
+where the strict inequality stems from the observation that the inner products ν T y j
+are maximized when y j has the same direction as ν. Also
+
+n
+
+(cid:3)j=m+1
+
+⎛
+⎝
+
+y′j⎞
+⎠
+
+since
+
+T ⎛
+⎝
+
+n
+
+(cid:3)j=m+1
+
+y∗j⎞
+⎠
+
+T ⎛
+⎝
+(cid:16)(cid:16)(cid:16)(cid:16)(cid:16)(cid:16)
+
+n
+
+(cid:3)j=m+1
+
+n
+
+(cid:3)j=m+1
+
+n
+
+⎠ >⎛
+y′j⎞
+⎝
+>(cid:16)(cid:16)(cid:16)(cid:16)(cid:16)(cid:16)
+y′j(cid:16)(cid:16)(cid:16)(cid:16)(cid:16)(cid:16)
+(cid:3)j=m+1
+
+y∗j⎞
+(cid:3)j=m+1
+⎠
+y∗j(cid:16)(cid:16)(cid:16)(cid:16)(cid:16)(cid:16)
+
+,
+
+n
+
+ACM Transactions on Database Systems, Vol. 37, No. 1, Article 2, Publication date: February 2012.
+
+2:14
+
+D. Martinenghi and M. Tagliasacchi
+
+where the strict inequality is due to the fact that, given two sets of vectors having
+pairwise the same lengths (i.e., (cid:6)y′i(cid:6) = (cid:6)y∗i (cid:6), for m+ 1 ≤ i ≤ n), the length of the sum
+is maximized when the vectors are parallel. Thus we have
+h(y∗m+1, . . . , y∗n) > h(y′m+1, . . . , y′n),
+f (y∗m+1, . . . , y∗n) < f (y′m+1, . . . , y′n),
+
+(22)
+which contradicts the statement that y∗m+1, . . . , y∗n is the optimal solution, hence the
+optimal solution is collinear.
+
+(21)
+
+By Theorem 4.1, we can reduce (17) to a 1-dimensional problem with n scalar vari-
+ables θi, i = 1, . . . , n, representing the distance from q. The ﬁrst m variables are
+constrained to be equal to the length of the orthogonal projection of x(τi) onto the
+line deﬁned by the query and the centroid of the seen tuples, that is, θi = P(x(τi)),
+i = 1, . . . , m, where
+
+P(x(τi)) =
+
+(x(τi) − q)T (ν − q)
+
+(cid:6)ν − q(cid:6)
+
+.
+
+(23)
+
+The remaining n − m variables are lower bounded by the current distances from q,
+that is, θi ≥ δi, m+ 1, . . . , n. The upper bound t(τ ) is obtained by solving the following
+problem.
+
+max.
+
+s.t.
+
+m
+
+n
+
+ws ln(σ (τi)) +
+
+(cid:3)i=1
+θi = P(x(τi)),
+θi ≥ δi,
+
+(cid:3)i=m+1
+i = 1, . . . , m
+i = m+ 1, . . . , n
+
+ws ln(cid:4)σ max
+
+i
+
+n
+
+(cid:3)i=1
+
+(cid:5) −
+
+wqθ 2
+
+i −
+
+n
+
+(cid:3)i=1
+
+wµ⎛
+⎝θi −
+
+1
+n
+
+n
+
+(cid:3)j=1
+
+2
+
+θ j⎞
+⎠
+
+(24)
+
+In Appendix A.3 we show that (24) can be written as a convex Quadratic Program
+(QP) with linear constraints, thus it can be efﬁciently solved using off-the-shelf solvers.
+Let θ∗ = [θ∗1 , . . . , θ∗n]T denote the optimal solution of (24). The solution of the original
+problem (17) is given by
+
+y∗i = q + θ∗i
+
+ν − q
+(cid:6)ν − q(cid:6)
+
+,
+
+i = m+ 1, . . . , n,
+
+(25)
+
+that is, the i-th variable is at distance θ∗i from the query q and on the ray that originates
+from q and goes through ν.
+Example 4.2. Assume Table I reports all the seen tuples. Thus, δ1 = 1, δ2 = 2√2
+2 gives y∗1 = [√2/2, √2/2]T
+and δ3 = 2√2. Solving (17) for the partial combination τ (1)
+and y∗3 = [2, 2]T (and t(τ (1)
+2 ). Solving
+1 × τ (1)
+(17) for τ (1)
+(ν = [−0.5, 0.25]T );
+(ii) computing the projections on the line from q to ν (θ1 = −0.22, θ3 = 1.34); (iii)
+solving (24) to obtain θ∗2 = 2√2; (iv) computing y∗2 = [−2.53, 1.26]T according to (25);
+(v) computing t(τ (1)
+3 ) = −16. Figure 3 shows that the optimal locations of the
+unseen tuples are, in this case, at the minimum allowed distances, but this does not
+hold in general.
+
+2 ) = −12.8), which lie along the ray from q to x(τ (1)
+
+requires: (i) computing the centroid of τ (1)
+
+1 × τ (1)
+
+1 × τ (1)
+
+3
+
+3
+
+4.2. A Case with Cosine Similarity
+In this section, we focus on the computation of a tight bound for an aggregation function
+based on cosine similarity. Our plan of attack is as follows. First, we formulate an
+
+ACM Transactions on Database Systems, Vol. 37, No. 1, Article 2, Publication date: February 2012.
+
+Proximity Measures for Rank Join
+
+2:15
+
+3
+
+2
+
+1
+
+0
+
+−1
+
+−2
+
+−3
+−3
+
+τ (1)
+2
+
+τ (1)
+3
+
+τ (2)
+1
+q
+τ (1)
+1
+
+τ (2)
+2
+
+τ (2)
+3
+
+−2
+
+−1
+
+0
+
+1
+
+2
+
+3
+
+Fig. 3. Solution of problem (17) with the tuples of Table I for: (i) partial combination τ
+combination τ
+tuples are represented by empty circles collinear with the the centroid and the query.
+
+(1)
+2 ; (ii) partial
+(1)
+3 whose centroid is indicated by a black empty circle. The optimal locations of unseen
+
+1 × τ
+
+(1)
+
+optimization problem to determine an upper bound for each partial combination. Then
+we show that, in the optimal solution, the vectors to be placed must lie on the plane
+determined by the origin, the query, and the centroid of the (partial) combination. This
+allows us to reduce the problem to a 2-dimensional problem, for which an approximate
+solution can be found by grid search. An alternative approach consists in ﬁnding an
+exact solution for a variant of the problem, stated as a quadratic problem, which
+provides a correct upper bound very close to the actual tight bound.
+
+We focus now on aggregation functions of the form given in (4), assuming without loss
+of generality, as mentioned, that both the query and the feature vectors are normalized
+to lie on the unit sphere, that is, (cid:6)q(cid:6) = 1 and (cid:6)x(τi)(cid:6) = 1. Note therefore that (cid:6)μ(τ )(cid:6) ≤ 1,
+as μ(τ ) is a convex combination of unit-norm vectors.
+Without loss of generality, let us assume M = {1, . . . , m} and consider a partial
+combination τ ∈ PC(M). The upper bound t(τ ) is obtained by solving the following
+instance of (9). We have
+
+m
+
+μT x(τi)
+(cid:6)μ(cid:6) +
+
+n
+
+(cid:3)i=m+1
+
+wsσ max
+
+i
+
++ wqqT yi + wµ
+
+μT yi
+(cid:6)μ(cid:6)
+
+(26)
+
+max.
+
+s.t.
+
+wsσ (τi) + wqqT x(τi) + wµ
+
+(cid:3)i=1
+1 − qT yi ≥ δi, i ∈ {m+ 1, . . . , n}
+yT
+i yi = 1,
+
+where, as usual, σ max
+indicates the maximum score possible for relation Ri, and, for
+compactness, the centroid μ(τ ) is written μ. Similarly to the case with Euclidean dis-
+tance, it is possible to reduce the size of the problem, thanks to Theorem 4.3 given
+next.
+
+i
+
+THEOREM 4.3. In the optimal solution of (26) each y∗i , i = m+ 1, . . . , n, is of the form
+(27)
+
+aiq + biμ,
+
+where ai, bi ∈ R.
+
+ACM Transactions on Database Systems, Vol. 37, No. 1, Article 2, Publication date: February 2012.
+
+2:16
+
+D. Martinenghi and M. Tagliasacchi
+
+PROOF. We prove the claim by contradiction. Assume that the optimal solution is such
+that not all of y∗m+1, . . . , y∗n are of form (27). We show that there is a feasible solution
+¯ym+1, . . . , ¯yn of (26), with the additional constraints qT yi = qT y∗i , i ∈ {m+1, . . . , n}, such
+that: (i) ¯yi is of form (27), i ∈ {m+1, . . . , n} and (ii) it attains a larger value of the objective
+function, thus contradicting the statement that y∗m+1, . . . , y∗n is the optimal solution.
+The objective function of problem (26) can be rewritten as a function f (ym+1, . . . , yn)
+deﬁned as
+
+m
+
+n
+
+m
+
+f (ym+1, . . . , yn) =
+
+n
+
+(cid:3)i=1
+(cid:3)i=m+1
+
+wsσ (τi) +
+
+(cid:3)i=m+1
+(cid:3)i=1
+wqqT yi +
+
+m
+
+wµ
+
+wqqT xi+
+
+wsσ max
+
+i
+
++
+
+(cid:3)i=1
+μT xi
+(cid:3)i=m+1
+(cid:6)μ(cid:6) +
+
+n
+
+wµ
+
+μT yi
+(cid:6)μ(cid:6)
+
+,
+
+(28)
+
+where, as usual, we write xi instead of x(τi). Note that the ﬁrst four terms are constant,
+given the constraint qT yi = qT y∗i , while the last two terms can be rewritten as follows.
+
+n
+
+wµ
+
+(cid:6)μ(cid:6)(cid:17) m
+(cid:3)i=1
+μT xi +
+(cid:6)μ(cid:6) (cid:17) m
+(cid:3)i=1
+
+wµμT
+
+=
+
+(cid:3)i=m+1
+xi +
+
+μT yi(cid:18)
+yi(cid:18) =
+(cid:3)i=m+1
+
+n
+
+Since (cid:6)μ(cid:6) is positive and x2 is monotonically increasing for x ≥ 0, we can maximize the
+function in (28) under the given constraints by solving the following equivalent problem.
+
+wµμT
+(cid:6)μ(cid:6)
+
+[μn] =
+
+wµ(cid:6)μ(cid:6)2n
+(cid:6)μ(cid:6) = wµn(cid:6)μ(cid:6)
+
+(29)
+
+max. (cid:6)μ(cid:6)2
+s.t.
+
+qT yi = qT y∗i , i ∈ {m+ 1, . . . , n}
+yT
+i yi = 1
+
+Let L(ym+1, . . . , yn, αm+1, . . . , αn, βm+1, . . . , βn) denote the Lagrangian function associ-
+ated with (30), that is
+
+L(ym+1, . . . , yn, αm+1, . . . , αn, βm+1, . . . , βn) = −(cid:6)μ(cid:6)2
+
++
+
+n
+
+(cid:3)i=m+1
+
+αi(qT yi − qT y∗i ) +
+
+n
+
+(cid:3)i=m+1
+
+βi(cid:19)yT
+
+i yi − 1(cid:20) ,
+
+(31)
+
+where αi and βi are the Lagrange multipliers associated with the equality constraints.
+The Karush-Kuhn-Tucker equations give necessary conditions that need to be satisﬁed
+by the solution of (30). More speciﬁcally, the stationarity constraints impose that
+
+where ¯ym+1, . . . , ¯yn denotes the optimal solution of (30). Therefore, we have
+
+2
+n
+
+= −
+
+μ + αiq + 2βi ¯yi = 0,
+
+∂ L(·)
+
+∂yi (cid:21)(cid:21)(cid:21)(cid:21)yi= ¯yi
+
+¯yi = −
+
+αi
+2βi
+
+q +
+
+1
+nβi
+
+μ.
+
+This indicates that ¯yi is of form (27), i ∈ {m + 1, . . . , n}. Since we assumed that not
+all of y∗m+1, . . . , y∗n are of form (27), and y∗m+1, . . . , y∗n is also a solution of (30), then
+f ( ¯ym+1, . . . , ¯yn) > f (y∗m+1, . . . , y∗n). Now, ¯ym+1, . . . , ¯yn is also a solution for problem (26),
+hence, y∗m+1, . . . , y∗n cannot be the optimal solution. Contradiction.
+
+ACM Transactions on Database Systems, Vol. 37, No. 1, Article 2, Publication date: February 2012.
+
+(30)
+
+(32)
+
+(33)
+
+Proximity Measures for Rank Join
+
+2:17
+
+τ (2)
+2
+
+τ (1)
+2
+
+τ (2)
+1
+
+τ (1)
+3
+
+1
+
+0.5
+
+0
+0
+
+q
+τ (1)
+1
+
+τ (2)
+3
+
+0
+
+0.5
+
+0.5
+
+1
+
+1
+
+(1)
+Fig. 4. Solutions of problem (26) with the tuples of Figure 1(b) for partial combination τ
+2
+
+3 ×
+(1)
+(whose centroid is indicated by a black empty circle). The optimal locations of the missing tuples are
+τ
+1
+represented by empty circles lying on the corresponding (q, ν)-plane, whose intersection with the unit sphere
+is indicated with a black line.
+
+and τ
+
+(1)
+
+When q and μ are not parallel, the locus π of points of form (27) is a 2-dimensional
+subspace (a plane) deﬁned by the span of the vectors q and μ. Theorem 4.3 claims
+then that all the points of the optimal solution of (26) lie on π. Note that, q and μ
+cannot be parallel if δi > 0 for at least one i ∈ {m+ 1, . . . , n} in problem (26), that is, if
+there is at least one constraint on the cosine similarity with the query. Indeed, q and
+μ would be parallel only if the points of the solution were not all on the same side with
+respect to q. But, in such a case, an equal or higher (if wµ > 0) value of the objective
+function would be obtained by placing all the points on the same side with respect to q,
+moving all points from the other side in the symmetric position with respect to q. In the
+degenerate case when δi = 0 for all i ∈ {m+ 1, . . . , n}, each y∗i trivially coincides with q.
+When we compute the tight bound associated with a partial combination τ , we do
+not yet know the centroid μ, but only the partial centroid ν (which is deﬁned if M is
+nonempty). The origin, q, and ν also identify a plane (henceforth, the (q, ν)-plane), if
+M (cid:19)= ∅, and such a plane turns out to be the same as π, as stated next.
+
+THEOREM 4.4. Let τ ∈ PC(M) with M (cid:19)= ∅. Then, in the optimal solution of (26), each
+
+y∗i , i = m+ 1, . . . , n, lies on the (q, ν)-plane.
+
+PROOF. From Theorem 4.3, we know that each y∗i , i = m+ 1, . . . , n, lies on the plane
+deﬁned by q, μ, and the origin. Let π be such a plane. To prove the theorem, it sufﬁces
+to show that π coincides with the (q, ν)-plane, that is, that ν lies on π.
+Consider the vector θ = (cid:2)n
+on π. By deﬁnition, the partial centroid can be written as ν = 1
+linear combination of μ and θ, and thus ν must also lie on π.
+In addition to the tuples of Figure 1(b), Figure 4 shows:
+—the centroid of the partial combination τ (1)
+
+i=m+1 y∗i . All the terms in the sum lie on π, so θ also lies
+m(nμ − θ), that is, ν is a
+
+1 as a small black circle and the optimal
+
+location of an unseen tuple from R2 (in red) to complete the partial combination;
+
+3 ×τ (1)
+
+ACM Transactions on Database Systems, Vol. 37, No. 1, Article 2, Publication date: February 2012.
+
+2:18
+
+D. Martinenghi and M. Tagliasacchi
+
+1
+
+0.8
+
+0.6
+
+0.4
+
+0.2
+
+0
+
+0
+
+˜y
+
+∗
+
+3
+
+˜μ∗
+
+˜x2 = ˜ν
+
+˜y
+
+∗
+
+1
+
+˜q
+
+0.2
+
+0.4
+
+0.6
+
+0.8
+
+1
+
+1
+
+0.8
+
+0.6
+
+0.4
+
+0.2
+
+0
+
+0
+
+˜q
+
+˜ν →
+
+˜x1
+
+˜x3
+˜μ∗
+
+˜y
+
+∗
+
+2
+
+0.2
+
+0.4
+
+0.6
+
+0.8
+
+1
+
+(a) projection of Figure 4 on the ( q, ν ) -plane for par-
+tial combination τ ( 1)
+
+2
+
+(b) projection of Figure 4 on the ( q, ν ) -plane for par-
+tial combination τ ( 1)
+
+× τ ( 1)
+
+3
+
+1
+
+Fig. 5. Projections of Figure 4 on the (q, ν)-planes for the partial combinations.
+
+—the optimal locations of unseen tuples from R1 (in blue) and R3 (in green) to complete
+
+the partial combination τ (1)
+2 .
+
+The ﬁgure also shows, as black lines, the intersection of the unit sphere with the
+(q, ν)-planes corresponding to the two partial combinations.
+
+Figure 5 shows the projections of the points in Figure 4 onto the two (q, ν)-planes. In
+Figure 5(a), the (projected) partial centroid ˜ν coincides with (the projection of) the only
+point ( ˜x) composing the partial combination τ (1)
+2 ; ˜y∗1 and ˜y∗3 are the projections of the
+optimal locations of the unseen tuples completing the partial combination, and ˜μ is the
+projection of the centroid. In Figure 5(b), we indicate similar data for the projection of
+partial combination τ (1)
+1 , given by points ˜x1 and ˜x3; here, ˜y∗2 is the projection of
+the optimal location of the unseen tuple completing the partial combination.
+
+3 × τ (1)
+
+Theorem 4.4 suggests to reduce (26) to a 2-dimensional problem with n variables
+˜yi ∈ R2 representing points on the unit circle. Let U = [u1, u2], ui ∈ Rd denote a basis
+for the subspace π. If M is nonempty and q and ν are not parallel, the (q, ν)-plane is
+univocally identiﬁed and a basis can be found, for example, by selecting the ﬁrst two
+output singular vectors of the singular value decomposition of the d × 2 matrix [q, ν].
+Then, we set ˜xi = UT xi, i = 1, . . . , m, that is, equal to the projection of xi onto π.
+When τ ∈ PC(∅) or ν is parallel to q , the (q, ν)-plane is not univocally identiﬁed. In
+such a case, we simply pick one such plane by setting u1 = q and u2 equal to a vector
+orthogonal to u1. In all cases, we deﬁne ˜q = UT q, ˜μ = UT μ, and ˜ν = UT ν. The upper
+bound t(τ ) is obtained by solving the following problem
+
+max. wq
+
+s.t.
+
+n
+
+n
+
+wµ
+(cid:6) ˜μ(cid:6)
+
+˜qT ˜yi +
+
+˜μT ˜yi + c
+
+(cid:3)i=1
+(cid:3)i=1
+˜yi = ˜xi, i ∈ {1, . . . , m}
+1 − ˜qT ˜yi ≥ δi, i ∈ {m+ 1, . . . , n}
+˜yT
+i ˜yi = 1, i ∈ {1, . . . , n}
+
+(34)
+
+ACM Transactions on Database Systems, Vol. 37, No. 1, Article 2, Publication date: February 2012.
+
+Proximity Measures for Rank Join
+
+2:19
+
+i
+
+i=m+1 wsσ max
+
+i=1 wsσ (τi)+(cid:2)n
+
+where c =(cid:2)m
+. Note that the vectors ˜yi, i ∈ {m+ 1, . . . , n}, can
+be parameterized based on the value of an angle, that is, ˜yi = [cos θi, sin θi]T . Therefore,
+the problem has n− m ≤ n scalar unknown variables θi.
+An approximate solution of (34) can be found by means of a grid search on a (n− m)-
+dimensional space, that is, considering P discrete values for each of the variables θi,
+i ∈ {m+ 1, . . . , n}. In this case, the objective function in (34) needs to be evaluated up to
+Pn−m times. Increasing P increases the accuracy of the solution at the cost of additional
+computation.
+
+An alternative approach consists of computing a correct upper bound, which can be
+obtained exactly although it might not be tight. To this end, consider a feasible solution
+¯˜ym+1, . . . , ¯˜yn constructed according to the following criteria: (i) all the constraints in (34)
+are satisﬁed with the equality sign, that is, 1 − ˜qT ¯˜yi = δi, ¯˜yT
+¯˜yi = 1, i ∈ {m+ 1, . . . , n}.
+Note that, for each variable, there are two such unit-norm vectors ¯˜yi, symmetric with
+respect to the vector ˜q; (ii) among all the possible 2n−m feasible solutions satisfying the
+constraints given before, select one of the two feasible solutions for which all unit-norm
+vectors ¯˜yi are on the same side as ˜ν with respect to ˜q. Let ¯˜μ = m
+n−m( ¯˜ym+1 +· · ·+ ¯˜yn)
+denote the centroid corresponding to such a feasible solution and consider the following
+problem, obtained from (34) by replacing (cid:6) ˜μ(cid:6) with the constant value (cid:6) ¯˜μ(cid:6).
+
+n ν + 1
+
+i
+
+n
+
+max. wq
+
+s.t.
+
+n
+
+wµ
+
+(cid:6) ¯˜μ(cid:6)
+
+˜qT ˜yi +
+
+˜μT ˜yi + c
+
+(cid:3)i=1
+(cid:3)i=1
+˜yi = ˜xi, i ∈ {1, . . . , m}
+1 − ˜qT ˜yi ≥ δi, i ∈ {m+ 1, . . . , n}
+˜yT
+i ˜yi = 1, i ∈ {1, . . . , n}
+
+Let f ∗ and ¯f ∗ denote, respectively, the value attained by the optimal solution of (34)
+and (35).
+
+It is possible to prove that the following theorem holds.
+
+¯f ∗ is a correct upper bound on f ∗.
+
+THEOREM 4.5.
+PROOF. Let ˜y∗m+1, . . . , ˜y∗n and ¯˜y∗m+1, . . . , ¯˜y∗n denote, respectively, the optimal solution of
+(34) and (35). Let h( ˜ym+1, . . . , ˜yn) = wq(cid:2)n
+i=1 ˜μT ˜yi
+and d( ˜ym+1, . . . , ˜yn) = (cid:6) ˜μ(cid:6).
+We can leverage the following lemma, which gives a lower bound on the centroid cor-
+responding to the optimal solution of (34), (cid:6) ˜μ∗(cid:6), where ˜μ∗ = m
+
+i=1 ˜qT ˜yi + c, n( ˜ym+1, . . . , ˜yn) = wµ(cid:2)n
+
+LEMMA 4.6. Let ¯˜μ = m
+It is possible to ﬁnd the following relationship between the optimal solutions of (35)
+
+n ν + 1
+
+n ν + 1
+n−m( ¯˜ym+1 + · · · + ¯˜yn). Then (cid:6) ˜μ∗(cid:6) ≥ (cid:6) ¯˜μ(cid:6).
+
+n−m(cid:4) ˜y∗m+1 + · · · + ˜y∗n(cid:5).
+
+and (34). We have
+
+(35)
+
+(36)
+
+(37)
+
+(38)
+
+¯f ∗ =h(cid:4) ¯˜y∗m+1, . . . , ¯˜y∗n(cid:5) +
+h(cid:4) ˜y∗m+1, . . . , ˜y∗n(cid:5) +
+h(cid:4) ˜y∗m+1, . . . , ˜y∗n(cid:5) +
+
+≥,
+
+(cid:6) ¯˜μ(cid:6)
+
+n(cid:4) ¯˜y∗m+1, . . . , ¯˜y∗n(cid:5)
+n(cid:4) ˜y∗m+1, . . . , ˜y∗n(cid:5)
+n(cid:4) ˜y∗m+1, . . . , ˜y∗n(cid:5)
+d(cid:4) ˜y∗m+1, . . . , ˜y∗n(cid:5) = f ∗,
+
+(cid:6) ¯˜μ(cid:6)
+
+≥,
+
+where the ﬁrst inequality is due to the fact that ¯˜y∗m+1, . . . , ¯˜y∗n is the optimal solution of
+(35), and the second inequality is due to Lemma 4.6.
+
+ACM Transactions on Database Systems, Vol. 37, No. 1, Article 2, Publication date: February 2012.
+
+2:20
+
+D. Martinenghi and M. Tagliasacchi
+
+1
+
+0.95
+
+0.9
+
+0.85
+
+0.8
+
+0.75
+
+0.7
+
+0.65
+
+0.6
+
+0.55
+
+0.5
+
+˜y
+
+∗
+
+3 = ¯˜y3
+
+˜μ∗
+
+¯˜μ
+
+˜y
+
+∗
+
+1
+˜x2 = ˜ν
+¯˜y1
+
+˜q
+
+0.4
+
+0.5
+
+0.6
+
+0.7
+
+0.8
+
+0.9
+
+Fig. 6. Variant of Figure 5(a) with different weights in the aggregation function. The optimal solution ˜y∗1 is
+not placed in the allowed position closest to the query, that is, ¯˜y1.
+
+n ν + 1
+
+i=1 ˜qT ˜yi + c and hµ( ˜ym+1, . . . , ˜yn) = wµ(cid:6) ˜μT (cid:6).
+
+PROOF OF LEMMA 4.6. Consider a feasible solution ¯˜ym+1, . . . , ¯˜yn of problem (34) con-
+structed by satisfying the constraints with the equality, as previously described. Let
+n(cid:4) ¯˜ym+1 + · · · + ¯˜yn(cid:5) denote the centroid corresponding to such a feasible solu-
+¯˜μ = m
+tion.
+Let f ( ˜ym+1, . . . , ˜yn) = hq( ˜ym+1, . . . , ˜yn) + hµ( ˜ym+1, . . . , ˜yn), where hq( ˜ym+1, . . . , ˜yn) =
+wq(cid:2)n
+Let ˜y∗m+1, . . . , ˜y∗n denote the optimal solution of (34). Hence
+f(cid:4) ˜y∗m+1, . . . , ˜y∗n(cid:5) ≥ f(cid:4) ¯˜ym+1, . . . , ¯˜yn(cid:5).
+hq(cid:4) ¯˜ym+1, . . . , ¯˜yn(cid:5) ≥ hq(cid:4) ˜y∗m+1, . . . , ˜y∗n(cid:5).
+hµ(cid:4) ˜y∗m+1, . . . , ˜y∗n(cid:5) ≥ hµ(cid:4) ¯˜ym+1, . . . , ¯˜yn(cid:5).
+
+The feasible solution ¯˜ym+1, . . . , ¯˜yn is the closest to the query vector ˜q. Hence
+
+From (39) and (40) it follows that
+
+(41)
+
+(40)
+
+(39)
+
+solving (35) is tight.
+
+Note that, if ¯˜y∗i = ¯˜yi, then ˜y∗i = ¯˜y∗i and ¯f ∗ = f ∗, that is, the upper bound computed
+Figure 6 shows a detailed view of a variant of the case of Figure 5(a), in which a
+larger value for weight wµ than for wq is used. This causes the optimal solution ˜y∗1
+not to lie in the allowed position closest to the query, that is, ¯˜y1. As can be seen, the
+centroid ˜μ∗ of the combination found with the optimal solution has a norm that is very
+similar to the norm of vector ¯˜μ, with (cid:6) ˜μ∗(cid:6) ≥ (cid:6) ¯˜μ(cid:6), as proved in Lemma 4.6.
+trated in Appendix A.4.
+
+Unlike (34), (35) is a quadratic problem, whose exact solution can be found as illus-
+
+5. BOUNDING SCHEMES FOR SCORE-BASED ACCESS
+Under score-based access, it is possible to compute a correct upper bound by keeping
+track of the scores σ (Ri[1]) and σ (Ri[ pi]) of the ﬁrst and, respectively, last accessed
+tuples from each relation. The upper bound is given by
+
+1, . . . , ts
+
+ts
+
+c = max(cid:22)ts
+
+n(cid:23), with ts
+
+i = f(cid:4) ¯S s
+
+1, . . . ,S s
+
+i, . . . , ¯S s
+n(cid:5),
+
+(42)
+
+ACM Transactions on Database Systems, Vol. 37, No. 1, Article 2, Publication date: February 2012.
+
+¯S s
+j = g j(cid:4)σ (Ri[1]), 0, 0(cid:5) .
+S s
+i = gi(cid:4)σ (Ri[ pi]), 0, 0(cid:5)
+
+(43)
+
+(44)
+
+Proximity Measures for Rank Join
+
+2:21
+
+τ (2)
+2
+
+τ (2)
+1
+
+τ (1)
+2
+τ (1)
+1
+
+Fig. 7. Geometry of the example used in the proof of Theorem 5.1.
+
+j is an upper bound on the proximity weighted score that can be attained by a
+
+where ¯S s
+tuple τ j ∈ Rj, that is,
+
+Similarly S s
+attained by an unseen tuple τi ∈ Ri − Pi.
+
+i denotes an upper bound on the proximity weighted score that can be
+
+Such a bound is a corner bound (like that of HRJN [Ilyas et al. 2004]), and it does
+not consider any geometric constraints of the problem at hand. As for the case of
+distance-based access, the bound is not tight and precludes instance optimality.
+
+THEOREM 5.1. Let A be an algorithm complying with the ProxRJ template for score-
+based access using the corner bound (42). Then A is not instance optimal for problems
+with at least two relations.
+
+PROOF. Consider an aggregation function of form (3) on a one-dimensional space,
+
+with ws = wq = wµ = 1, q = 0, and a problem I = (R1, R2,S, 1) with
+σ(cid:4)τ (1)
+x(cid:4)τ (1)
+1 (cid:5) = [1] σ(cid:4)τ (1)
+1 (cid:5) = 1
+2 (cid:5) = [1]
+σ(cid:4)τ (2)
+1 (cid:5) = e−5 x(cid:4)τ (2)
+1 (cid:5) = [0] σ(cid:4)τ (2)
+2 (cid:5) = [1/3]
+as shown in Figure 7. The combination τ = τ (1)
+2 has score S(τ ) = −4/3, which is
+the highest possible for all seen and unseen combinations. However, when p1 = p2 = 2
+c = 0, thus τ cannot be guaranteed to be top by ts
+the corner bound is ts
+c > S(τ ).
+Deepening on R1 cannot lower ts
+c remains above S(τ ) until the ﬁrst
+( j)
+2 ) ≤ e−4/3. The number of tuples between τ (2)
+in R2
+tuple τ
+2
+is arbitrary, hence the claim.
+
+2 (cid:5) = 1 x(cid:4)τ (1)
+2 (cid:5) = 1 x(cid:4)τ (2)
+1 × τ (2)
+
+c . When p2 grows, ts
+
+is seen with σ (τ
+
+( j)
+2 and τ
+2
+
+c , as ts
+
+( j)
+
+Similarly to Section 3, let τ ∈ PC(M) denote a partial combination that can be
+formed using seen tuples from Ri, i ∈ M. A tight upper bound ts(τ ) is obtained by
+solving the following unconstrained optimization problem in the variables yi ∈ Rd,
+i ∈ {1, . . . , n} − M.
+
+maximize
+
+f(cid:4)S s
+1, . . . ,S s
+i =(cid:8)gi(cid:4)σ (τi), δ(x(τi), q), δ(x(τi), μ)(cid:5) ,
+S s
+gi(cid:4)σ (Ri[ pi]), δ(yi, q), δ(yi, μ)(cid:5) ,
+
+n(cid:5), where
+i ∈ M
+i ∈ {1, . . . , n} − M
+
+A tight bound for the score-based case is then given by
+
+ts = max(cid:22)ts
+
+M|M ⊂ {1, . . . , n}(cid:23), ts
+
+M = max{ts(τ )|τ ∈ PC(M)}.
+
+This sufﬁces to obtain instance optimality. The proofs of these claims are analogous to
+those of Theorems 3.2 and 3.4.
+
+(45)
+
+(46)
+
+THEOREM 5.2. The bounding scheme (46) is tight.
+
+ACM Transactions on Database Systems, Vol. 37, No. 1, Article 2, Publication date: February 2012.
+
+2:22
+
+D. Martinenghi and M. Tagliasacchi
+
+THEOREM 5.3. ProxRJ with the tight bounding scheme (46) and a round-robin pulling
+
+strategy is instance optimal for proximity rank join with score-based access.
+
+Unlike the case of distance-based access, for each set M, we need to keep track of
+only one partial combination τ M
+best that dominates all the others. In other words, if,
+at a given state of execution, ts(τ α) ≥ ts(τ β), for two given partial combinations τ α
+and τ β, then the same inequality holds when additional tuples are retrieved from Ri,
+i ∈ {1, . . . , n} − M. Retrieving additional tuples from Ri, i ∈ M creates new partial
+combinations. Updating the tight bound when a new tuple is retrieved can be done
+incrementally, as it sufﬁces to solve (45) for each new partial combination and to keep
+track of the partial combination with the highest upper bound.
+
+Algorithm 4 provides the pseudocode that is executed for updating the value of
+the tight bound after each retrieved tuple τi for the case of score-based access. The
+algorithm includes a dominance test and proceeds as Algorithm 3, with two main
+differences: (i) the upper bound of a partial combination is computed according to
+(45), and (ii) partial combinations that do not exceed the current value of ts
+M can
+be immediately ﬂagged as dominated, and will remain so. Note that, for each M ⊂
+{1, . . . , n}, we keep track of the partial combination τ M
+best with the currently highest
+upper bound, each stored as a global variable. At line 10, if the upper bound of the
+current partial combination τ ′ exceeds ts
+best (if deﬁned) as
+dominated (line 11), we update ts
+
+M, we ﬂag the previous τ M
+
+M (line 12), and we set τ ′ as the new τ M
+
+best (line 13).
+
+ALGORITHM 4: update Bound(τi) score-based case with dominance check
+
+Input : last seen tuple τi = Ri[ pi]; seen tuples Pj, j = 1, . . . , n, curr. values of ts(·) for all
+Output: Tight upper bound ts
+
+best for every M ⊂ {1, . . . , n}
+
+seen combinations, τ M
+
+1 begin
+2
+
+ts ← −∞;
+for M ⊂ {1, . . . , n} do
+ts
+M ← −∞;
+for τ ′ ∈ PC(M) do
+
+if τ ′ is not dominated then
+
+if i ∈ M ∧ τ ′i = τi ∨ i (cid:19)∈ M then
+Compute ts(τ ′) solving (45);
+end
+if ts(τ ′) > ts
+Flag τ M
+ts
+M ← ts(τ ′);
+τ M
+best ← τ ′;
+Flag τ ′ as dominated;
+
+M then
+best as dominated;
+
+else
+
+end
+
+end
+
+end
+
+3
+
+4
+
+5
+
+6
+
+7
+
+8
+
+9
+
+10
+
+11
+
+12
+
+13
+
+14
+
+15
+
+16
+
+17
+
+18
+
+19
+
+end
+return ts
+
+20
+21 end
+
+5.1. Tight Bound for a Case with Euclidean Distance
+Consider an aggregation function of the form given in (3). Without loss of generality let
+us assume M = {1, . . . , m} and a partial combination τ ∈ PC(M). The (partial) upper
+
+ACM Transactions on Database Systems, Vol. 37, No. 1, Article 2, Publication date: February 2012.
+
+Proximity Measures for Rank Join
+
+2:23
+
+bound is obtained by solving the following problem.
+
+m
+
+max.
+
+wsσ (τi) − wq(cid:6)x(τi) − q(cid:6)2 − wµ(cid:6)x(τi) − μ(cid:6)2+
+
+n
+
+(cid:3)i=1
+(cid:3)i=m+1
+
+wsσ (R[ pi]) − wq(cid:6)yi − q(cid:6)2 − wµ(cid:6)yi − μ(cid:6)2
+
+The problem is of the same kind as (15), but without constraints. Therefore, the optimal
+solution is given by
+
+y∗m+1 = · · · = y∗n = q + (ν − q)
+
+mwµ
+
+mwµ + nwq
+
+,
+
+(47)
+
+that is, the upper bound on the score of unseen combinations is achieved by completing
+the partial combination τ with tuples from Ri, i = m+ 1, . . . , n such that: (i) the unseen
+tuples are located along the ray that originates from the query q and goes through the
+centroid ν of the partial combination; (ii) the score is equal to the score of the last seen
+tuple of Ri.
+
+5.2. Bound for a Case with Cosine Similarity
+Consider an aggregation function of the form given in (4). Without loss of generality let
+us assume M = {1, . . . , m} and a partial combination τ ∈ PC(M). The (partial) upper
+bound is obtained by solving the following problem.
+
+m
+
+max.
+
+s.t.
+
+wsσ (τi) + wqqT x(τi) + wµ
+
+(cid:3)i=1
+yT
+i yi = 1
+
+μT x(τi)
+(cid:6)μ(cid:6) +
+
+n
+
+(cid:3)i=m+1
+
+wsσ (R[ pi]) + wqqT yi + wµ
+
+yT
+i μ
+(cid:6)μ(cid:6)
+
+(48)
+
+i
+
+The problem is of the same kind as (26), but replacing σ max
+with σ (R[ pi]), and removing
+the constraints 1 − qT yi ≥ δi due to distance-based access (this is equivalent to setting
+δi = 0). It can be observed that the problem is symmetric in the optimization variables
+yi. Thus, the optimal solution must satisfy y∗m+1 = · · · = y∗n = y∗. Finding the value f ∗
+attained by the optimal solution of (48) is complicated by the presence of the term (cid:6)μ(cid:6).
+Therefore, we proceed as in the alternative approach of Section 4.2 and ﬁnd the value
+¯f ∗ (where ¯f ∗ ≥ f ∗ due to Theorem (4.5)) attained by the following problem. We have
+yT μ
+(cid:6) ¯μ(cid:6)
+
+wsσ (R[ pi]) + wqqT y + wµ
+
+wsσ (τi) + wqqT x(τi) + wµ
+
+μT x(τi)
+(cid:6) ¯μ(cid:6) +
+
+max.
+
+n
+
+(cid:3)i=m+1
+
+m
+
+(cid:3)i=1
+yT y = 1,
+
+s.t.
+
+(49)
+
+where ¯μ = m
+n q is a constant obtained by considering a feasible solution
+¯ym+1, . . . , ¯yn that satisﬁes δi = 0, that is, ¯ym+1 = · · · = ¯yn = q. As shown in Ap-
+pendix A.5, the optimal solution of (49) is given by
+
+n ν + n−m
+
+where
+
+¯y∗m+1 = · · · = ¯y∗n =
+
+b
+
+√bT b
+
+,
+
+b = (n− m)(cid:24)wqq + 2
+
+wµ
+(cid:6) ¯μ(cid:6)
+
+m
+n
+
+ν(cid:25) .
+
+(50)
+
+(51)
+
+ACM Transactions on Database Systems, Vol. 37, No. 1, Article 2, Publication date: February 2012.
+
+2:24
+
+D. Martinenghi and M. Tagliasacchi
+
+6. PULLING STRATEGY
+A pulling strategy identiﬁes the relation Ri from which the next tuple is retrieved. We
+describe a Potential Adaptive (PA) strategy that is based on the current upper bounds
+tM, deﬁned for each set M ⊂ {1, . . . , n}. We generalize the approach introduced in
+Finger and Polyzotis [2009] to the case of n ≥ 2 relations. Let poti denote the potential
+of relation Ri, deﬁned as poti = max{tM|M ⊂ {1, . . . , n} − {i}}, that is, the upper bound
+on the aggregate score of combinations that can be formed with unseen tuples from Ri.
+The PA strategy is then deﬁned as follows: access relation Ri such that poti is maximal
+(among pot1, . . . , potn), breaking ties in favor of the relation with the least depth pi,
+then the relation with the least index i.
+
+Let TBPA and TBRR denote algorithms complying with the ProxRJ template using
+
+the tight bound (9) and, respectively, the PA and round-robin strategy.
+
+THEOREM 6.1. Let I be a proximity rank join problem. Then depth(TBPA, I, i) ≤
+
+depth(TBRR, I, i) for all i.
+
+PROOF. The proof of this theorem is very similar to the proof of Theorem 4.2
+in Schnaitter and Polyzotis [2008]. There, the authors show that their potential adap-
+tive version of the PBRJ template with a corner bound (PBRJ∗c ) always terminates
+with a depth less than or equal to the depth of the round-robin execution (PBRJRR
+),
+for every input relation. Their argument seamlessly adapts to our case by replacing
+c with TBRR, and (iii) their upper bound ¯S(Ri( pi))
+(i) PBRJ∗c with TBPA, (ii) PBRJRR
+with the potential poti of relation Ri. The proof proceeds by contradiction, assuming an
+index k for which depth(TBPA, I, k) > depth(TBRR, I, k). Let pRR
+i = depth(TBRR, I, i)
+and let pi be the depth of Ri when TBPA decides to pull Rk[ pRR
+k + 1]. Then, it can be
+shown that, for each i, either TBPA has seen all tuples from Ri seen by TBRR or no
+tuple past Ri[ pi] can participate in the solution. Thus, TBPA has already formed all
+combinations found by TBRR. Also, the score of the last combination found by TBRR
+is at least poti, for every i, and max{ pot1, . . . , potn} coincides with our tight bound.
+Therefore the termination condition of TBPA is met. Contradiction.
+
+c
+
+COROLLARY 6.2. TBPA is instance optimal.
+
+PROOF. Trivial, by instance optimality of TBRR (Theorems 3.4 and 5.3) and
+
+Theorem 6.1.
+
+7. EXPERIMENTAL STUDY
+We investigate the following aspects: (i) I/O cost reduction, in terms of the sumDepths
+metrics, that can be achieved using a tight bounding scheme and an adaptive pulling
+strategy, with respect to a simpler corner bound and a round-robin pulling strategy;
+(ii) overhead, in terms of CPU time, due to the computation of a tight bound and
+potential savings that can be achieved when dominance is exploited; (iii) impact, on
+the aforementioned metrics, of the problem parameters, that is, number of results,
+dimensionality of the feature space, tuple density in the feature space, skewness of the
+tuple density, spatial skewness, number of relations, join condition, and aggregation
+function weights.
+
+7.1. Methodology
+
+7.1.1. Datasets. First, we conduct our analysis on synthetic data whose relevant pa-
+
+rameters are summarized in Table III. The dataset is generated as follows.
+
+For the experiments on Euclidean distance, for each of the relations Ri, i = 1, . . . , n,
+we generate a number of tuples. Each tuple τi is assigned a random score σ (τi), sampled
+
+ACM Transactions on Database Systems, Vol. 37, No. 1, Article 2, Publication date: February 2012.
+
+Proximity Measures for Rank Join
+
+2:25
+
+Table III. Operating Parameters (defaults in bold)
+
+Full name
+Number of results
+Number of dimensions
+Density
+Skewness
+Spatial skewness
+Number of relations
+Join condition
+Preference weight
+
+Parameter
+
+Tested values
+
+K
+d
+ρ
+
+ρ1/ρ2
+
+C
+n
+θ
+
+wq/ws
+
+1, 10, 50
+1, 2, 4, 8, 16
+20, 50, 100, 200
+1, 2, 4, 8
+100, 8, 4, 2, 1
+2, 3, 4
+∞, 0.4, 0.2, 0.1, 0.05
+10, 5, 1, 0.2, 0.1
+
+from a uniform distribution, and a feature vector x(τi). The feature vectors are obtained
+by sampling a d-dimensional uniform distribution centered in 0 a number of times so
+as to obtain the desired average density ρ expressed in terms of tuples per volume
+unit. When testing n = 2, we change the skewness parameter ρ1/ρ2 in such a way as to
+generate relations with different densities. Spatial skewness is achieved by sampling C
+vectors per volume unit, that is, ci ∈ Rd, i = 1, . . . , C. The feature vectors are sampled
+from a Gaussian Mixture Model (GMM) with C Gaussians with means ci and diagonal
+covariance matrix (variance σ 2 = 0.0025 along each dimension). When C → ρ, the
+feature vectors are uniformly distributed. For low values of C, the feature vectors are
+distributed in C clusters, while preserving the overall density ρ.
+
+For the experiments on cosine similarity, the feature vectors are obtained by sampling
+a uniform distribution on the unit d-dimensional hypersphere centered in 0 a number
+of times so as to obtain the desired average density ρ expressed in terms of tuples per
+surface unit.
+
+For both Euclidean distance and cosine similarity, a join predicate might be added to
+select a subset of the combinations resulting from the cross-product. A range distance
+join predicated is used [Silva et al. 2010], whereby τ = τ1 × · · · × τn is selected if
+δ(x(τi), x(τ j)) ≤ θ, ∀i, j.
+We emphasize that the size of the datasets is not a relevant parameter in our study.
+Indeed, solving the proximity rank join problem for a target number of results K calls
+for retrieving only a preﬁx of the relations.
+
+Then, we test all methods on two real datasets. For the case of Euclidean distance, we
+consider relations containing hotels, theaters, and restaurants in ﬁve different Ameri-
+can cities (San Francisco, New York, Boston, Dallas, and Honolulu). For each such city,
+we test the case described in Example 2.1 in Section 1. Each dataset is obtained by re-
+trieving customer ratings, latitude, and longitude (thus d = 2) of entertainment places
+in all ﬁve cities by means of the YQL console available at YQL [2012]. These datasets
+are used to feed n = 3 Web services endowed with distance-based access returning,
+respectively, hotels, restaurants, and cinemas. The query vector q is represented by a
+speciﬁc location within these cities (e.g., Fishermans Wharf in San Francisco, Battery
+Park in New York, etc.). For each query, we retrieve the top-10 combinations.
+
+For the case of cosine similarity, we consider relations containing annotation pro-
+ﬁles of genes of two different organisms largely studied in the ﬁeld of bioinformatics:
+Saccharomyces cerevisiae (SGD) and Drosophila melanogaster (FlyBase). Each gene is
+annotated with terms deﬁning its biological process attributes by means of the Gene
+Ontology [Consortium 2001]. Annotation proﬁles are stored as a bit vectors whose size
+equals the number of terms in the vocabulary (the bit is set to 1 if the term is used to
+annotate the gene, 0 otherwise). We restricted the vocabulary to terms used to anno-
+tate (after unfolding) at least three genes in each organism, resulting in 346 terms. The
+annotation proﬁle of each gene is then projected to a 8-dimensional subspace by means
+of latent semantic analysis [Khatri et al. 2005], which handles correlation between
+terms, as learned by analyzing co-occurrence of terms in the dataset.
+
+ACM Transactions on Database Systems, Vol. 37, No. 1, Article 2, Publication date: February 2012.
+
+2:26
+
+D. Martinenghi and M. Tagliasacchi
+
+Our test queries aim to discover orthologous genes from the two organisms given a
+target annotation proﬁle, that is, to extract the genes that are similar to a given proﬁle
+as well as to each other. For that, we sampled the annotation proﬁles of ﬁve genes at
+random. The aggregation function in use is as in (4), with wq = 1, wµ = 0.1, ws = 1
+(however, ws is immaterial to ranking, as genes do not have an associated score).
+
+7.1.2. Methods. We test different instantiations of the ProxRJ template described in
+Algorithm 1. These are the result of combining the different bounding schemes with
+the two pulling strategies. We denote the tested algorithms as CBRR (Corner Bound,
+Round Robin), CBPA (Corner Bound, Potential Adaptive), TBRR (Tight Bound, Round
+Robin), and TBPA (Tight Bound, Potential Adaptive). For the case of cosine similarity,
+our proposed approach uses a bound obtained by solving (35) exactly, which provides a
+correct upper bound that is not always the tight bound, although very close to it. For
+this reason, we refer to it as good bound and test the two corresponding algorithms
+GBRR (Good Bound, Round Robin) and GBPA (Good Bound, Potential Adaptive) in
+our experiments. Also, we observe that CBRR and CBPA correspond to, respectively,
+HRJN and HRJN∗ [Ilyas et al. 2004]. The dominance test is always performed for both
+distance-based and score-based access.
+
+7.1.3. Evaluation Metrics. We adopt sumDepths as the primary metrics for comparing
+the different algorithms. This is especially relevant in application scenarios where
+the cost of fetching tuples from the relations largely dominates over computing the
+combinations and their respective bounds. This is the case, for example, of search
+services invoked over the Web. We also report the total CPU time, in seconds, for the
+various experiments. We do not measure the time needed for fetching the tuples, as this
+is implicitly captured by the sumDepths metrics. Moreover, we indicate the fraction of
+time consumed by the calls to the function update Bound. For fairness, we compute both
+metrics over ten different datasets and report the average.
+
+7.2. Testing Environment
+All the algorithms have been executed on a PC with the Windows 7 operating system,
+an Intel Core2-Duo processor at 2.4 GHz and 4Gb RAM. We remark that the sumDepth
+metrics is completely oblivious of the testing environment. As for the CPU time, we
+measured the wall-clock execution time needed to return the top-K combinations, as-
+suming that tuples of the joined relations are available locally in main memory. Thus,
+we did not consider the time needed for fetching the tuples when data is available from
+remote sources.
+
+7.3. Results
+The results obtained are summarized in Figures 8 through 24. Each ﬁgure refers to
+either distance-based or score-based access, and reports the results for both Euclidean
+distance and cosine similarity. In the stacked bar charts reporting the total CPU time,
+(i) the darker bars at the bottom represent the cost of forming the combinations and
+computing their aggregate score, and (ii) the lighter bars on top represent the cost of
+executing update Bound. As a general trend, we observe that the use of a tight (or good)
+bounding always outperforms the simpler corner bound in terms of the sumDepths
+metrics by a noticeable margin, that is, at least 15% in the worst case. This comes at
+the cost of an increased complexity when computing the bound. However, the average
+total CPU time in our experiments, for n = 2, is in most cases less than 0.5 seconds.
+Thus, in a scenario where data is accessed by means of remote service invocations, the
+total CPU time is of the same order of magnitude as the time needed for a single access.
+Moreover, we note that in our experiments the tight (or good) bound is recomputed after
+every accessed tuple. While this guarantees to access the minimum number of tuples,
+
+ACM Transactions on Database Systems, Vol. 37, No. 1, Article 2, Publication date: February 2012.
+
+Proximity Measures for Rank Join
+
+2:27
+
+s
+h
+t
+p
+e
+D
+m
+u
+s
+
+200
+
+150
+
+100
+
+50
+
+0
+
+)
+.
+c
+e
+s
+(
+
+e
+m
+
+i
+t
+
+0.5
+
+0.4
+
+0.3
+
+0.2
+
+0.1
+
+0
+
+CBRR(HRJN )
+CBP A(HRJN ∗)
+T BRR
+T BP A
+
+1
+50
+Number of top results - K
+
+10
+
+s
+h
+t
+p
+e
+D
+m
+u
+s
+
+200
+
+150
+
+100
+
+50
+
+0
+
+CBRR(HRJN )
+CBP A(HRJN ∗)
+GBRR
+GBP A
+
+1
+50
+Number of top results - K
+
+10
+
+(a) Euclidean distance
+
+(b) cosine similarity
+
+)
+.
+c
+e
+s
+(
+
+e
+m
+
+i
+t
+
+0.5
+
+0.4
+
+0.3
+
+0.2
+
+0.1
+
+0
+
+1
+50
+Number of top results - K
+
+10
+
+1
+50
+Number of top results - K
+
+10
+
+(c) Euclidean distance
+
+(d) cosine similarity
+
+Fig. 8. Performance of the tested algorithms as a function of the number of results K for distance-based
+access.
+
+in practical systems a good trade-off can be achieved by recomputing the tight bound
+only after retrieving blocks of tuples.
+
+For the case of cosine similarity, we do not show the results for TBRR and TBPA,
+as the improvement in terms of sumDepths over, respectively, GBRR and GBPA is
+negligible (at most 2 units in all our experiments). In our tests, we computed the tight
+bound by extensive grid search with very high accuracy, which required an effort in
+terms of CPU time several orders of magnitude higher than with the other algorithms.
+Note also that the good bound used by GBRR and GBPA is constructed in such a way
+that it coincides with the actual tight bound in case the solution of (34) satisﬁes the
+constraints with the equality, which is likely to be the case in practice whenever the
+weight wq is heavier than wµ.
+
+We now comment on the effect of all the individual parameters.
+
+7.3.1. Number of Results - K. As in conventional rank join problems, the number of re-
+sults grows sublinearly with respect to the number of accessed tuples (Figures 8(a), 8(b),
+9(a), and 9(b)). The gain of TBPA over CBPA is between 25% and 45% and is larger
+for smaller values of K. The adaptive pulling strategy reduces the number of accessed
+tuples by 5 to 10%, although the two relations contain data sampled from identical
+distributions. TBPA requires approximately 4 times more CPU time than CBPA with
+distance-based access for Euclidean distance (Figure 8(c)), while only twice as much for
+cosine similarity (Figure 8(c)); no extra burden is measured in the case of score-based
+access (Figure 9(c) and 9(b)), as computing the bound is much more efﬁcient due to the
+aggressive pruning obtained by using dominance in this case.
+
+ACM Transactions on Database Systems, Vol. 37, No. 1, Article 2, Publication date: February 2012.
+
+2:28
+
+D. Martinenghi and M. Tagliasacchi
+
+s
+h
+t
+p
+e
+D
+m
+u
+s
+
+200
+
+150
+
+100
+
+50
+
+0
+
+)
+.
+c
+e
+s
+(
+
+e
+m
+
+i
+t
+
+0.5
+
+0.4
+
+0.3
+
+0.2
+
+0.1
+
+0
+
+CBRR(HRJN )
+CBP A(HRJN ∗)
+T BRR
+T BP A
+
+1
+50
+Number of top results - K
+
+10
+
+s
+h
+t
+p
+e
+D
+m
+u
+s
+
+200
+
+150
+
+100
+
+50
+
+0
+
+CBRR(HRJN )
+CBP A(HRJN ∗)
+GBRR
+GBP A
+
+1
+50
+Number of top results - K
+
+10
+
+(a) Euclidean distance
+
+(b) cosine similarity
+
+)
+.
+c
+e
+s
+(
+
+e
+m
+
+i
+t
+
+0.5
+
+0.4
+
+0.3
+
+0.2
+
+0.1
+
+0
+
+1
+50
+Number of top results - K
+
+10
+
+1
+50
+Number of top results - K
+
+10
+
+(c) Euclidean distance
+
+(d) cosine similarity
+
+Fig. 9. Performance of the tested algorithms as a function of the number of results K for score-based access.
+
+7.3.2. Number of Dimensions - d. This is a characteristic parameter of the proximity
+rank join problem. For Euclidean distance with distance-based access (Figure 10(a)),
+the gain of TBPA over CBPA is between 15% and 45% and it is larger in higher
+dimensional spaces. Indeed, for the same density per volume unit, higher dimensional
+spaces are emptier, in the sense that the average inter-tuple distance is larger. This fact
+is neglected by the simpler corner bounding scheme adopted by CBRR and CBPA, which
+always assume a zero distance from the centroid for unseen combinations. Note that
+the total CPU time (Figure 10(c)) scales favorably when d increases. This is due to two
+facts: ﬁrst, the number of accessed tuples decreases as d increases, thus computing the
+tight bound needs to consider fewer partial combinations; second, for the same number
+of accessed tuples, the total CPU time does not depend on d, since computing the upper
+bound on the score of a partial combination requires solving a 1-dimensional problem,
+regardless of d. Similar considerations and performance gains hold for the case of cosine
+similarity (Figures 10(b) and 10(d)). A different trend is observed in Figures 11(a)
+and 11(c) for the case of score-based access, as the sumDepth metrics increases when
+d increases for all tested algorithms, although relative gains due to the tight bounding
+scheme remain the same. Here, the upper bound used to terminate the algorithm is
+independent of d, as it depends mostly on the scores. At the same time, a larger average
+inter-tuple distance induces lower average values of the aggregate scores, according to
+(3). Thus, for the same depths, fewer combinations have an aggregate score exceeding
+the upper bound. This is not the case for distance-based access in Figure 10(a), since
+the bounding scheme inherently takes into account the geometry of the space and the
+corresponding inter-tuple distances when computing the upper bound.
+
+ACM Transactions on Database Systems, Vol. 37, No. 1, Article 2, Publication date: February 2012.
+
+Proximity Measures for Rank Join
+
+2:29
+
+s
+h
+t
+p
+e
+D
+m
+u
+s
+
+200
+
+150
+
+100
+
+50
+
+0
+
+)
+.
+c
+e
+s
+(
+
+e
+m
+
+i
+t
+
+0.5
+
+0.4
+
+0.3
+
+0.2
+
+0.1
+
+0
+
+CBRR(HRJN )
+CBP A(HRJN ∗)
+T BRR
+T BP A
+
+1
+16
+Number of dimensions - d
+
+8
+
+4
+
+2
+
+s
+h
+t
+p
+e
+D
+m
+u
+s
+
+200
+
+150
+
+100
+
+50
+
+0
+
+CBRR(HRJN )
+CBP A(HRJN ∗)
+GBRR
+GBP A
+
+1
+16
+Number of dimensions - d
+
+2
+
+4
+
+8
+
+(a) Euclidean distance
+
+(b) cosine similarity
+
+)
+.
+c
+e
+s
+(
+
+e
+m
+
+i
+t
+
+0.5
+
+0.4
+
+0.3
+
+0.2
+
+0.1
+
+0
+
+1
+16
+Number of dimensions - d
+
+8
+
+2
+
+4
+
+1
+16
+Number of dimensions - d
+
+4
+
+2
+
+8
+
+(c) Euclidean distance
+
+(d) cosine similarity
+
+Fig. 10. Performance of the tested algorithms as a function of the number of dimensions d for distance-based
+access.
+
+7.3.3. Density - ρ (Number of Tuples per Volume Unit). TBPA and CBPA are similarly af-
+fected by the tuple density, and the gain of the former is always in the 20 to 30%
+range. The sumDepths metrics increases with the density (Figure 12(a) , 12(b), 13(a),
+and 13(b)). This is due to the higher probability of generating combinations with a
+large aggregate score by means of random sampling.
+
+7.3.4. Skewness- ρ1 /ρ2 (RatioofDensitiesforTwoRelations). Generating skewed datasets
+highlights the beneﬁts of an adaptive pulling strategy. The gain over round robin can
+be as large as 25 to 30% when ρ1/ρ2 ≥ 4 (Figure 14(a), 14(b), 15(a), and 15(b)).
+
+7.3.5. SpatialSkewness-C. With spatially skewed datasets, the query vector might fall
+in a region which is not densely populated. Therefore, the proximity weighted scores of
+top-K combinations decrease with C, thus sumDepths increases (Figures 16(a), 16(b),
+17(a), and 17(b)). This trend is more pronounced for distance-based access. TBPA and
+CBPA are similarly affected by the tuple density, and the gain of the former is always
+in the 20 to 30% range.
+
+7.3.6. NumberofRelations-n. The gain of TBPA over CBPA is signiﬁcantly larger when
+joining more than two relations, attaining more than 50% for n = 3. We observe that,
+in this case, TBPA outperforms CBPA in terms of both sumDepths (Figure 18(a), 18(b),
+19(a), and 19(b)) and total CPU time (Figure 18(c), 18(d), 19(c), and 19(d)). Indeed, the
+additional computational burden related to the tight bounding scheme is more than
+compensated by the signiﬁcantly smaller number of combinations (approximately 4000
+as opposed to 32000 for the case of distance-based access with Euclidean distance) that
+
+ACM Transactions on Database Systems, Vol. 37, No. 1, Article 2, Publication date: February 2012.
+
+2:30
+
+D. Martinenghi and M. Tagliasacchi
+
+s
+h
+t
+p
+e
+D
+m
+u
+s
+
+200
+
+150
+
+100
+
+50
+
+0
+
+)
+.
+c
+e
+s
+(
+
+e
+m
+
+i
+t
+
+5
+
+4
+
+3
+
+2
+
+1
+
+0
+
+CBRR(HRJN )
+CBP A(HRJN ∗)
+T BRR
+T BP A
+
+1
+16
+Number of dimensions - d
+
+8
+
+2
+
+4
+
+s
+h
+t
+p
+e
+D
+m
+u
+s
+
+200
+
+150
+
+100
+
+50
+
+0
+
+CBRR(HRJN )
+CBP A(HRJN ∗)
+GBRR
+GBP A
+
+1
+16
+Number of dimensions - d
+
+2
+
+4
+
+8
+
+(a) Euclidean distance
+
+(b) cosine similarity
+
+)
+.
+c
+e
+s
+(
+
+e
+m
+
+i
+t
+
+5
+
+4
+
+3
+
+2
+
+1
+
+0
+
+1
+16
+Number of dimensions - d
+
+2
+
+8
+
+4
+
+1
+16
+Number of dimensions - d
+
+2
+
+4
+
+8
+
+(c) Euclidean distance
+
+(d) cosine similarity
+
+Fig. 11. Performance of the tested algorithms as a function of the number of dimensions d for score-based
+access.
+
+need to be formed. This observation is further conﬁrmed for n = 4. In this case, CBPA
+was unable to report the top-10 results (within ﬁve minutes) when adopting distance-
+based access, due to the extremely large number of combinations that need to be formed.
+
+7.3.7. Join Condition - θ. Although the ProxRJ template focuses on cross-product, it
+can be straightforwardly adapted to the case in which a join predicate is added. By
+varying the value of parameter θ, it is possible to set join conditions targeting different
+join selectivity levels. Speciﬁcally, when θ → ∞, all join results are selected, while
+fewer join results are selected by decreasing θ. For fairness, we evaluate the impact
+of θ when n = 3 relations are joined, since when n = 2 the total CPU time is not
+affected: all combinations in the Cartesian product are visited anyway, and those that
+do not satisfy the join predicate are then discarded, while for n > 2 some combinations
+may not even be visited. For large values of θ, the join results that are discarded are
+those combinations whose tuples are far apart from each other, which are unlikely to
+be reported among the top-K results. Hence, in Figures 20(a) and 21(a), we observe
+that the sumDepths metrics is not affected. On the other hand, the total CPU time
+(Figures 20(c) and 21(c)) decreases due to the fact that: (i) fewer full combinations are
+formed; (ii) fewer partial combinations are formed, for which the upper bound needs to
+be computed. For small values of θ, combinations with a high proximity-weighted score
+might be discarded, thus a larger number of tuples needs to be retrieved to ﬁnd the
+top-K join results, and the sumDepths metrics increases. Similar results are obtained
+for the case of cosine similarity (Figures 20(b) and 21(b)), where the join condition is
+expressed in terms of the angle between two feature vectors for the sake of clarity.
+
+ACM Transactions on Database Systems, Vol. 37, No. 1, Article 2, Publication date: February 2012.
+
+Proximity Measures for Rank Join
+
+2:31
+
+s
+h
+t
+p
+e
+D
+m
+u
+s
+
+200
+
+150
+
+100
+
+50
+
+0
+
+)
+.
+c
+e
+s
+(
+
+e
+m
+
+i
+t
+
+0.5
+
+0.4
+
+0.3
+
+0.2
+
+0.1
+
+0
+
+CBRR(HRJN )
+CBP A(HRJN ∗)
+T BRR
+T BP A
+
+20
+
+50
+100
+Density - ρ
+
+200
+
+(a) Euclidean distance
+
+20
+
+50
+100
+Density - ρ
+
+200
+
+(c) Euclidean distance
+
+s
+h
+t
+p
+e
+D
+m
+u
+s
+
+200
+
+150
+
+100
+
+50
+
+0
+
+)
+.
+c
+e
+s
+(
+
+e
+m
+
+i
+t
+
+0.5
+
+0.4
+
+0.3
+
+0.2
+
+0.1
+
+0
+
+CBRR(HRJN )
+CBP A(HRJN ∗)
+GBRR
+GBP A
+
+20
+
+50
+100
+Density - ρ
+
+200
+
+(b) cosine similarity
+
+20
+
+50
+100
+Density - ρ
+
+200
+
+(d) cosine similarity
+
+Fig. 12. Performance of the tested algorithms as a function of tuple density ρ for distance-based access.
+
+7.3.8. AggregationFunctionWeights-wq/ws. In some circumstances, both distance-based
+and score-based access might be available. Which access kind should be preferred
+largely depends on the preference weights wq and ws. Intuitively, when the ratio wq/ws
+increases, distance-based access leads to fewer retrieved tuples, while the opposite
+holds for score-based access. This is conﬁrmed by Figures 22(a) and 23(a), where the
+ratio wq/ws is varied, while keeping wµ = ws. In all cases, TBPA (GBPA) always
+outperforms CBPA (CBPA).
+
+7.3.9. Dominance. The dominance test described in Section 3.2.1 identiﬁes those par-
+tial combinations that cannot contribute to the top-K join results, so that their upper
+bound need not be updated. As such, dominance does not affect the sumDepths metrics,
+but it impacts the total CPU time, reducing the time needed to update the upper bound.
+Figures 24(a) and 24(b) show that the total CPU time is halved when the dominance
+test is enabled regardless of the number of top results, for both Euclidean distance
+and cosine similarity. Figures 24(c) and 24(d) analyze the impact of dominance when
+joining more than two relations. We observe an n-fold decrease in the fraction of time
+needed to update the upper bound.
+
+7.3.10. Real Data Sets. Finally, Figures 25 and 26 report the results obtained on
+the real datasets. For the case of Euclidean distance and distance-based access,
+Figure 25(a) shows that TBPA outperforms CBPA by a large margin (on average, 50%).
+The adaptive pulling strategy is always beneﬁcial, regardless of the bounding scheme,
+reducing by 10 to 20% the number of accessed tuples. For the case of score-based
+access, Figure 25(b) shows that a larger number of tuples needs to be retrieved to
+
+ACM Transactions on Database Systems, Vol. 37, No. 1, Article 2, Publication date: February 2012.
+
+2:32
+
+D. Martinenghi and M. Tagliasacchi
+
+s
+h
+t
+p
+e
+D
+m
+u
+s
+
+200
+
+150
+
+100
+
+50
+
+0
+
+)
+.
+c
+e
+s
+(
+
+e
+m
+
+i
+t
+
+0.5
+
+0.4
+
+0.3
+
+0.2
+
+0.1
+
+0
+
+CBRR(HRJN )
+CBP A(HRJN ∗)
+T BRR
+T BP A
+
+20
+
+50
+100
+Density - ρ
+
+200
+
+(a) Euclidean distance
+
+20
+
+50
+100
+Density - ρ
+
+200
+
+(c) Euclidean distance
+
+s
+h
+t
+p
+e
+D
+m
+u
+s
+
+200
+
+150
+
+100
+
+50
+
+0
+
+)
+.
+c
+e
+s
+(
+
+e
+m
+
+i
+t
+
+0.5
+
+0.4
+
+0.3
+
+0.2
+
+0.1
+
+0
+
+CBRR(HRJN )
+CBP A(HRJN ∗)
+GBRR
+GBP A
+
+20
+
+50
+100
+Density - ρ
+
+200
+
+(b) cosine similarity
+
+20
+
+50
+100
+Density - ρ
+
+200
+
+(d) cosine similarity
+
+Fig. 13. Performance of the tested algorithms as a function of tuple density ρ for score-based access.
+
+obtain the top-10 combinations than with distance-based access. This is due to the fact
+that many tuples in each relation are assigned the largest possible score value. Thus,
+the upper bound does not decrease signiﬁcantly until all such tuples are retrieved.
+However, TBPA always outperforms CBPA (on average 15%).
+
+Similar results are obtained in the case of cosine similarity, as illustrated in
+
+Figure 26(a). There, GBPA outperforms CBPA by 50 to 70%, depending on the query.
+
+8. RELATED WORK
+Proximity rank join is a signiﬁcant extension of rank join, a class of problems recently
+discussed in Ilyas et al. [2004], Schnaitter et al. [2007], Schnaitter and Polyzotis [2008],
+Finger and Polyzotis [2009], and Ilyas et al. [2008].
+
+State-of-the-art rank join algorithms [Ilyas et al. 2004; Schnaitter and Polyzotis
+2008; Finger and Polyzotis 2009] inherit the idea of using an upper bound from the
+threshold-based stopping condition of the well-known Threshold Algorithm [Fagin et al.
+2003] (TA). TA addresses rank aggregation, which is the problem of combining several
+ranked lists into a single consensus ranking.
+
+Our main starting point is Schnaitter and Polyzotis [2008], where the rank join PBRJ
+template is introduced, which we have specialized and extended into ProxRJ for proxim-
+ity rank join. This template encompasses the well-known HRJN and HRJN∗ operators
+[Ilyas et al. 2004], corresponding to our CBRR and CBPA algorithms. In Schnaitter and
+Polyzotis [2008], rank join is studied in the case where each relation may be equipped
+with even more than one score attribute, while we have focused on relations with a sin-
+gle score. As was discussed in Section 3, the results in Schnaitter and Polyzotis [2008]
+
+ACM Transactions on Database Systems, Vol. 37, No. 1, Article 2, Publication date: February 2012.
+
+Proximity Measures for Rank Join
+
+2:33
+
+s
+h
+t
+p
+e
+D
+m
+u
+s
+
+200
+
+150
+
+100
+
+50
+
+0
+
+)
+.
+c
+e
+s
+(
+
+e
+m
+
+i
+t
+
+0.5
+
+0.4
+
+0.3
+
+0.2
+
+0.1
+
+0
+
+CBRR(HRJN )
+CBP A(HRJN ∗)
+T BRR
+T BP A
+
+1
+
+2
+
+4
+
+skewness -ρ1/ρ2
+
+(a) Euclidean distance
+
+1
+
+2
+
+4
+
+skewness -ρ1/ρ2
+
+s
+h
+t
+p
+e
+D
+m
+u
+s
+
+200
+
+150
+
+100
+
+50
+
+0
+
+)
+.
+c
+e
+s
+(
+
+e
+m
+
+i
+t
+
+0.5
+
+0.4
+
+0.3
+
+0.2
+
+0.1
+
+0
+
+8
+
+8
+
+CBRR(HRJN )
+CBP A(HRJN ∗)
+GBRR
+GBP A
+
+1
+
+2
+
+4
+
+skewness -ρ1/ρ2
+
+(b) cosine similarity
+
+1
+
+2
+
+4
+
+skewness -ρ1/ρ2
+
+8
+
+8
+
+(c) Euclidean distance
+
+(d) cosine similarity
+
+Fig. 14. Performance of the tested algorithms as a function of skewness ρ1/ρ2 for distance-based access.
+
+do not always carry over to proximity rank join, due to the geometry of the problem (ab-
+sent in rank join). These include, for example, the fact that HRJN is instance optimal
+with two relations (with a single score) for rank join but not for proximity rank join.
+
+In Finger and Polyzotis [2009], the authors propose an efﬁcient way for computing
+an approximation of the tight bound, in order to ﬁnd a good trade-off between I/O cost
+and CPU cost.
+
+In Agrawal and Widom [2009], the authors study (two-way) rank join problems, in
+which memory availability is limited, and propose algorithms that are instance optimal
+also with this restriction.
+
+We have considered a scenario in which the objects’ feature vectors are deterministic.
+Others have addressed related problems (e.g., nearest neighbors) when the objects have
+uncertain features, such as approximate positions [Beskales et al. 2008].
+
+Weighted proximity join is introduced in Thonangi et al. [2009], where algorithms are
+proposed to ﬁnd combinations of words in documents that appear close to each other and
+match different query terms. Their approach differs from ours in the following aspects:
+(i) the aggregation function does not depend on the distance from the query, and all the
+input needs to be read to ﬁnd the best combinations; (ii) the proposed algorithms are
+speciﬁcally tailored to 1-dimensional spaces. Similarity join is promoted to a ﬁrst-class
+operator in Silva et al. [2010].
+
+This work builds upon Martinenghi and Tagliasacchi [2010], where the authors
+introduce proximity rank join focusing on a speciﬁc case of Euclidean distance. Here,
+we also study the problem for a proximity measure that is not a metric, as is the case
+with cosine similarity. While such a measure ﬁts the general framework described in
+
+ACM Transactions on Database Systems, Vol. 37, No. 1, Article 2, Publication date: February 2012.
+
+2:34
+
+D. Martinenghi and M. Tagliasacchi
+
+s
+h
+t
+p
+e
+D
+m
+u
+s
+
+200
+
+150
+
+100
+
+50
+
+0
+
+)
+.
+c
+e
+s
+(
+
+e
+m
+
+i
+t
+
+0.5
+
+0.4
+
+0.3
+
+0.2
+
+0.1
+
+0
+
+CBRR(HRJN )
+CBP A(HRJN ∗)
+T BRR
+T BP A
+
+1
+
+2
+
+4
+
+skewness -ρ1/ρ2
+
+(a) Euclidean distance
+
+1
+
+2
+
+4
+
+skewness -ρ1/ρ2
+
+s
+h
+t
+p
+e
+D
+m
+u
+s
+
+200
+
+150
+
+100
+
+50
+
+0
+
+)
+.
+c
+e
+s
+(
+
+e
+m
+
+i
+t
+
+0.5
+
+0.4
+
+0.3
+
+0.2
+
+0.1
+
+0
+
+8
+
+8
+
+CBRR(HRJN )
+CBP A(HRJN ∗)
+GBRR
+GBP A
+
+1
+
+2
+
+4
+
+skewness -ρ1/ρ2
+
+(b) cosine similarity
+
+1
+
+2
+
+4
+
+skewness -ρ1/ρ2
+
+8
+
+8
+
+(c) Euclidean distance
+
+(d) cosine similarity
+
+Fig. 15. Performance of the tested algorithms as a function of skewness ρ1/ρ2 for score-based access.
+
+Section 3, this is required to devise entirely new techniques for efﬁciently computing
+the tight bounds (Sections 4.2 and 5.2). In addition, we have signiﬁcantly extended
+our experimental evaluation to also cover the cases with cosine similarity and with
+score-based access.
+
+The study of join predicates that depend on the spatial proximity among the objects
+has been thoroughly investigated in the past literature. The work in Hjaltason and
+Samet [1998] presents incremental distance joins, for example, how to compute the
+spatial join between two lists of objects and reporting the closest pairs early. A non-
+incremental algorithm for the K-closest-pair problem is investigated in Corral et al.
+[2004]. This is extended in Papadopoulos et al. [2006], where additional spatial con-
+straints are imposed on the domain of the objects belonging to the two lists (e.g., all
+points of the ﬁrst list that are part of the answer are enclosed in a given region). The
+top-k spatial join described in Mamoulis et al. [2005] is a binary join operator that
+returns, for each list, the object with the largest number of overlapping objects in the
+other list, thus extending the previous approaches to objects covering ﬁnite regions.
+Nevertheless, in all of the aforementioned works, the authors assume that input rela-
+tions are indexed by structures of the R-tree family. This contrasts our setting, where
+indexes are unavailable and relations are accessed either by distance or by score.
+
+9. CONCLUSION
+We introduced proximity rank join as the problem of ﬁnding the best combinations
+of heterogeneous objects that are close to a given target object (the query) and to
+each other. We gave a general formulation of the problem and proposed an instance
+
+ACM Transactions on Database Systems, Vol. 37, No. 1, Article 2, Publication date: February 2012.
+
+Proximity Measures for Rank Join
+
+2:35
+
+s
+h
+t
+p
+e
+D
+m
+u
+s
+
+200
+
+150
+
+100
+
+50
+
+0
+
+)
+.
+c
+e
+s
+(
+
+e
+m
+
+i
+t
+
+0.5
+
+0.4
+
+0.3
+
+0.2
+
+0.1
+
+0
+
+CBRR(HRJN )
+CBP A(HRJN ∗)
+T BRR
+T BP A
+
+100
+
+8
+
+4
+
+2
+
+Spatial skewness -C
+
+(a) Euclidean distance
+
+100
+
+8
+
+4
+
+2
+
+Spatial skewness -C
+
+s
+h
+t
+p
+e
+D
+m
+u
+s
+
+200
+
+150
+
+100
+
+50
+
+0
+
+)
+.
+c
+e
+s
+(
+
+e
+m
+
+i
+t
+
+0.5
+
+0.4
+
+0.3
+
+0.2
+
+0.1
+
+0
+
+1
+
+1
+
+CBRR(HRJN )
+CBP A(HRJN ∗)
+GBRR
+GBP A
+
+100
+
+8
+
+4
+
+2
+
+Spatial skewness -C
+
+(b) cosine similarity
+
+100
+
+8
+
+4
+
+2
+
+Spatial skewness -C
+
+1
+
+1
+
+(c) Euclidean distance
+
+(d) cosine similarity
+
+Fig. 16. Performance of the tested algorithms as a function of spatial skewness C for distance-based access.
+
+optimal algorithm that solves it based on the computation of a tight upper bound on
+the aggregate score of the combinations to be formed. Our solution proves superior to
+existing rank join approaches, also experimentally.
+
+We plan to extend proximity rank join to the case of relations that can be accessed
+
+not only by sorted access but also by random access.
+
+APPENDIXES
+
+A. DERIVATIONS
+
+A.1. Solution of (15)
+
+We assume without loss of generality, that q = 0 or, equivalently, that all the feature
+vectors are referred to a coordinate system that has the origin in q, that is, xi ← xi − q,
+for i = 1, . . . , m, and we adopt the shorthand notation xi = x(τi). The centroid μ of the
+full combination can be written as
+
+μ =
+
+1
+
+n(cid:26) m
+(cid:3)i=1
+
+xi + (n− m)y(cid:27) =
+
+1
+n
+
+m
+
+(cid:3)i=1
+
+xi +
+
+n− m
+
+n
+
+y =
+
+m
+n
+
+ν +
+
+n− m
+
+n
+
+y,
+
+(52)
+
+where y = ym+1 = · · · = yn due to the symmetry of the problem, and ν = 1
+the centroid of the partial combination.
+
+i=1 xi is
+
+m(cid:2)m
+
+ACM Transactions on Database Systems, Vol. 37, No. 1, Article 2, Publication date: February 2012.
+
+2:36
+
+D. Martinenghi and M. Tagliasacchi
+
+CBRR(HRJN )
+CBP A(HRJN ∗)
+T BRR
+T BP A
+
+100
+
+8
+
+4
+
+2
+
+Spatial skewness -C
+
+(a) Euclidean distance
+
+s
+h
+t
+p
+e
+D
+m
+u
+s
+
+200
+
+150
+
+100
+
+50
+
+0
+
+1.5
+
+)
+.
+c
+e
+s
+(
+
+e
+m
+
+i
+t
+
+1
+
+0.5
+
+0
+
+100
+
+8
+
+4
+
+2
+
+Spatial skewness -C
+
+CBRR(HRJN )
+CBP A(HRJN ∗)
+GBRR
+GBP A
+
+100
+
+8
+
+4
+
+2
+
+Spatial skewness -C
+
+(b) cosine similarity
+
+s
+h
+t
+p
+e
+D
+m
+u
+s
+
+200
+
+150
+
+100
+
+50
+
+0
+
+1.5
+
+)
+.
+c
+e
+s
+(
+
+e
+m
+
+i
+t
+
+1
+
+0.5
+
+0
+
+100
+
+8
+
+4
+
+2
+
+Spatial skewness -C
+
+1
+
+1
+
+1
+
+1
+
+(c) Euclidean distance
+
+(d) cosine similarity
+
+Fig. 17. Performance of the tested algorithms as a function of spatial skewness C for score-based access.
+
+The objective function of (15) is
+
+m
+
+max.
+
+n
+
+(cid:3)i=1(cid:28)ws ln(σ (τi)) − wq(cid:6)xi(cid:6)2 − wµ(cid:6)xi − μ(cid:6)2(cid:29)
+(cid:3)i=m+1(cid:28)ws ln(cid:4)σ max
+(cid:5) − wq(cid:6)y(cid:6)2 − wµ(cid:6)y − μ(cid:6)2(cid:29) ,
+
+i
+
++
+
+which can be rewritten as
+
+m
+
+m
+
+wq
+
+(cid:3)i=1
+min. wq(n− m)(cid:6)y(cid:6)2 + wµ(n− m)(cid:6)y − μ(cid:6)2 + wµ
+(cid:3)i=m+1
+ln(cid:4)σ max
+(cid:3)i=1
+min. wq(n− m)yT y + wµ(n− m)(y − μ)T (y − μ) + wµ
+(xi − μ)T (xi − μ) + s,
+
+(cid:6)xi − μ(cid:6)2+
+(cid:5),
+
+ln(σ (τi)) − ws
+
+(cid:6)xi(cid:6)2 − ws
+
+(cid:3)i=1
+
+m
+
+(cid:3)i=1
+
+that is,
+
+m
+
+n
+
+i
+
+where s is a scalar deﬁned as
+
+s = wq
+
+m
+
+(cid:3)i=1
+
+(cid:6)xi(cid:6)2 − ws
+
+m
+
+(cid:3)i=1
+
+ln(σ (τi)) − ws
+
+n
+
+(cid:3)i=m+1
+
+i
+
+ln(cid:4)σ max
+
+(cid:5),
+
+(53)
+
+(54)
+
+ACM Transactions on Database Systems, Vol. 37, No. 1, Article 2, Publication date: February 2012.
+
+Proximity Measures for Rank Join
+
+2:37
+
+s
+h
+t
+p
+e
+D
+m
+u
+s
+
+200
+
+150
+
+100
+
+50
+
+0
+
+)
+.
+c
+e
+s
+(
+
+e
+m
+
+i
+t
+
+200
+
+150
+
+100
+
+50
+
+0
+
+CBRR(HRJN )
+CBP A(HRJN ∗)
+T BRR
+T BP A
+
+2
+4
+Number of relations - n
+
+3
+
+(a) Euclidean distance
+
+2
+4
+Number of relations - n
+
+3
+
+(c) Euclidean distance
+
+s
+h
+t
+p
+e
+D
+m
+u
+s
+
+200
+
+150
+
+100
+
+50
+
+0
+
+)
+.
+c
+e
+s
+(
+
+e
+m
+
+i
+t
+
+200
+
+150
+
+100
+
+50
+
+0
+
+CBRR(HRJN )
+CBP A(HRJN ∗)
+GBRR
+GBP A
+
+2
+4
+Number of relations - n
+
+3
+
+(b) cosine similarity
+
+2
+4
+Number of relations - n
+
+3
+
+(d) cosine similarity
+
+Fig. 18. Performance of the tested algorithms as a function of the number or relations n for distance-based
+access.
+
+which does not depend on y. In turn, (53) can be rewritten as follows.
+
+n− m
+
+n
+
+y(cid:10)T (cid:9)y −
+y(cid:10) + s,
+n− m
+
+n
+
+ν −
+
+m
+n
+
+ν −
+
+n− m
+
+n
+
+y(cid:10) +
+
+that is,
+
+m
+n
+
+n
+
+ν(cid:20)T (cid:19) m
+y −
+ν(cid:20) −
+
+m
+n
+
+ν(cid:20) +
+y(cid:25) + s,
+n− m
+
+n
+
+that is,
+
+m
+
+wµ
+
+m
+n
+
+m
+n
+
+n− m
+
+(cid:3)i=1(cid:9)xi −
+
+min. wq(n− m)yT y + wµ(n− m)(cid:9)y −
+
+ν −
+y(cid:10)T (cid:9)xi −
+m
+n
+min. wq(n− m)yT y + wµ(n− m)(cid:19) m
+n− m
+
+y −
+
+ν −
+
+m
+n
+
+n
+
+n
+
+m
+
+wµ
+
+m
+n
+
+(cid:3)i=1(cid:24)(cid:19)xi −
+
+ν(cid:20) −
+min. wq(n− m)yT y + wµ(n− m)
+
+m2
+n2
+ν T ν − 2wµ(n− m)
+m
+ν(cid:20)T (cid:19)xi −
+n
+
+m
+n
+
+m2
+n2
+
+m
+
+wµ(n− m)
+wµ
+
+(cid:3)i=1(cid:17)(cid:19)xi −
+
+n
+
+y(cid:25)T (cid:24)(cid:19)xi −
+yT y+
+m2
+n2
+
+ν T y+
+n (cid:10)2
+ν(cid:20) +(cid:9) m− n
+
+yT y − 2
+
+n− m
+
+n
+
+(cid:19)xi −
+
+m
+n
+
+ν(cid:20)T
+
+y(cid:18) + s.
+
+(55)
+
+ACM Transactions on Database Systems, Vol. 37, No. 1, Article 2, Publication date: February 2012.
+
+2:38
+
+D. Martinenghi and M. Tagliasacchi
+
+s
+h
+t
+p
+e
+D
+m
+u
+s
+
+200
+
+150
+
+100
+
+50
+
+0
+
+)
+.
+c
+e
+s
+(
+
+e
+m
+
+i
+t
+
+200
+
+150
+
+100
+
+50
+
+0
+
+CBRR(HRJN )
+CBP A(HRJN ∗)
+T BRR
+T BP A
+
+2
+4
+Number of relations - n
+
+3
+
+(a) Euclidean distance
+
+2
+4
+Number of relations - n
+
+3
+
+(c) Euclidean distance
+
+s
+h
+t
+p
+e
+D
+m
+u
+s
+
+200
+
+150
+
+100
+
+50
+
+0
+
+)
+.
+c
+e
+s
+(
+
+e
+m
+
+i
+t
+
+200
+
+150
+
+100
+
+50
+
+0
+
+CBRR(HRJN )
+CBP A(HRJN ∗)
+GBRR
+GBP A
+
+2
+4
+Number of relations - n
+
+3
+
+(b) cosine similarity
+
+2
+4
+Number of relations - n
+
+3
+
+(d) cosine similarity
+
+Fig. 19. Performance of the tested algorithms as a function of the number or relations n for score-based
+access.
+
+Now, (55) can be compactly represented by
+
+where
+
+min. ayT y + 2bT y + c,
+
+a = wq(n− m) + wµ
+
+m
+n
+
+(n− m),
+m
+n
+
+ν,
+
+b = −wµ(n− m)
+
+c = wµ(n− m)
+
+m2
+n2
+
+ν T ν + wµ
+
+The solution of the problem
+
+m
+
+(cid:3)i=1(cid:19)xi −
+
+m
+n
+
+ν(cid:20)T (cid:19)xi −
+
+m
+n
+
+ν(cid:20) + s.
+
+minimize ayT y + 2bT y + c
+subject to (cid:6)y(cid:6) ≥ δ
+
+is obtained by imposing the Karush-Kuhn-Tucker conditions and it is given by
+
+y∗ =(cid:8) −b/a if (cid:6)b/a(cid:6) ≥ δ
+
+otherwise
+
+δ ν
+(cid:6)ν(cid:6)
+
+(56)
+
+(57)
+
+(58)
+
+(59)
+
+(60)
+
+(61)
+
+ACM Transactions on Database Systems, Vol. 37, No. 1, Article 2, Publication date: February 2012.
+
+Proximity Measures for Rank Join
+
+2:39
+
+s
+h
+t
+p
+e
+D
+m
+u
+s
+
+200
+
+150
+
+100
+
+50
+
+0
+
+)
+.
+c
+e
+s
+(
+
+e
+m
+
+i
+t
+
+10
+
+8
+
+6
+
+4
+
+2
+
+0
+
+CBRR(HRJN )
+CBP A(HRJN ∗)
+T BRR
+T BP A
+
+Inf
+
+0.4
+
+0.2
+
+0.1
+
+Join condition - θ
+
+s
+h
+t
+p
+e
+D
+m
+u
+s
+
+200
+
+150
+
+100
+
+50
+
+0
+
+0.05
+
+CBRR(HRJN )
+CBP A(HRJN ∗)
+GBRR
+GBP A
+
+Inf
+
+16°
+
+8°
+
+4°
+
+Join condition - θ
+
+(a) Euclidean distance
+
+(b) cosine similarity
+
+)
+.
+c
+e
+s
+(
+
+e
+m
+
+i
+t
+
+10
+
+8
+
+6
+
+4
+
+2
+
+0
+
+Inf
+
+0.05
+
+Inf
+
+0.4
+
+0.2
+
+0.1
+
+Join condition - θ
+
+16°
+
+8°
+
+4°
+
+Join condition - θ
+
+2°
+
+2°
+
+(c) Euclidean distance
+
+(d) cosine similarity
+
+Fig. 20. Performance of the tested algorithms as a function of the join condition θ for distance-based access.
+
+or, equivalently,
+
+y∗ =(cid:11) ν
+
+mwµ
+
+mwµ+nwq
+ν δ
+(cid:6)ν(cid:6)
+
+mwµ
+
+if (cid:6)ν
+otherwise
+
+mwµ+nwq (cid:6) ≥ δ
+
+.
+
+(62)
+
+Note that y∗ has the same direction as the vector representing the centroid ν. If q (cid:19)= 0,
+then y∗ ← q + y∗, thus
+
+y∗ =(cid:11) q + (ν − q) mwµ
+
+q + (ν − q)
+
+mwµ+nwq
+(cid:6)(ν−q)(cid:6)
+
+δ
+
+if (cid:6)(ν − q) mwµ
+otherwise
+
+mwµ+nwq (cid:6) ≥ δ
+
+.
+
+(63)
+
+A.2. Derivation of (19)
+The deﬁnition of h(ym+1, . . . , yn) given in (18) can be expanded as follows.
+
+n
+
+m
+
+h(ym+1, . . . , yn)
+(cid:3)i=1
+(cid:3)i=m+1
+(cid:6)xi − μ(cid:6)2 +
+n⎛
+(cid:3)j=1
+(cid:3)i=1
+x j +
+⎝
+
+xi −
+
+1
+
+m
+
+m
+
+=
+
+=
+
+(cid:16)(cid:16)(cid:16)(cid:16)(cid:16)(cid:16)
+
+n
+
+(cid:6)yi − μ(cid:6)2
+y j⎞
+⎠
+
+(cid:3)j=m+1
+
+2
+
+(cid:16)(cid:16)(cid:16)(cid:16)(cid:16)(cid:16)
+
+yi −
+
++
+
+n
+
+(cid:3)i=m+1
+
+(cid:16)(cid:16)(cid:16)(cid:16)(cid:16)(cid:16)
+
+m
+
+1
+
+n⎛
+(cid:3)j=1
+⎝
+
+x j +
+
+n
+
+(cid:3)j=m+1
+
+y j⎞
+⎠
+
+2
+
+(cid:16)(cid:16)(cid:16)(cid:16)(cid:16)(cid:16)
+
+ACM Transactions on Database Systems, Vol. 37, No. 1, Article 2, Publication date: February 2012.
+
+2:40
+
+D. Martinenghi and M. Tagliasacchi
+
+s
+h
+t
+p
+e
+D
+m
+u
+s
+
+200
+
+150
+
+100
+
+50
+
+0
+
+)
+.
+c
+e
+s
+(
+
+e
+m
+
+i
+t
+
+10
+
+8
+
+6
+
+4
+
+2
+
+0
+
+CBRR(HRJN )
+CBP A(HRJN ∗)
+T BRR
+T BP A
+
+Inf
+
+0.4
+
+0.2
+
+0.1
+
+Join condition - θ
+
+s
+h
+t
+p
+e
+D
+m
+u
+s
+
+200
+
+150
+
+100
+
+50
+
+0
+
+0.05
+
+CBRR(HRJN )
+CBP A(HRJN ∗)
+GBRR
+GBP A
+
+Inf
+
+16°
+
+8°
+
+4°
+
+Join condition - θ
+
+(a) Euclidean distance
+
+(b) cosine similarity
+
+)
+.
+c
+e
+s
+(
+
+e
+m
+
+i
+t
+
+10
+
+8
+
+6
+
+4
+
+2
+
+0
+
+Inf
+
+0.05
+
+Inf
+
+0.4
+
+0.2
+
+0.1
+
+Join condition - θ
+
+16°
+
+8°
+
+4°
+
+Join condition - θ
+
+2°
+
+2°
+
+(c) Euclidean distance
+
+(d) cosine similarity
+
+Fig. 21. Performance of the tested algorithms as a function of the join condition θ for score-based access.
+
+=
+
+m
+
+(cid:3)i=1
+
+n
+
+(cid:3)j=m+1
+
+xT
+i xi +
+
+⎡
+⎢⎣
+(cid:3)i=m+1
+
+n
+
+⎡
+⎢⎣
+
+x j +
+
+m
+
+1
+
+n2 ⎛
+(cid:3)j=1
+⎝
+n2 ⎛
+(cid:3)j=1
+⎝
+
+1
+
+m
+
++
+
+yT
+i yi +
+
+x j +
+
+x j +
+
+m
+
+T ⎛
+y j⎞
+(cid:3)j=1
+⎝
+⎠
+T ⎛
+y j⎞
+(cid:3)j=1
+⎝
+⎠
+
+m
+
+n
+
+n
+
+(cid:3)j=m+1
+
+x j +
+
+=
+
+m
+
+(cid:3)i=1
+
+xT
+i xi +
+
++
+
+n
+
+(cid:3)i=m+1
+
+yT
+i yi +
+
+=
+
+m
+
+(cid:3)i=1
+
+xT
+i xi +
+
+n
+
+m
+
+m
+
+m
+
+x j +
+
+(cid:3)j=m+1
+
+n2 ⎛
+(cid:3)j=1
+⎝
+n2 ⎛
+n− m
+(cid:3)j=1
+⎝
+n⎛
+(cid:3)j=1
+⎝
+
+yT
+i yi −
+
+(cid:3)i=m+1
+
+1
+
+m
+
+n
+
+x j +
+
+m
+
+(cid:3)j=m+1
+T ⎛
+y j⎞
+(cid:3)j=1
+⎝
+⎠
+y j⎞
+(cid:3)j=m+1
+⎠
+(cid:3)j=m+1
+
+x j +
+
+n
+
+n
+
+x j +
+
+n
+
+(cid:3)j=m+1
+
+m
+
+x j +
+
+T⎛
+(cid:3)j=1
+⎝
+T ⎛
+y j⎞
+(cid:3)j=1
+⎝
+⎠
+
+m
+
+x j +
+
+n
+
+(cid:3)j=m+1
+
+T
+
+xi⎤
+y j⎞
+⎥⎦
+⎠
+y j⎞
+⎠
+
+T
+
+n
+
+yi⎤
+⎥⎦
+
+x j +
+
+n
+
+(cid:3)j=m+1
+
+x j +
+
+T
+
+(cid:3)j=m+1
+y j⎞
+⎠
+(cid:3)j=m+1
+
+n
+
+xi
+
+m
+
+(cid:3)i=1
+y j⎞
+⎠
+
+T
+
+n
+
+(cid:3)i=m+1
+
+yi
+
+n
+
+m
+
+m
+
+m
+
+2
+
+2
+
+2
+
+n⎛
+(cid:3)j=1
+⎝
+n⎛
+(cid:3)j=1
+⎝
+
+y j⎞
+⎠ −
+y j⎞
+⎠ −
+n⎛
+(cid:3)j=1
+⎝
+y j⎞
+n⎛
+(cid:3)j=1
+⎠−
+⎝
+y j⎞
+(cid:3)j=m+1
+⎠
+
+(cid:3)j=m+1
+y j⎞
+⎠ −
+(cid:3)j=m+1
+
+x j +
+
+x j +
+
+2
+
+m
+
+n
+
+n
+
+ACM Transactions on Database Systems, Vol. 37, No. 1, Article 2, Publication date: February 2012.
+
+Proximity Measures for Rank Join
+
+2:41
+
+s
+h
+t
+p
+e
+D
+m
+u
+s
+
+200
+
+150
+
+100
+
+50
+
+0
+
+)
+.
+c
+e
+s
+(
+
+e
+m
+
+i
+t
+
+2
+
+1.5
+
+1
+
+0.5
+
+0
+
+CBRR(HRJN )
+CBP A(HRJN ∗)
+T BRR
+T BP A
+
+10
+
+5
+
+1
+
+1/5
+
+1/10
+
+Weight ratio - wq/ws
+
+s
+h
+t
+p
+e
+D
+m
+u
+s
+
+200
+
+150
+
+100
+
+50
+
+0
+
+CBRR(HRJN )
+CBP A(HRJN ∗)
+GBRR
+GBP A
+
+10
+
+5
+
+1
+
+1/5
+
+1/10
+
+Weight ratio - wq/ws
+
+(a) Euclidean distance
+
+(b) cosine similarity
+
+)
+.
+c
+e
+s
+(
+
+e
+m
+
+i
+t
+
+2
+
+1.5
+
+1
+
+0.5
+
+0
+
+10
+
+1/10
+
+5
+
+1
+
+1/5
+
+1/10
+
+Weight ratio - wq/ws
+
+10
+
+5
+
+1
+
+1/5
+
+Weight ratio - wq/ws
+
+(c) Euclidean distance
+
+(d) cosine similarity
+
+Fig. 22. Performance of the tested algorithms as a function of the weight ratio wq/ws for distance-based
+access.
+
+x j⎞
+⎠
+
+m
+
+T ⎛
+(cid:3)j=1
+⎝
+
+x j⎞
+⎠ −
+
+1
+
+n⎛
+⎝
+
+n
+
+(cid:3)j=m+1
+
+y j⎞
+⎠
+
+T ⎛
+⎝
+
+n
+
+(cid:3)j=m+1
+
+y j⎞
+⎠
+
+yT
+i yi −
+
+n
+
+(cid:3)j=m+1
+
+m
+
+1
+
+n⎛
+(cid:3)j=1
+⎝
+y j⎞
+⎠
+
+=
+
+=
+
+m
+
+n
+
+m
+
+2
+
+(cid:3)i=1
+xT
+i xi +
+n⎛
+(cid:3)j=1
+⎝
+xT
+i xi +
+
+−
+
+m
+
+(cid:3)i=1
+
+(cid:3)i=m+1
+T ⎛
+x j⎞
+⎝
+⎠
+(cid:3)i=m+1
+
+n
+
+yT
+i yi −
+
+m2
+n
+
+ν T ν −
+
+1
+
+n⎛
+⎝
+
+n
+
+(cid:3)j=m+1
+
+y j⎞
+⎠
+
+T ⎛
+⎝
+
+n
+
+(cid:3)j=m+1
+
+y j⎞
+⎠ − 2
+
+m
+n
+
+ν T ⎛
+⎝
+
+n
+
+(cid:3)j=m+1
+
+y j⎞
+⎠
+
+The last line equals the right-hand side of (19).
+
+A.3. Solution of (24)
+
+Let θ = [θ1, θ2, . . . , θn]T denote a vector representing the distances from q of the n vec-
+tors of the tuples that form a combination. Problem (24) can be written as a Quadratic
+Program (QP) in canonical form, as follows.
+
+minimize θ T Hθ
+subject to Aeqθ = beq
+
+θ ≥ ℓ
+
+(64)
+
+ACM Transactions on Database Systems, Vol. 37, No. 1, Article 2, Publication date: February 2012.
+
+2:42
+
+D. Martinenghi and M. Tagliasacchi
+
+s
+h
+t
+p
+e
+D
+m
+u
+s
+
+200
+
+150
+
+100
+
+50
+
+0
+
+)
+.
+c
+e
+s
+(
+
+e
+m
+
+i
+t
+
+2
+
+1.5
+
+1
+
+0.5
+
+0
+
+CBRR(HRJN )
+CBP A(HRJN ∗)
+T BRR
+T BP A
+
+10
+
+5
+
+1
+
+1/5
+
+1/10
+
+Weight ratio - wq/ws
+
+s
+h
+t
+p
+e
+D
+m
+u
+s
+
+200
+
+150
+
+100
+
+50
+
+0
+
+CBRR(HRJN )
+CBP A(HRJN ∗)
+GBRR
+GBP A
+
+10
+
+5
+
+1
+
+1/5
+
+1/10
+
+Weight ratio - wq/ws
+
+(a) Euclidean distance
+
+(b) cosine similarity
+
+)
+.
+c
+e
+s
+(
+
+e
+m
+
+i
+t
+
+2
+
+1.5
+
+1
+
+0.5
+
+0
+
+10
+
+1/10
+
+5
+
+1
+
+1/5
+
+1/10
+
+Weight ratio - wq/ws
+
+10
+
+5
+
+1
+
+1/5
+
+Weight ratio - wq/ws
+
+(c) Euclidean distance
+
+(d) cosine similarity
+
+Fig. 23. Performance of the tested algorithms as a function of the weight ratio wq/ws for score-based access.
+
+To see this, let 1 = [1, 1, . . . , 1]T ∈ Rn and In be the n×n identity matrix. The objective
+
+function of (24) can be written in matrix form. We have
+
+m
+
+n
+
+n
+
+i
+
+wqθ 2
+
+(cid:5) −
+
+ws ln(cid:4)σ max
+
+(cid:3)i=m+1
+
+(cid:3)i=1
+ws ln(σ (τi)) +
+= r − wqθ T θ − wµ(cid:9)θ −
+= r − wqθ T θ − wµθ T (cid:9)In −
+
+(cid:3)i=1
+1 · 1T θ(cid:10)T (cid:9)θ −
+1 · 1T(cid:10)T (cid:9)In −
+
+1
+n
+
+1
+n
+
+where r is an expression not containing θ. Therefore
+
+1
+n
+
+n
+
+(cid:3)j=1
+
+2
+
+θ j⎞
+⎠
+
+n
+
+wµ⎛
+(cid:3)i=1
+⎝θi −
+i −
+1 · 1T θ(cid:10) ,
+1 · 1T(cid:10) θ ,
+
+1
+n
+
+1
+n
+
+H = wqI + wµ(cid:9)In −
+
+1
+n
+
+1 · 1T(cid:10)T (cid:9)In −
+
+1
+n
+
+1 · 1T(cid:10) .
+
+From the equality constraints in (24), θi = P(x(τi)), i = 1, . . . , m, it follows
+
+Aeq =(cid:24) Im
+
+0(n−m)×m 0(n−m)×(n−m) (cid:25) ,
+
+0m×(n−m)
+
+beq = [P(x(τ1)), . . . ,P(x(τm)), 01×(n−m)]T .
+
+(65)
+
+(66)
+
+(67)
+
+ACM Transactions on Database Systems, Vol. 37, No. 1, Article 2, Publication date: February 2012.
+
+Proximity Measures for Rank Join
+
+2:43
+
+)
+.
+c
+e
+s
+(
+
+e
+m
+
+i
+t
+
+)
+.
+c
+e
+s
+(
+
+e
+m
+
+i
+t
+
+0.5
+
+0.4
+
+0.3
+
+0.2
+
+0.1
+
+0
+
+120
+
+100
+
+80
+
+60
+
+40
+
+20
+
+0
+
+T BRR - w/o dominance
+T BRR - with dominance
+T BP A - w/o dominance
+T BP A - with dominance
+
+1
+50
+Number of top results - K
+
+10
+
+(a) Euclidean distance
+
+2
+4
+Number of relations - n
+
+3
+
+(c) Euclidean distance
+
+)
+.
+c
+e
+s
+(
+
+e
+m
+
+i
+t
+
+)
+.
+c
+e
+s
+(
+
+e
+m
+
+i
+t
+
+0.5
+
+0.4
+
+0.3
+
+0.2
+
+0.1
+
+0
+
+120
+
+100
+
+80
+
+60
+
+40
+
+20
+
+0
+
+GBRR - w/o dominance
+GBRR - with dominance
+GBP A - w/o dominance
+GBP A - with dominance
+
+1
+50
+Number of top results - K
+
+10
+
+(b) cosine similarity
+
+2
+4
+Number of relations - n
+
+3
+
+(d) cosine similarity
+
+Fig. 24.
+
+Impact of dominance on the tested algorithms in terms of the total CPU time metrics.
+
+Finally, from the inequality constraints in (24), θi ≥ δi, i = m+ 1, . . . , n, it follows
+
+ℓ = [0m×1, δm+1, . . . , δn]T .
+
+(68)
+
+A.4. Solution of (35)
+We want to solve the following (nonconvex) Quadratically Constrained Quadratic Prob-
+lem (QCQP).
+
+n
+
+n
+
+wµ
+
+max. wq
+
+˜qT ˜yi +
+
+(cid:3)i=1
+(cid:3)i=1
+˜yi = ˜xi, i ∈ {1, . . . , m}
+˜qT ˜yi ≤ δi, i ∈ {m+ 1, . . . , n}
+˜yT
+i ˜yi = 1, i ∈ {1, . . . , n}
+First, let us consider the following (simpler) problem
+
+(cid:6) ¯˜μ(cid:6)
+
+s.t.
+
+˜μT ˜yi + c
+
+(69)
+
+max. wq
+
+s.t.
+
+r
+
+n
+
+˜qT ˜zi + wq
+
+(cid:3)i=1
+˜yT
+i ˜yi = 1, i ∈ {r + 1, . . . , n}
+
+(cid:3)i=r+1
+
+˜qT ˜yi +
+
+wµ
+
+(cid:6) ¯˜μ(cid:6)
+
+r
+
+(cid:3)i=1
+
+˜μT ˜zi +
+
+wµ
+
+(cid:6) ¯˜μ(cid:6)
+
+n
+
+(cid:3)i=r+1
+
+˜μT ˜yi + c,
+
+(70)
+
+where r ≥ m and ˜zi are constant vectors, that is, ˜zi = ˜xi, i ∈ {1, . . . , m}, ˜zi = ¯˜yi,
+i ∈ {m + 1, . . . , r}. We recognize that (70) is symmetric with respect to the unknown
+
+ACM Transactions on Database Systems, Vol. 37, No. 1, Article 2, Publication date: February 2012.
+
+2:44
+
+D. Martinenghi and M. Tagliasacchi
+
+s
+h
+t
+p
+e
+D
+m
+u
+s
+
+200
+
+150
+
+100
+
+50
+
+0
+
+)
+.
+c
+e
+s
+(
+
+e
+m
+
+i
+t
+
+0.5
+
+0.4
+
+0.3
+
+0.2
+
+0.1
+
+0
+
+CBRR(HRJN )
+CBP A(HRJN ∗)
+T BRR
+T BP A
+
+SF
+
+BO
+
+NY
+DA
+Real data sets
+
+HO
+
+s
+h
+t
+p
+e
+D
+m
+u
+s
+
+500
+
+400
+
+300
+
+200
+
+100
+
+0
+
+CBRR(HRJN )
+CBP A(HRJN ∗)
+T BRR
+T BP A
+
+SF
+
+BO
+
+NY
+DA
+Real data sets
+
+HO
+
+(a) distance-based
+
+(b) score-based
+
+)
+.
+c
+e
+s
+(
+
+e
+m
+
+i
+t
+
+5
+
+4
+
+3
+
+2
+
+1
+
+0
+
+SF
+
+NY
+DA
+Real data sets
+
+BO
+
+HO
+
+SF
+
+BO
+
+NY
+DA
+Real data sets
+
+HO
+
+(c) distance-based
+
+(d) score-based
+
+Fig. 25. Performance of the tested algorithms for real datasets in terms of both the sumDepths and the total
+CPU time metrics with Euclidean distance for distance-based and score-based access.
+
+s
+h
+t
+p
+e
+D
+m
+u
+s
+
+600
+
+500
+
+400
+
+300
+
+200
+
+100
+
+0
+
+CBRR(HRJN )
+CBP A(HRJN ∗)
+GBRR
+GBP A
+
+1
+
+2
+4
+Real data sets
+
+3
+
+5
+
+)
+.
+c
+e
+s
+(
+
+e
+m
+
+i
+t
+
+5
+
+4
+
+3
+
+2
+
+1
+
+0
+
+1
+
+2
+4
+Real data sets
+
+3
+
+5
+
+(a) distance-based
+
+(b) distance-based
+
+Fig. 26. Performance of the tested algorithms for real datasets in terms of both the sumDepths and the total
+CPU time metrics with cosine similarity for distance-based access.
+
+variables ˜yi, i ∈ {r + 1, . . . , n}. Hence, its optimal solution is such that ˜y∗r+1 = · · · =
+˜y∗n = ˜y∗. Hence, we can reduce (70) into a problem in a single unknown vector ˜y.
+We have
+
+max. aT ˜y + b
+˜yT ˜y = 1,
+s.t.
+
+(71)
+
+ACM Transactions on Database Systems, Vol. 37, No. 1, Article 2, Publication date: February 2012.
+
+Proximity Measures for Rank Join
+
+where
+
+a = wq(n− r) ˜q + 2
+wµ
+b = wqr ˜qT ˜˜ν +
+
+r ˜˜ν
+
+wµ
+
+n− r
+(cid:6) ¯˜μ(cid:6)
+n
+(n− r)2
+
++
+i=1 ˜zi. The optimal solution of (71) is
+
+(cid:6) ¯˜μ(cid:6)
+
+n
+
+r2
+n
+
+wµ
+
+(cid:6) ¯˜μ(cid:6)
+
+˜˜ν T ˜˜ν + c
+
+˜y∗ =
+
+.
+
+a
+(cid:6)a(cid:6)
+
+and ˜˜ν = 1
+
+r (cid:2)r
+
+2:45
+
+(72)
+
+(73)
+
+(74)
+
+The solution of (35) can be found by writing the Karush-Kuhn-Tucker conditions.
+
+Given the complementary slackness conditions
+
+λi( ˜qT ˜y − δi) = 0,
+
+i ∈ {m+ 1, . . . , n}
+
+(75)
+each of the n − m Lagrange multipliers λi can either be equal to zero or positive.
+Without loss of generality, consider one of the 2n−m possible cases, corresponding to
+λi > 0, i = {m+ 1, . . . , r} and λi = 0, i = {r + 1, . . . , n}. Due to complementary slackness,
+this implies ˜qT ˜y∗ = δi, i = {m+ 1, . . . , r}. This scenario leads to solving problem (70). If
+the optimal solution of (70) is feasible for the original problem (35), that is, ˜qT ˜y∗ ≤ δi,
+i = {r + 1, . . . , n}, then it is marked as a candidate solution. By enumerating the 2n−m
+cases it is possible to ﬁnd up to 2n−m candidate solutions. The optimal solution of (35)
+is the candidate solution that maximizes the objective function of (35).
+
+A.5. Solution of (49)
+
+We adopt the shorthand notation xi = x(τi). The centroid μ of the full combination can
+be written as
+
+m
+
+1
+
+xi + (n− m)y(cid:27) =
+
+n(cid:26) m
+(cid:3)i=1
+i=1 xi is the centroid of the partial combination.
+
+n− m
+
+(cid:3)i=1
+
+xi +
+
+y =
+
+1
+n
+
+m
+n
+
+n
+
+where ν = 1
+
+The objective function (49) can be rewritten as
+
+n− m
+
+n
+
+y,
+
+ν +
+
+(76)
+
+μ =
+m(cid:2)m
+(n− m)(cid:24)wqq + 2
+wµ
+wµ
+ν T ν +
+(cid:6) ¯μ(cid:6)
+(cid:6) ¯μ(cid:6)
+
+m2
+n
+
+max.
+
+where
+
+m
+n
+
+ν(cid:25)T
+wµ
+(cid:6) ¯μ(cid:6)
+(n− m)2
+
+y +
+
+m
+
+(cid:3)i=1
+
+wsσ (τi) + wqqT x(τi) +
+
+n
+
+(cid:3)i=m+1
+
+wsσ (R[ pi])+
+
+,
+
+that is,
+
+n
+
+max. bT y + c
+yT y = 1,
+s.t.
+
+b = (n− m)(cid:24)wqq + 2
+
+wµ
+(cid:6) ¯μ(cid:6)
+
+(77)
+
+(78)
+
+m
+n
+
+ν(cid:25)
+
+and c is a constant that does not depend on y. The solution of the problem is obtained
+by imposing the Karush-Kuhn-Tucker conditions and it is given by
+
+y∗ =
+
+b
+
+√bT b
+
+.
+
+(79)
+
+ACM Transactions on Database Systems, Vol. 37, No. 1, Article 2, Publication date: February 2012.
+
+2:46
+
+REFERENCES
+
+D. Martinenghi and M. Tagliasacchi
+
+AGRAWAL, P. AND WIDOM, J. 2009. Conﬁdence-aware join algorithms. In Proceedings of the International Con-
+
+fereence on Data Engineering (ICDE). 628–639.
+
+BESKALES, G., SOLIMAN, M. A., AND ILYAS, I. F. 2008. Efﬁcient search for the top-k probable nearest neighbors
+
+in uncertain databases. Proc. VLDB 1, 1, 326–339.
+
+CONSORTIUM, T. G. O. 2001. Creating the gene ontology resource: Design and implementation. Genome
+
+Res. 11, 8, 1425–1433.
+
+CORRAL, A., MANOLOPOULOS, Y., THEODORIDIS, Y., AND VASSILAKOPOULOS, M. 2004. Algorithms for processing
+
+k-closest-pair queries in spatial databases. Data Knowl. Engin. 49, 1, 67–104.
+
+FAGIN, R., LOTEM, A., AND NAOR, M. 2003. Optimal aggregation algorithms for middleware. J. Comput. Syst.
+
+Sci. 66, 4, 614–656.
+
+FINGER, J. AND POLYZOTIS, N. 2009. Robust and efﬁcient algorithms for rank join evaluation. In Proceedings of
+
+the ACM SIGMOD Conference on Data Management. 415–428.
+
+HJALTASON, G. R. AND SAMET, H. 1998. Incremental distance join algorithms for spatial databases. In Proceed-
+
+ings of the ACM SIGMOD Conference on Management of Data. 237–248.
+
+ILYAS, I. F., AREF, W. G., AND ELMAGARMID, A. K. 2004. Supporting top-k join queries in relational databases.
+
+VLDB J. 13, 3, 207–221.
+
+ILYAS, I. F., BESKALES, G., AND SOLIMAN, M. A. 2008. A survey of top- query processing techniques in relational
+
+database systems. ACM Comput. Surv. 40, 4.
+
+KHATRI, P., DONE, B., RAO, A., DONE, A., AND DRAGHICI, S. 2005. A semantic analysis of the annotations of the
+
+human genome. Bioinformatics 21, 16, 3416–3421.
+
+MAMOULIS, N., THEODORIDIS, Y., AND PAPADIAS, D. 2005. Spatial joins: Algorithms, cost models and optimization
+
+techniques. In Spatial Databases, 155–184.
+
+MARTINENGHI, D. AND TAGLIASACCHI, M. 2010. Proximity rank join. Proc. VLDB 3, 1, 352–363.
+PAPADOPOULOS, A. N., NANOPOULOS, A., AND MANOLOPOULOS, Y. 2006. Processing distance join queries with
+
+constraints. Comput. J. 49, 3, 281–296.
+
+SCHNAITTER, K. AND POLYZOTIS, N. 2008. Evaluating rank joins with optimal cost. In Proceedings of the Confer-
+
+ence on Principles of Database Systems (PODS). 43–52.
+
+SCHNAITTER, K., SPIEGEL, J., AND POLYZOTIS, N. 2007. Depth estimation for ranking query optimization. In
+
+Proceedings of the International Conference on Very Large Database (VLDB). 902–913.
+
+SILVA, Y. N., AREF, W. G., AND ALI, M. H. 2010. The similarity join database operator. In Proceedings of the
+
+International Conference on Data Engineering (ICDE).
+
+THONANGI, R., HE, H., DOAN, A., WANG, H., AND YANG, J. 2009. Weighted proximity best-joins for information
+
+retrieval. In Proceedings of the International Conference on Data Engineering (ICDE). 234–245.
+
+YQL CONSOLE. 2012. http://developer.yahoo.com/yql/console/.
+
+Received February 2011; revised July 2011; accepted September 2011
+
+ACM Transactions on Database Systems, Vol. 37, No. 1, Article 2, Publication date: February 2012.
+
+
